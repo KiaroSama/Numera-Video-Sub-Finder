@@ -1,0 +1,42 @@
+{
+  "schema": 1,
+  "quality_qualified": false,
+  "synthetic": {"generated_by": "xtask fixtures", "purpose": "actual native timing/OCR/GUI integration, not real-world quality"},
+  "real_candidates": [
+    {
+      "id": "wikipedia-meetup-en",
+      "language": "en",
+      "url": "https://upload.wikimedia.org/wikipedia/commons/0/0e/WikipediaMeetup_%28English_subtitles%29.webm",
+      "source": "https://commons.wikimedia.org/wiki/File:WikipediaMeetup_(English_subtitles).webm?oldid=1029907915",
+      "license": "CC-BY-SA-3.0",
+      "attribution": "VGrigas (WMF), own work, 2015",
+      "publisher_sha1": "c83727ae992848b9c2e7ba7f9cae398015f89517",
+      "bytes": 24593930,
+      "ground_truth": "https://commons.wikimedia.org/wiki/TimedText:WikipediaMeetup.webm.en.srt?oldid=599874332",
+      "state": "NEEDS_VISIBLE_TEXT_AND_TIMING_REVIEW"
+    },
+    {
+      "id": "wanna-work-together-ja",
+      "language": "ja",
+      "url": "https://upload.wikimedia.org/wikipedia/commons/2/28/Wanna_Work_Together%3F_%28Japanese_subtitled%29.ogv",
+      "source": "https://commons.wikimedia.org/wiki/File:Wanna_Work_Together%3F_(Japanese_subtitled).ogv?oldid=1240004678",
+      "license": "CC-BY-2.5; Japanese subtitle contribution public domain",
+      "attribution": "Ryan Junell, Lesser, Sara Kraft; Japanese subtitles Mr. Donbraco",
+      "publisher_sha1": "5d649faac3d7179b796de8f18687ef8f4502de09",
+      "bytes": 10055325,
+      "ground_truth": null,
+      "state": "NEEDS_INDEPENDENT_JAPANESE_FRAME_ANNOTATION"
+    },
+    {
+      "id": "white-house-iran-fa",
+      "language": "fa",
+      "url": "https://upload.wikimedia.org/wikipedia/commons/5/54/President_Obama%27s_Remarks_on_Iran_%28with_Persian_subtitles%29.webm",
+      "source": "https://commons.wikimedia.org/wiki/File:President_Obama%27s_Remarks_on_Iran_(with_Persian_subtitles).webm?oldid=1031102076",
+      "license": "PD-USGov-POTUS; jurisdiction and third-party rights review retained",
+      "attribution": "The White House, 2009-06-23",
+      "publisher_sha1": null,
+      "ground_truth": null,
+      "state": "NEEDS_OVERLAY_VERIFICATION_AND_PERSIAN_FRAME_ANNOTATION"
+    }
+  ]
+}

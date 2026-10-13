@@ -1,0 +1,137 @@
+{
+  "schema": 1,
+  "scope": "desktop-only",
+  "targets": [
+    {
+      "id": "linux-x64",
+      "runner": "ubuntu-24.04",
+      "target": "x86_64-unknown-linux-gnu",
+      "os": "linux",
+      "arch": "x64",
+      "triplet": "x64-linux",
+      "package_formats": [
+        "appimage",
+        "deb",
+        "rpm",
+        "tar.gz"
+      ],
+      "minimum_os": "Ubuntu24.04/glibc2.39",
+      "features": [],
+      "required": true,
+      "release_status": "development-unqualified",
+      "ort": {
+        "url": "https://github.com/microsoft/onnxruntime/releases/download/v1.31.0/onnxruntime-linux-x64-1.31.0.tgz",
+        "sha256": "cc5c72baf5ae5c8238a6841f0897227be2d02826b9cf98eaf02fdefaeeb03a57",
+        "bytes": 11408003
+      }
+    },
+    {
+      "id": "linux-arm64",
+      "runner": "ubuntu-24.04-arm",
+      "target": "aarch64-unknown-linux-gnu",
+      "os": "linux",
+      "arch": "arm64",
+      "triplet": "arm64-linux",
+      "package_formats": [
+        "appimage",
+        "deb",
+        "rpm",
+        "tar.gz"
+      ],
+      "minimum_os": "Ubuntu24.04/glibc2.39",
+      "features": [],
+      "required": true,
+      "release_status": "development-unqualified",
+      "ort": {
+        "url": "https://github.com/microsoft/onnxruntime/releases/download/v1.31.0/onnxruntime-linux-aarch64-1.31.0.tgz",
+        "sha256": "c5b8b3cca31f3d643a3b313b8f42e2d0f16a4fcefd02cda343d97bd5306afaab",
+        "bytes": 10331104
+      }
+    },
+    {
+      "id": "windows-x64",
+      "runner": "windows-2025",
+      "target": "x86_64-pc-windows-msvc",
+      "os": "windows",
+      "arch": "x64",
+      "triplet": "x64-windows",
+      "package_formats": [
+        "nsis",
+        "zip"
+      ],
+      "minimum_os": "Windows10 1809",
+      "features": [],
+      "required": true,
+      "release_status": "development-unqualified",
+      "ort": {
+        "url": "https://github.com/microsoft/onnxruntime/releases/download/v1.31.0/onnxruntime-win-x64-1.31.0.zip",
+        "sha256": "3958d8a44984160692c1b4ffd0de3cb48f8c39f9d34bb31e433db06e30b82195",
+        "bytes": 82887349
+      }
+    },
+    {
+      "id": "windows-arm64",
+      "runner": "windows-11-arm",
+      "target": "aarch64-pc-windows-msvc",
+      "os": "windows",
+      "arch": "arm64",
+      "triplet": "arm64-windows",
+      "package_formats": [
+        "nsis",
+        "zip"
+      ],
+      "minimum_os": "Windows10 1809",
+      "features": [],
+      "required": true,
+      "release_status": "development-unqualified",
+      "ort": {
+        "url": "https://github.com/microsoft/onnxruntime/releases/download/v1.31.0/onnxruntime-win-arm64-1.31.0.zip",
+        "sha256": "ef6206fa8d6975878d93a97035d280240ce5764c126a7430e5427e18923316d5",
+        "bytes": 85806468
+      }
+    },
+    {
+      "id": "macos-x64",
+      "runner": "macos-15-intel",
+      "target": "x86_64-apple-darwin",
+      "os": "macos",
+      "arch": "x64",
+      "triplet": "x64-osx",
+      "package_formats": [
+        "app",
+        "dmg",
+        "tar.gz"
+      ],
+      "minimum_os": "macOS13",
+      "features": [],
+      "required": true,
+      "release_status": "development-unqualified",
+      "ort": {
+        "source_build": true,
+        "source_tag": "v1.31.0"
+      }
+    },
+    {
+      "id": "macos-arm64",
+      "runner": "macos-15",
+      "target": "aarch64-apple-darwin",
+      "os": "macos",
+      "arch": "arm64",
+      "triplet": "arm64-osx",
+      "package_formats": [
+        "app",
+        "dmg",
+        "tar.gz"
+      ],
+      "minimum_os": "macOS13",
+      "features": [],
+      "required": true,
+      "release_status": "development-unqualified",
+      "ort": {
+        "url": "https://github.com/microsoft/onnxruntime/releases/download/v1.31.0/onnxruntime-osx-arm64-1.31.0.tgz",
+        "sha256": "1031b36dd3bdaa8d976a6130d9cf2a05e9be320b93ae804f8427b91dc3432afc",
+        "bytes": 36549009
+      }
+    }
+  ]
+}

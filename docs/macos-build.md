@@ -1,0 +1,7 @@
+# macOS build and distribution
+
+Build only in GitHub Actions on macOS 15 Intel and Apple Silicon hosted runners. The declared minimum deployment target is macOS 13; a build on macOS 15 is not runtime evidence for 13. Pinned native FFmpeg/Tesseract dynamic dependencies are built via vcpkg. ONNX Runtime API31 uses an official ARM64 archive and an exact 1.31 source build on Intel, with telemetry disabled.
+
+Cargo executables use @executable_path/runtimes. Native dylib identities use @rpath/name and internal dependencies use @loader_path/name. Bundle resources contain matching runtimes/models/notices; GUI/CLI paths resolve the app's Contents layout without developer search-path overrides. Official ICNS is generated in CI.
+
+Distribution formats are app, DMG and portable tar.gz. CI content checks are distinct from installer and Gatekeeper acceptance. Builds may be ad-hoc signed for native loader correctness, but that is not a trusted Developer ID signature/notarization. Never disable Gatekeeper or signature checks globally. Trusted signing/notarization credentials and physical CoreML placement are not authorized/qualified. Native production UI lifecycle checks require existing hosted Accessibility capability and fail explicitly when it is missing.

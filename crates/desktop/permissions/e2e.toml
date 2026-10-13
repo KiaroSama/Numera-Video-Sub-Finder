@@ -1,0 +1,4 @@
+[[permission]]
+identifier = "allow-e2e-fixture"
+description = "CI-only fixture grant under the explicitly configured canonical fixture root; command is absent from production builds."
+commands.allow = ["e2e_fixture", "e2e_save_edits"]

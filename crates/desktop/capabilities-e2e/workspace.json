@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "workspace",
+  "description": "CI e2e artifact only: ordinary workspace plus fixed-root fixture admission.",
+  "windows": ["main"],
+  "permissions": ["allow-workspace", "allow-e2e-fixture"]
+}

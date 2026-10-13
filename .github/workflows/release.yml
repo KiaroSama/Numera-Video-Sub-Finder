@@ -1,0 +1,33 @@
+name: Release qualification
+on:
+  workflow_dispatch:
+    inputs:
+      evidence_run:
+        description: Exact Desktop CI run containing complete qualification evidence
+        required: true
+        type: string
+permissions:
+  contents: read
+  actions: read
+jobs:
+  qualification:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          run-id: ${{ inputs.evidence_run }}
+          github-token: ${{ github.token }}
+          pattern: desktop-*-${{ github.sha }}
+          path: .ci-work/qualification
+          merge-multiple: true
+      - name: Fail closed on missing required release evidence
+        env:
+          SOURCE_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          report=.ci-work/qualification/reports/qualification.json
+          jq -e --arg sha "$SOURCE_SHA" '.source_sha==$sha and .release_ready==true and all(.evidence[]; .state=="PASS") and (.families|length==30) and all(.families[]; (.id=="CT-23" and .state=="NOT_APPLICABLE") or (.state=="PASS" and .tests>0 and .source_sha==$sha)) and .metrics.coverage>=0.80 and .metrics.critical_coverage>=0.90 and .metrics.changed_line_coverage>=0.90 and .metrics.critical_mutation>=0.80' "$report"
+      - name: Publication remains reviewer controlled
+        run: echo 'Qualification does not publish, sign, merge or close a pull request.'

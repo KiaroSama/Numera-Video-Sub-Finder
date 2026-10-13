@@ -1,0 +1,35 @@
+[package]
+name = "nvsf-desktop"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "numera-video-sub-finder"
+path = "src/main.rs"
+
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
+e2e = ["dep:tauri-plugin-webdriver"]
+
+[dependencies]
+nvsf-core.workspace = true
+nvsf-app.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+image.workspace = true
+tauri = { version = "=2.12.3", features = [] }
+tauri-plugin-dialog = "=2.8.2"
+tauri-plugin-webdriver = { version = "=0.2.3", optional = true }
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[build-dependencies]
+tauri-build = { version = "=2.7.2", features = [] }
+
+[lints]
+workspace = true

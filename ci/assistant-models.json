@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "id": "paddleocr-vl-1.6",
+  "license": "Apache-2.0",
+  "revision": "511b09642bb324401f15f97cc23bc67e8f0a291d",
+  "runtime": {"name": "llama.cpp", "version": "v0.6.0", "commit": "d81235049384534c167caea52b85a694f6103d14", "tag_object": "69ecae922d2b60c1fa8c590279f4e2099af75111", "profile": "hosted-cpu; accelerator-qualified pack separate"},
+  "artifacts": [
+    {"file": "PaddleOCR-VL-1.6-GGUF.gguf", "url": "https://huggingface.co/PaddlePaddle/PaddleOCR-VL-1.6-GGUF/resolve/511b09642bb324401f15f97cc23bc67e8f0a291d/PaddleOCR-VL-1.6-GGUF.gguf", "bytes": 935769056, "sha256": "f3ae46ec885050acf4b3d31944431e1fd90d50664fb09126af4a3c050ba14ee8"},
+    {"file": "PaddleOCR-VL-1.6-GGUF-mmproj.gguf", "url": "https://huggingface.co/PaddlePaddle/PaddleOCR-VL-1.6-GGUF/resolve/511b09642bb324401f15f97cc23bc67e8f0a291d/PaddleOCR-VL-1.6-GGUF-mmproj.gguf", "bytes": 881770560, "sha256": "204d757d7610d9b3faab10d506d69e5b244e32bf765e2bab2d0167e65e0a058a"}
+  ],
+  "admission": "optional explicit installation; hash/native load/real crop quality are separate; no automatic acceptance"
+}

@@ -1,0 +1,30 @@
+[package]
+name = "nvsf-ui"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+default = []
+e2e = []
+
+[dependencies]
+nvsf-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+leptos = { version = "=0.8.22", features = ["csr"] }
+wasm-bindgen = "=0.2.129"
+wasm-bindgen-futures = "=0.4.79"
+js-sys = "=0.3.106"
+serde-wasm-bindgen = "=0.6.5"
+gloo-timers = { version = "=0.4.0", features = ["futures"] }
+web-sys = { version = "=0.3.106", features = [
+  "Window", "Document", "Element", "HtmlElement", "HtmlInputElement", "HtmlTextAreaElement",
+  "Storage", "Location", "MediaQueryList", "Blob", "BlobPropertyBag", "Url", "KeyboardEvent",
+  "MouseEvent", "Event", "EventTarget", "DomRect", "HtmlImageElement"
+] }
+
+[lints]
+workspace = true

@@ -1,0 +1,22 @@
+{
+  "schema": 1,
+  "scope": "desktop-only",
+  "release_ready": false,
+  "requirements": {
+    "native_targets": ["linux-x64", "linux-arm64", "windows-x64", "windows-arm64", "macos-x64", "macos-arm64"],
+    "real_languages": ["en", "fa", "ja"],
+    "cer_max": {"en": 0.02, "fa": 0.05, "ja": 0.05},
+    "accurate_event_recall_min": 0.98,
+    "p95_boundary_ms": {"maximum_of": [100, "two_displayed_frame_intervals"]},
+    "coverage_min": 0.80,
+    "critical_coverage_min": 0.90,
+    "changed_line_coverage_min": 0.90,
+    "critical_mutation_min": 0.80
+  },
+  "evidence": {
+    "real_corpus_annotation": {"state": "BLOCKED", "reason": "Licensed real candidates exist; independent visible-text/frame-PTS annotations are not yet admitted for fa/ja"},
+    "physical_gpu": {"state": "BLOCKED", "reason": "Only standard public hosted runners authorized; no physical device runner available"},
+    "signing": {"state": "NOT_RUN", "reason": "No signing/notarization credential operation authorized"},
+    "six_native_cpu": {"state": "NOT_RUN", "reason": "Source and workflow authored; exact source SHA results pending"}
+  }
+}

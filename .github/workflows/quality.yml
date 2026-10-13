@@ -1,0 +1,86 @@
+name: Portable quality
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: quality-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  mutation:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    env:
+      CARGO_BUILD_JOBS: 2
+      RUST_TEST_THREADS: 2
+      PROPTEST_CASES: 128
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249
+        with:
+          toolchain: 1.99.0
+      - name: Project-owned mutation state
+        run: |
+          foreach ($dir in 'temp','logs','captures','cargo','tools','mutation') { New-Item -ItemType Directory -Force -Path ".ci-work/$dir" | Out-Null }
+          "CARGO_HOME=$env:GITHUB_WORKSPACE/.ci-work/cargo" >> $env:GITHUB_ENV
+          foreach ($name in 'TMP','TEMP','TMPDIR') { "$name=$env:GITHUB_WORKSPACE/.ci-work/temp" >> $env:GITHUB_ENV }
+      - name: Pinned mutation runner
+        run: |
+          ./scripts/ci/guard.ps1 -Name mutants-install -WallSeconds 1200 -IdleSeconds 180 -Executable cargo -Arguments @('install','cargo-mutants','--version','27.1.0','--locked','--root','.ci-work/tools')
+          "$env:GITHUB_WORKSPACE/.ci-work/tools/bin" >> $env:GITHUB_PATH
+      - name: Build result validator
+        run: ./scripts/ci/guard.ps1 -Name mutation-validator-build -WallSeconds 600 -IdleSeconds 120 -Executable cargo -Arguments @('build','--locked','--release','-p','xtask')
+      - name: Critical portable behavior mutation
+        timeout-minutes: 95
+        run: ./scripts/ci/guard.ps1 -Name portable-mutants -WallSeconds 5400 -IdleSeconds 240 -Executable cargo -Arguments @('mutants','-p','nvsf-core','--file','crates/core/src/time.rs','--file','crates/core/src/tracking.rs','--file','crates/core/src/export.rs','--file','crates/core/src/edit.rs','--jobs','1','--jobserver-tasks','2','--timeout','30','--build-timeout','300','--output','.ci-work/mutation','--cargo-arg','--locked','--','--test-threads=2')
+      - name: Nonzero mutation denominator and retained floor
+        run: |
+          & target/release/xtask mutation --input '.ci-work/mutation/mutants.out/outcomes.json' --output '.ci-work/mutation/mutation-report.json'
+          if ($LASTEXITCODE -ne 0) { throw 'Mutation result integrity/floor failed' }
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
+        with:
+          name: mutation-evidence-${{ github.sha }}
+          path: |
+            .ci-work/mutation/mutants.out/
+            .ci-work/mutation/mutation-report.json
+            .ci-work/logs/
+          if-no-files-found: error
+          retention-days: 7
+  miri:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      CARGO_BUILD_JOBS: 2
+      RUST_TEST_THREADS: 2
+      PROPTEST_CASES: 8
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249
+        with:
+          toolchain: nightly-2026-10-12
+          components: miri
+      - name: Owned interpreter state
+        run: |
+          foreach ($dir in 'temp','logs','captures','cargo') { New-Item -ItemType Directory -Force -Path ".ci-work/$dir" | Out-Null }
+          foreach ($name in 'TMP','TEMP','TMPDIR') { "$name=$env:GITHUB_WORKSPACE/.ci-work/temp" >> $env:GITHUB_ENV }
+      - name: Miri portable public contracts
+        timeout-minutes: 25
+        run: |
+          ./scripts/ci/guard.ps1 -Name miri-setup -WallSeconds 600 -IdleSeconds 120 -Executable cargo -Arguments @('+nightly-2026-10-12','miri','setup')
+          ./scripts/ci/guard.ps1 -Name miri-core -WallSeconds 1200 -IdleSeconds 180 -Executable cargo -Arguments @('+nightly-2026-10-12','miri','test','--locked','-p','nvsf-core','--test','contracts','--test','editing','--','--test-threads=2')
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: failure()
+        with:
+          name: miri-diagnostics-${{ github.sha }}
+          path: .ci-work/logs/
+          retention-days: 7

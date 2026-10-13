@@ -1,0 +1,218 @@
+name: Desktop CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: desktop-ci-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  inventory:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.targets.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - id: targets
+        run: |
+          jq -e '.schema == 1 and (.targets | length == 6) and .scope == "desktop-only"' ci/targets.json
+          echo "matrix=$(jq -c '{include: .targets | map({id, runner, target, os, arch, triplet})}' ci/targets.json)" >> "$GITHUB_OUTPUT"
+  native:
+    needs: inventory
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix: ${{ fromJSON(needs.inventory.outputs.matrix) }}
+    env:
+      CARGO_TERM_COLOR: always
+      CARGO_BUILD_JOBS: 2
+      OMP_NUM_THREADS: 2
+      NVSF_TARGET_ID: ${{ matrix.id }}
+      ORT_SKIP_DOWNLOAD: 1
+      MACOSX_DEPLOYMENT_TARGET: '13.0'
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable action source
+        with:
+          toolchain: 1.99.0
+          components: rustfmt, clippy, llvm-tools-preview
+          targets: wasm32-unknown-unknown
+      - name: Project-owned working directories
+        run: |
+          $work = Join-Path $env:GITHUB_WORKSPACE '.ci-work'
+          foreach ($dir in 'temp','logs','captures','cargo','tools') { New-Item -ItemType Directory -Force -Path (Join-Path $work $dir) | Out-Null }
+          foreach ($name in 'TEMP','TMP','TMPDIR') { "$name=$work/temp" >> $env:GITHUB_ENV }
+          "CARGO_HOME=$work/cargo" >> $env:GITHUB_ENV
+          'RUST_TEST_THREADS=2' >> $env:GITHUB_ENV
+          'PROPTEST_CASES=128' >> $env:GITHUB_ENV
+      - name: Linux native prerequisites
+        if: matrix.os == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config clang libclang-dev nasm cmake ninja-build autoconf automake libtool libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf libfuse2 libarchive-tools xvfb xdotool wmctrl openbox fonts-dejavu-core fonts-noto-core fonts-noto-cjk
+          if ($LASTEXITCODE -ne 0) { throw 'Linux prerequisites failed' }
+      - name: Native dependency source builds and verified runtime
+        run: ./scripts/ci/native.ps1 -TargetId '${{ matrix.id }}'
+      - name: Native coverage instrumentation
+        if: matrix.id == 'linux-x64'
+        run: ./scripts/ci/coverage.ps1 -Phase start
+      - name: Rust formatting
+        run: |
+          cargo fmt --all --check
+          if ($LASTEXITCODE -ne 0) { throw 'Formatting failed' }
+      - name: Locked dependency validation
+        run: |
+          cargo metadata --locked --no-deps --format-version 1 > .ci-work/workspace.json
+          if ($LASTEXITCODE -ne 0) { throw 'Committed dependency lock mismatch' }
+      - name: Core and native static analysis
+        run: |
+          ./scripts/ci/guard.ps1 -Name rust-clippy -WallSeconds 1200 -IdleSeconds 180 -Executable cargo -Arguments @('clippy','--locked','-p','nvsf-core','-p','nvsf-app','-p','nvsf-cli','-p','xtask','--','-D','warnings')
+          if ($LASTEXITCODE -ne 0) { throw 'Rust static analysis failed' }
+      - name: CLI and frontend build
+        run: |
+          ./scripts/ci/guard.ps1 -Name native-release -WallSeconds 1800 -IdleSeconds 360 -Executable cargo -Arguments @('build','--locked','--release','-p','nvsf-cli','-p','xtask')
+          if ($LASTEXITCODE -ne 0) { throw 'Native CLI build failed' }
+          ./scripts/ci/guard.ps1 -Name trunk-install -WallSeconds 1200 -IdleSeconds 180 -Executable cargo -Arguments @('install','trunk','--version','0.21.14','--locked','--root','.ci-work/tools')
+          if ($LASTEXITCODE -ne 0) { throw 'Trunk installation failed' }
+          "$env:GITHUB_WORKSPACE/.ci-work/tools/bin" >> $env:GITHUB_PATH
+          $env:PATH = "$env:GITHUB_WORKSPACE/.ci-work/tools/bin$([IO.Path]::PathSeparator)$env:PATH"
+      - name: Instrumented native GUI build
+        run: |
+          ./scripts/ci/guard.ps1 -Name tauri-install -WallSeconds 1200 -IdleSeconds 180 -Executable cargo -Arguments @('install','tauri-cli','--version','2.12.2','--locked','--root','.ci-work/tools')
+          if ($LASTEXITCODE -ne 0) { throw 'Tauri CLI installation failed' }
+          "$env:GITHUB_WORKSPACE/.ci-work/tools/bin" >> $env:GITHUB_PATH
+          $env:PATH = "$env:GITHUB_WORKSPACE/.ci-work/tools/bin$([IO.Path]::PathSeparator)$env:PATH"
+          cargo tauri icon assets/logo.png --output crates/desktop/icons
+          if ($LASTEXITCODE -ne 0) { throw 'Native icon generation failed' }
+          ./scripts/ci/frontend.ps1 -E2e
+          if ($LASTEXITCODE -ne 0) { throw 'Instrumented Rust frontend build failed' }
+          ./scripts/ci/guard.ps1 -Name instrumented-desktop -WallSeconds 1800 -IdleSeconds 360 -Executable cargo -Arguments @('build','--locked','--release','-p','nvsf-desktop','--features','e2e')
+          if ($LASTEXITCODE -ne 0) { throw 'Instrumented native GUI build failed' }
+          $ext = if ($IsWindows) { '.exe' } else { '' }
+          New-Item -ItemType Directory -Force -Path .ci-work/e2e | Out-Null
+          Copy-Item "target/release/numera-video-sub-finder$ext" '.ci-work/e2e/'
+          Copy-Item "target/release/nvsf$ext" '.ci-work/e2e/'
+          Copy-Item '.ci-work/runtimes' '.ci-work/e2e/runtimes' -Recurse
+          Copy-Item '.ci-work/runtimes' 'target/release/runtimes' -Recurse
+          if ($IsWindows) {
+            Get-ChildItem '.ci-work/runtimes' -Filter '*.dll' | Copy-Item -Destination '.ci-work/e2e/'
+            Get-ChildItem '.ci-work/runtimes' -Filter '*.dll' | Copy-Item -Destination 'target/release/'
+          }
+      - name: All required Rust contract suites and nonzero evidence
+        timeout-minutes: 45
+        run: ./scripts/ci/tests.ps1 -TargetId '${{ matrix.id }}'
+      - name: Native desktop package build
+        timeout-minutes: 30
+        run: |
+          ./scripts/ci/frontend.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Production frontend build failed' }
+          ./scripts/ci/guard.ps1 -Name desktop-production -WallSeconds 1800 -IdleSeconds 360 -Executable cargo -Arguments @('tauri','build','--no-bundle','--','--locked') -WorkingDirectory "$env:GITHUB_WORKSPACE/crates/desktop"
+          if ($LASTEXITCODE -ne 0) { throw 'Native desktop build failed' }
+      - name: Actual model and extraction smoke
+        run: |
+          $ext = if ($IsWindows) { '.exe' } else { '' }
+          $xtask = "target/release/xtask$ext"
+          ./scripts/ci/guard.ps1 -Name provision-models -WallSeconds 1200 -IdleSeconds 240 -Executable "$env:GITHUB_WORKSPACE/$xtask" -Arguments @('runtime-models','--data-root','.ci-work/data')
+          if ($LASTEXITCODE -ne 0) { throw 'Model provisioning failed' }
+          $ffmpeg = ".ci-work/native/installed/${{ matrix.triplet }}/tools/ffmpeg/ffmpeg$ext"
+          ./scripts/ci/guard.ps1 -Name generate-fixtures -WallSeconds 60 -IdleSeconds 30 -Executable "$env:GITHUB_WORKSPACE/$xtask" -Arguments @('fixtures','--ffmpeg',"$env:GITHUB_WORKSPACE/$ffmpeg",'--output','.ci-work/fixtures')
+          if ($LASTEXITCODE -ne 0) { throw 'Fixture generation failed' }
+          ./scripts/ci/guard.ps1 -Name cli-smoke -WallSeconds 210 -IdleSeconds 90 -Executable "$env:GITHUB_WORKSPACE/$xtask" -Arguments @('smoke','--cli',"target/release/nvsf$ext",'--fixture-dir','.ci-work/fixtures','--data-root','.ci-work/data')
+          if ($LASTEXITCODE -ne 0) { throw 'Actual native extraction smoke failed' }
+      - name: Actual native GUI extraction and correction
+        timeout-minutes: 5
+        run: |
+          $ext = if ($IsWindows) { '.exe' } else { '' }
+          $args = @('gui','--gui',".ci-work/e2e/numera-video-sub-finder$ext",'--fixture-dir','.ci-work/fixtures','--data-root','.ci-work/data','--output','.ci-work/gui-evidence')
+          if ($IsLinux) {
+            ./scripts/ci/guard.ps1 -Name native-gui -WallSeconds 270 -IdleSeconds 150 -Executable xvfb-run -Arguments (@('-a',"$env:GITHUB_WORKSPACE/target/release/xtask$ext") + $args)
+          } else {
+            ./scripts/ci/guard.ps1 -Name native-gui -WallSeconds 270 -IdleSeconds 150 -Executable "$env:GITHUB_WORKSPACE/target/release/xtask$ext" -Arguments $args
+          }
+          if ($LASTEXITCODE -ne 0) { throw 'Actual native GUI acceptance failed' }
+      - name: Assemble native artifact and provenance
+        run: |
+          $ext = if ($IsWindows) { '.exe' } else { '' }
+          & "target/release/xtask$ext" package --target '${{ matrix.id }}' --cli "target/release/nvsf$ext" --gui "target/release/numera-video-sub-finder$ext" --runtimes '.ci-work/runtimes' --output '.ci-work/packages'
+          if ($LASTEXITCODE -ne 0) { throw 'Native artifact assembly failed' }
+      - name: Relocated artifact-only extraction
+        run: |
+          $ext = if ($IsWindows) { '.exe' } else { '' }
+          ./scripts/ci/guard.ps1 -Name standalone-smoke -WallSeconds 240 -IdleSeconds 90 -Executable "$env:GITHUB_WORKSPACE/target/release/xtask$ext" -Arguments @('standalone','--target','${{ matrix.id }}','--packages','.ci-work/packages','--fixture-dir','.ci-work/fixtures')
+          if ($LASTEXITCODE -ne 0) { throw 'Relocated package validation failed' }
+      - name: Actual installer and archive formats
+        timeout-minutes: 35
+        run: |
+          ./scripts/ci/bundle.ps1 -TargetId '${{ matrix.id }}' -PackagesRoot '.ci-work/packages'
+      - name: Actual production GUI without test listener
+        timeout-minutes: 3
+        run: |
+          $ext = if ($IsWindows) { '.exe' } else { '' }
+          $name = if ($IsWindows) { 'Numera Video Sub Finder.exe' } else { 'numera-video-sub-finder' }
+          $gui = "$env:GITHUB_WORKSPACE/.ci-work/relocated/Numera 日本 portable ${{ matrix.id }}/$name"
+          $args = @('production','--gui',$gui,'--data-root','.ci-work/production-data','--output','.ci-work/production-evidence')
+          if ($IsLinux) {
+            ./scripts/ci/guard.ps1 -Name production-gui -WallSeconds 90 -IdleSeconds 30 -Executable xvfb-run -Arguments @('-a','pwsh','-NoProfile','-File','scripts/ci/virtual-desktop.ps1','-Executable',"$env:GITHUB_WORKSPACE/target/release/xtask$ext",'-ArgumentsJson',($args | ConvertTo-Json -Compress))
+          } else {
+            ./scripts/ci/guard.ps1 -Name production-gui -WallSeconds 90 -IdleSeconds 30 -Executable "$env:GITHUB_WORKSPACE/target/release/xtask$ext" -Arguments $args
+          }
+          Copy-Item '.ci-work/production-evidence/production-gui-report.json' '.ci-work/packages/reports/${{ matrix.id }}-production.json'
+          Copy-Item '.ci-work/gui-evidence/gui-report.json' '.ci-work/packages/reports/${{ matrix.id }}-gui.json'
+      - name: Native coverage floors
+        if: matrix.id == 'linux-x64'
+        run: ./scripts/ci/coverage.ps1 -Phase report
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: desktop-${{ matrix.id }}-${{ github.sha }}
+          path: |
+            .ci-work/packages/
+            .ci-work/gui-evidence/
+          if-no-files-found: error
+          retention-days: 7
+      - name: Preserve failed diagnostics
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: diagnostics-${{ matrix.id }}-${{ github.sha }}
+          path: |
+            .ci-work/logs/
+            .ci-work/data/logs/
+          if-no-files-found: ignore
+          retention-days: 7
+  required:
+    if: always()
+    needs: [inventory, native]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Fail on missing or failed native jobs
+        env:
+          INVENTORY: ${{ needs.inventory.result }}
+          NATIVE: ${{ needs.native.result }}
+        run: |
+          test "$INVENTORY" = success
+          test "$NATIVE" = success
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: desktop-*-${{ github.sha }}
+          path: .ci-work/downloaded
+          merge-multiple: true
+      - name: Check six exact-source reports
+        run: |
+          for id in $(jq -r '.targets[].id' ci/targets.json); do
+            jq -e --arg sha "$GITHUB_SHA" --arg id "$id" '.schema==1 and .source_sha==$sha and .target==$id and (.files|length>=2) and all(.files[]; (.sha256|test("^[a-f0-9]{64}$")))' ".ci-work/downloaded/reports/$id.json"
+            for kind in standalone gui production suites bundles; do
+              jq -e --arg sha "$GITHUB_SHA" --arg id "$id" '.schema==1 and .source_sha==$sha and .target==$id and .passed==true and .tests>0 and .failed==0 and .skipped==0' ".ci-work/downloaded/reports/$id-$kind.json"
+            done
+          done
+          jq -e --arg sha "$GITHUB_SHA" '.source_sha==$sha and .passed==true and .coverage>=0.80 and .critical_coverage>=0.90' .ci-work/downloaded/reports/coverage.json

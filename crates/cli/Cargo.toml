@@ -1,0 +1,22 @@
+[package]
+name = "nvsf-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "nvsf"
+path = "src/main.rs"
+
+[dependencies]
+nvsf-app.workspace = true
+nvsf-core.workspace = true
+clap.workspace = true
+serde_json.workspace = true
+serde.workspace = true
+chrono.workspace = true
+ctrlc = "=3.5.2"
+
+[lints]
+workspace = true

@@ -1,0 +1,10 @@
+[[permission]]
+identifier = "allow-workspace"
+description = "Local subtitle workspace operations; native dialogs grant paths and previews use registered tokens. No filesystem, shell or external URL permissions."
+commands.allow = [
+  "ui_ready", "set_unsaved", "pick_source", "choose_output", "preview_frame", "start_job",
+  "queue_list", "queue_add", "queue_remove", "queue_regrant", "queue_start", "pick_checkpoint",
+  "job_status", "control_job", "current_project", "replace_project",
+  "save_project", "export_project", "pick_project", "list_history",
+  "open_history", "model_catalog", "install_models", "cancel_model_install", "import_model", "export_model", "doctor", "suggest_regions", "recognize_cue", "install_visual_retry", "cancel_visual_retry", "propose_visual_retry"
+]

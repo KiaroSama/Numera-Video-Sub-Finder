@@ -1,0 +1,36 @@
+[package]
+name = "nvsf-app"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[features]
+default = []
+cuda = ["ort/cuda"]
+directml = ["ort/directml"]
+coreml = ["ort/coreml"]
+
+[dependencies]
+nvsf-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+image.workspace = true
+sha2.workspace = true
+chrono.workspace = true
+dirs.workspace = true
+tempfile.workspace = true
+fs2.workspace = true
+reqwest.workspace = true
+ndarray.workspace = true
+ffmpeg-next = { version = "=9.0.0", default-features = false, features = ["codec", "format", "software-scaling"] }
+ort = { version = "=2.0.0-rc.14", default-features = false, features = ["std", "ndarray", "load-dynamic", "api-31"] }
+libloading = "=0.9.0"
+serde_yaml_ng = "=0.10.0"
+
+[dev-dependencies]
+proptest.workspace = true
+
+[lints]
+workspace = true

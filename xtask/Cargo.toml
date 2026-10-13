@@ -1,0 +1,21 @@
+[package]
+name = "xtask"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+nvsf-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+clap.workspace = true
+sha2.workspace = true
+chrono.workspace = true
+reqwest.workspace = true
+image.workspace = true
+tempfile.workspace = true
+base64 = { version = "=0.23.1", default-features = false, features = ["std"] }
+
+[lints]
+workspace = true

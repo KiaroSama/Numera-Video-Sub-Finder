@@ -1,0 +1,65 @@
+{
+  "schema": 1,
+  "models": [
+    {
+      "id": "det",
+      "upstream": "PaddlePaddle/PP-OCRv5_mobile_det_onnx",
+      "revision": "e6f4fa85f00e168c862bc462aebca69eef9b3d3d",
+      "url": "https://huggingface.co/PaddlePaddle/PP-OCRv5_mobile_det_onnx/resolve/e6f4fa85f00e168c862bc462aebca69eef9b3d3d/inference.onnx",
+      "sha256": "a431985659dc921974177a95adcfbb90fd9e51989a5e04d70d0b75f597b6e61d",
+      "bytes": 4826518,
+      "metadata": "assets/model-metadata/det.yml",
+      "metadata_sha256": "98069072e1b6b37d727fd9d9f11725faa46d6ea0de012f2ed26caea011c37699",
+      "languages": [
+        "en",
+        "ja"
+      ],
+      "license": "Apache-2.0",
+      "status": "upstream-declared; CI inference admission pending"
+    },
+    {
+      "id": "fa",
+      "upstream": "PaddlePaddle/arabic_PP-OCRv5_mobile_rec_onnx",
+      "revision": "14aaedcd75825982689ecf5cd64ab33ee083215a",
+      "url": "https://huggingface.co/PaddlePaddle/arabic_PP-OCRv5_mobile_rec_onnx/resolve/14aaedcd75825982689ecf5cd64ab33ee083215a/inference.onnx",
+      "sha256": "799113ebf267fbe742deb99eb36e8d42c9ddc5291ceacf92add41b4d52a59110",
+      "bytes": 7998947,
+      "metadata": "assets/model-metadata/fa.yml",
+      "metadata_sha256": "21368419e6c016c31db55d316d59e11c128e1913e6e6fe10287084710043d3a6",
+      "languages": [
+        "fa"
+      ],
+      "license": "Apache-2.0",
+      "status": "upstream-declared; CI inference admission pending"
+    },
+    {
+      "id": "en-ja",
+      "upstream": "PaddlePaddle/PP-OCRv5_mobile_rec_onnx",
+      "revision": "ed152b8b495f84de93cda5709d768548a9127622",
+      "url": "https://huggingface.co/PaddlePaddle/PP-OCRv5_mobile_rec_onnx/resolve/ed152b8b495f84de93cda5709d768548a9127622/inference.onnx",
+      "sha256": "da72dc72ca4dc220df0dfde68c1dedc31c58d3e76a25871122e5056227d50092",
+      "bytes": 16534782,
+      "metadata": "assets/model-metadata/en-ja.yml",
+      "metadata_sha256": "5dfeb2777f6d0db8177d8128a8acfcf6e6276dc4ac73ea3bf0dc06d6a5e85d8e",
+      "languages": [
+        "en",
+        "ja"
+      ],
+      "license": "Apache-2.0",
+      "status": "upstream-declared; CI inference admission pending"
+    },
+    {
+      "id": "ja-specialist",
+      "upstream": "tobiichioriguchi/japan_PP-OCRv3_mobile_rec_onnx",
+      "revision": "1c772b3dd782e6ac4e61aba8bfe9683bee3334fc",
+      "url": "https://huggingface.co/tobiichioriguchi/japan_PP-OCRv3_mobile_rec_onnx/resolve/1c772b3dd782e6ac4e61aba8bfe9683bee3334fc/inference.onnx",
+      "sha256": "2e397c27461751befc82eca78c9b19e87322ebee34e7316468b21856f9977d64",
+      "bytes": 10089078,
+      "metadata": "assets/model-metadata/ja-specialist.yml",
+      "metadata_sha256": "f7605e536bde4dd6c22e958534a23415ef73d21164bf346389f6a5d67cc05be7",
+      "languages": ["ja"],
+      "license": "Apache-2.0",
+      "status": "community conversion of official PaddleOCRv3; optional; CI admission and subtitle parity pending"
+    }
+  ]
+}

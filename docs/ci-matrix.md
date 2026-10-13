@@ -1,0 +1,11 @@
+# CI matrix and evidence
+
+Six hosted native targets are pinned in [targets.json](../ci/targets.json): Ubuntu 24.04 x64/ARM64, Windows 2025 x64/Windows 11 ARM64, macOS 15 Intel/ARM64. Three concurrent native jobs, two build/test/native threads per runner. All application compilation happens in Actions, never locally.
+
+Desktop CI builds target-native FFmpeg/Tesseract/ORT and the Rust CLI, WASM frontend and Tauri GUI. It runs every owned package's contract suites, actual native extraction, instrumented GUI control/edit/export, relocated portable CLI, production native-window lifecycle without WebDriver and installer content inventories. Libtest reports must contain nonzero tests with no failed/ignored/filtered cases. Command guard owns the process group/Job Object and enforces wall/idle ceilings; any leftover descendant rejects success.
+
+Native Linux x64 coverage collects the same contract/integration executions using LLVM instrumentation. Its ≥80% overall and ≥90% critical native-source floors are enforced. This is not a claim of full WASM UI/changed-line/platform-union coverage: those remain release-qualification requirements. Mutation and Miri are separate portable quality lanes, not duplicate native execution. CodeQL Rust/Actions and RustSec/license/source-policy checks are required.
+
+Every report/artifact is bound to GITHUB_SHA. Missing, failed, skipped, wrong-source and zero-test evidence fail the relevant gate. Development CI is not release qualification: real independently annotated en/fa/ja quality, reviewed critical mutations, physical acceleration, signing and installer/update/uninstall evidence remain explicit gates. The manual release workflow cannot publish or manufacture missing evidence.
+
+No mobile, self-hosted, paid or physical-device runner is configured. Job ceilings are initial explicit budgets until measured in the first hosted run; no speed promise is made. Diagnostics are retained seven days; application media/projects/private configuration are not uploaded.
