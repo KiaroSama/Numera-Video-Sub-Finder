@@ -54,6 +54,9 @@ jobs:
           "CARGO_HOME=$work/cargo" >> $env:GITHUB_ENV
           'RUST_TEST_THREADS=2' >> $env:GITHUB_ENV
           'PROPTEST_CASES=128' >> $env:GITHUB_ENV
+      - name: Hosted guard regression contracts
+        timeout-minutes: 2
+        run: ./scripts/ci/guard-tests.ps1
       - name: Linux native prerequisites
         if: matrix.os == 'linux'
         run: |

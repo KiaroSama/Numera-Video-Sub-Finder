@@ -100,6 +100,10 @@ $ready = Join-Path $logs "$runId.ready"
 $code = 1
 $started = $false
 $assigned = $false
+$rootExited = $false
+$ownedPid = $null
+$exitObserved = $null
+$exitCode = $null
 $stopwatch = [Diagnostics.Stopwatch]::StartNew()
 try {
     $command = Get-Command $FilePath -CommandType Application -ErrorAction Stop | Select-Object -First 1
@@ -115,7 +119,7 @@ try {
     $info.StandardErrorEncoding = $utf8
     if ($IsWindows) {
         $job = [NvsfCiOwnership]::new()
-        $info.FileName = (Get-Command pwsh -CommandType Application -ErrorAction Stop).Source
+        $info.FileName = (Get-Command pwsh -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
         $payload = @'
 $ErrorActionPreference='Stop'
 [Console]::OutputEncoding=[Text.UTF8Encoding]::new($false)
@@ -136,7 +140,7 @@ exit $LASTEXITCODE
         foreach ($arg in @('-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($payload)))) { $info.ArgumentList.Add($arg) }
     } else {
         # Only bootstrap/control glue uses the hosted Python stdlib; no Python application runtime.
-        $info.FileName = (Get-Command python3 -CommandType Application -ErrorAction Stop).Source
+        $info.FileName = (Get-Command python3 -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
         $payload = @'
 import os, sys, time
 os.setsid()
@@ -156,8 +160,9 @@ os.execv(exe, [exe, *argv])
     Write-GuardLog 'INFO' "Starting name=$Name executable=$([IO.Path]::GetFileName($command.Source)) cwd=$($info.WorkingDirectory) wall_s=$WallSeconds idle_s=$IdleSeconds workers=2"
     if (-not $process.Start()) { throw 'Process start failed.' }
     $started = $true
+    $ownedPid = $process.Id
     $startUtc = $process.StartTime.ToUniversalTime()
-    Write-GuardLog 'INFO' "Owned process pid=$($process.Id) start_utc=$($startUtc.ToString('o'))"
+    Write-GuardLog 'INFO' "Owned process pid=$ownedPid start_utc=$($startUtc.ToString('o'))"
     if ($IsWindows) { $job.Assign($process); $assigned = $true }
     while (-not (Test-Path -LiteralPath $ready)) {
         if ($process.WaitForExit(20) -or $stopwatch.Elapsed.TotalSeconds -ge 20) { throw 'Process did not establish its ownership boundary.' }
@@ -186,14 +191,23 @@ os.execv(exe, [exe, *argv])
                 } else { $reads[$i] = $null }
             }
         }
-        if ($process.HasExited -and ($reads[0] -or $reads[1])) {
-            $hasDescendants = if ($IsWindows) { $job.Active() -gt 0 } else { [NvsfCiOwnership]::SignalGroup($group, 0) -eq 0 }
-            if ($hasDescendants) { throw 'Owned root exited while descendants still hold capture streams; rejecting leaked process tree.' }
+        if (-not $rootExited -and $process.HasExited) {
+            $exitCode = $process.ExitCode
+            $exitObserved = $stopwatch.Elapsed.TotalSeconds
+            $rootExited = $true
+            # An exited Windows root remains in job accounting while this Process holds its handle.
+            $process.Close()
         }
-        if ($process.HasExited -and -not $reads[0] -and -not $reads[1]) { $code = $process.ExitCode; break }
+        if ($rootExited) {
+            $hasDescendants = if ($IsWindows) { $job.Active() -gt 0 } else { [NvsfCiOwnership]::SignalGroup($group, 0) -eq 0 }
+            if (-not $hasDescendants -and -not $reads[0] -and -not $reads[1]) { $code = $exitCode; break }
+            if (($stopwatch.Elapsed.TotalSeconds - $exitObserved) -ge 2) {
+                throw 'Owned root exited without bounded stream/tree completion; rejecting leaked process tree.'
+            }
+        }
         if ($stopwatch.Elapsed.TotalSeconds -ge $WallSeconds -or ($stopwatch.Elapsed.TotalSeconds - $lastProgress) -ge $IdleSeconds) {
             $code = 124
-            throw "Command exceeded wall/idle deadline: name=$Name pid=$($process.Id)."
+            throw "Command exceeded wall/idle deadline: name=$Name pid=$ownedPid."
         }
         # Bounded scheduling wait, never a progress heartbeat that resets the idle deadline.
         [Threading.Thread]::Sleep(20)
@@ -205,10 +219,15 @@ os.execv(exe, [exe, *argv])
 } finally {
     try {
         if ($started) {
+            if (-not $rootExited -and $process.HasExited) { $process.Close(); $rootExited = $true }
             if ($IsWindows -and $assigned) {
                 $remaining = $job.Active()
                 if ($remaining -gt 0) {
                     $job.Terminate()
+                    if (-not $rootExited) {
+                        if (-not $process.WaitForExit(3000)) { throw 'Owned root did not exit after job termination.' }
+                        $process.Close(); $rootExited = $true
+                    }
                     $cleanup = [Diagnostics.Stopwatch]::StartNew()
                     while ($job.Active() -gt 0 -and $cleanup.Elapsed.TotalSeconds -lt 10) { [Threading.Thread]::Sleep(20) }
                     if ($job.Active() -gt 0) { throw 'Owned Windows job still has live processes after cleanup.' }
@@ -222,9 +241,9 @@ os.execv(exe, [exe, *argv])
                     if ([NvsfCiOwnership]::SignalGroup($group, 0) -eq 0) { throw 'Owned Unix process group still exists after cleanup.' }
                     if ($code -eq 0) { $code = 1; Write-GuardLog 'ERROR' 'Successful command left owned descendants; terminated and rejected.' }
                 } elseif ([NvsfCiOwnership]::LastError() -ne 3) { throw 'Could not verify owned Unix process group cleanup.' }
-            } elseif (-not $process.HasExited) { $process.Kill($true) }
-            if (-not $process.WaitForExit(10000)) { throw 'Owned process did not exit after cleanup.' }
-            Write-GuardLog 'INFO' "Cleanup verified pid=$($process.Id)"
+            } elseif (-not $rootExited -and -not $process.HasExited) { $process.Kill($true) }
+            if (-not $rootExited -and -not $process.WaitForExit(10000)) { throw 'Owned process did not exit after cleanup.' }
+            Write-GuardLog 'INFO' "Cleanup verified pid=$ownedPid"
         }
     } catch { $code = 1; [Console]::Error.WriteLine("Cleanup failure: $($_.Exception.Message)") }
     if ($job) { $job.Dispose() }

@@ -107,7 +107,7 @@ try {
         $vs = Invoke-NativeCommand -Name 'vs-discovery' -Executable $vswhere -Arguments @('-latest', '-products', '*', '-property', 'installationPath') -Capture
         if (-not $vs -or -not (Test-Path -LiteralPath $vs)) { throw 'Hosted Visual Studio installation was not found.' }
         $candidates = @($env:LIBCLANG_PATH, (Join-Path $env:ProgramFiles 'LLVM/bin'), (Join-Path $vs 'VC/Tools/LLVM/ARM64/bin'), (Join-Path $vs 'VC/Tools/LLVM/x64/bin'), (Join-Path $vs 'VC/Tools/LLVM/bin'))
-        $clang = Get-Command clang -CommandType Application -ErrorAction SilentlyContinue
+        $clang = Get-Command clang -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
         if ($clang) { $candidates += Split-Path $clang.Source -Parent }
         $machine = if ($hostArch -eq 'arm64') { 0xAA64 } else { 0x8664 }
         $libclang = @($candidates | Where-Object { $_ -and (Test-Path -LiteralPath (Join-Path $_ 'libclang.dll')) } | Where-Object { (Get-PeMachine (Join-Path $_ 'libclang.dll')) -eq $machine }) | Select-Object -First 1
@@ -136,7 +136,7 @@ try {
         [IO.File]::AppendAllText($env:GITHUB_PATH, "$(Join-Path $prefix 'bin')`n$runtimes`n", $utf8)
         $env:PATH = "$runtimes;$(Join-Path $prefix 'bin');$env:PATH"
     } else {
-        $pkgConfig = Get-Command pkg-config -CommandType Application -ErrorAction SilentlyContinue
+        $pkgConfig = Get-Command pkg-config -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
         if (-not $pkgConfig) {
             $pkgConfig = @(Get-ChildItem -LiteralPath (Join-Path $env:VCPKG_ROOT 'downloads/tools') -Recurse -File -ErrorAction SilentlyContinue | Where-Object Name -in @('pkgconf', 'pkg-config')) | Select-Object -First 1
         }

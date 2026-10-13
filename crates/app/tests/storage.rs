@@ -9,10 +9,10 @@ fn data_integrity_locking_and_logs_are_real_local_resources() {
     let directory = tempfile::tempdir().unwrap();
     let root = directory.path().join("Numera 日本 path with spaces");
     let paths = Paths::new(Some(&root)).unwrap();
-    let file = root.join("known.txt");
-    write_atomic(&file, b"hello world", false).unwrap();
+    let known = root.join("known.txt");
+    write_atomic(&known, b"hello world", false).unwrap();
     assert_eq!(
-        hash_file(&file).unwrap(),
+        hash_file(&known).unwrap(),
         "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
     );
     let lock_path = root.join("job.lock");
@@ -54,8 +54,8 @@ fn data_integrity_locking_and_logs_are_real_local_resources() {
     assert!(!text.contains("fixture-secret"));
     assert!(!text.contains("fixture-token"));
     assert!(text.contains("[REDACTED]"));
-    assert!(write_atomic(&file, b"replacement", false).is_err());
-    assert_eq!(std::fs::read(&file).unwrap(), b"hello world");
+    assert!(write_atomic(&known, b"replacement", false).is_err());
+    assert_eq!(std::fs::read(&known).unwrap(), b"hello world");
 }
 
 #[test]

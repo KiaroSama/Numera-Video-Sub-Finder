@@ -14,6 +14,8 @@ All application compilation and execution checks run in GitHub Actions on the ex
 
 English CER ≤2%; Persian/Japanese CER ≤5%; accurate-mode event recall ≥98%; p95 boundary error ≤max(100ms, two displayed-frame intervals). Allowed precision-related CER regression ≤0.5 percentage points. Instrumentable owned Rust coverage ≥80%; timing/tracking/export/persistence and changed lines ≥90%; reviewed critical mutations ≥80%. These are acceptance targets, not measured results.
 
+Before native provisioning, `scripts/ci/guard-tests.ps1` exercises the real guard with captured Unicode output, nonzero exit propagation and a deliberately surviving child that must be rejected and reaped. Each command has a 15-second wall/5-second idle ceiling; the regression step has a two-minute ceiling. Interpreter lookup selects one executable; exited root handles are released before owned-tree accounting, with a two-second bounded stream/teardown grace. Live descendants still fail the guard.
+
 Every created test is audited before its run: load-bearing assertions, cheapest evidence tier, shared immutable setup, isolated mutable state, bounded waits, two-worker ceiling and full owned-tree cleanup. Initial measured wall times are unknown until the first hosted run. No test is run locally and again in CI.
 
 ## Evidence integrity
