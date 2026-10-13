@@ -61,8 +61,12 @@ jobs:
         if: matrix.os == 'linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential pkg-config clang libclang-dev nasm cmake ninja-build autoconf automake libtool libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf libfuse2 libarchive-tools xvfb xdotool wmctrl openbox fonts-dejavu-core fonts-noto-core fonts-noto-cjk
+          sudo apt-get install -y build-essential pkg-config clang libclang-dev nasm cmake ninja-build autoconf autoconf-archive automake libtool libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf libfuse2 libarchive-tools xvfb xdotool wmctrl openbox fonts-dejavu-core fonts-noto-core fonts-noto-cjk
           if ($LASTEXITCODE -ne 0) { throw 'Linux prerequisites failed' }
+      - name: macOS native prerequisites
+        if: matrix.os == 'macos'
+        timeout-minutes: 20
+        run: ./scripts/ci/guard.ps1 -Name macos-prerequisites -WallSeconds 900 -IdleSeconds 180 -Executable brew -Arguments @('install','nasm','autoconf','autoconf-archive','automake','libtool','pkg-config')
       - name: Native dependency source builds and verified runtime
         run: ./scripts/ci/native.ps1 -TargetId '${{ matrix.id }}'
       - name: Native coverage instrumentation
@@ -189,6 +193,8 @@ jobs:
           path: |
             .ci-work/logs/
             .ci-work/data/logs/
+            .ci-work/native/vcpkg/buildtrees/ffmpeg/*.log
+            .ci-work/native/vcpkg/buildtrees/ffmpeg/*/ffbuild/config.log
           if-no-files-found: ignore
           retention-days: 7
   required:

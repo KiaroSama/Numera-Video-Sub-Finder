@@ -14,9 +14,11 @@ $guard = Join-Path $PSScriptRoot 'guard.ps1'
 $pwsh = (Get-Command pwsh -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
 $originalPath = $env:PATH
 $ownedChild = $null
-function Invoke-Contract([string]$Name, [string]$Code, [string]$Capture) {
+function Invoke-Contract([string]$Name, [string]$Code, [string]$Capture, [string]$Progress) {
     $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($Code))
-    & $guard -Name "contract-$Name" -WallSeconds 15 -IdleSeconds 5 -FilePath $pwsh -Arguments @('-NoLogo','-NoProfile','-NonInteractive','-EncodedCommand',$encoded) -WorkingDirectory $work -CaptureStdoutPath $Capture
+    $parameters = @{ Name = "contract-$Name"; WallSeconds = 15; IdleSeconds = 5; FilePath = $pwsh; Arguments = @('-NoLogo','-NoProfile','-NonInteractive','-EncodedCommand',$encoded); WorkingDirectory = $work; CaptureStdoutPath = $Capture }
+    if ($Progress) { $parameters.ProgressDirectory = $Progress }
+    & $guard @parameters
 }
 try {
     # Duplicate real executable directories reproduce multi-candidate PATH resolution without mocks.
@@ -54,7 +56,24 @@ exit 0
     try {
         if ($survivor -and $survivor.StartTime.ToUniversalTime().ToString('o') -eq $ownedChild.start -and -not $survivor.HasExited) { throw 'Guard left its real regression child alive.' }
     } finally { if ($survivor) { $survivor.Dispose() } }
-    [Console]::WriteLine('Guard contracts passed: tests=3 failed=0 skipped=0; Unicode success, nonzero exit and owned descendant rejection/cleanup.')
+    $progress = Join-Path $work 'buildlogs'
+    [IO.Directory]::CreateDirectory($progress) | Out-Null
+    $quietCode = @'
+[IO.Directory]::CreateDirectory('buildlogs')|Out-Null
+for($i=0;$i -lt 12;$i++) {
+    [IO.File]::AppendAllText('buildlogs/build.log',"completed-unit=$i`n",[Text.UTF8Encoding]::new($false))
+    # Controlled quiet-build cadence exceeds the guard idle limit in total, not between writes.
+    [Threading.Thread]::Sleep(500)
+}
+exit 0
+'@
+    Invoke-Contract 'file-progress' $quietCode (Join-Path $work 'quiet.stdout') $progress
+    if ([IO.File]::ReadAllLines((Join-Path $progress 'build.log'), $utf8).Count -ne 12) { throw 'Quiet build did not complete every actual log write.' }
+    $rejected = $false
+    try { Invoke-Contract 'frozen-progress' '[Threading.Thread]::Sleep(60000); exit 0' (Join-Path $work 'frozen.stdout') $progress }
+    catch { $rejected = $_.Exception.Message -match 'exit_code=124' }
+    if (-not $rejected) { throw 'Existing unchanged build logs incorrectly reset the idle deadline.' }
+    [Console]::WriteLine('Guard contracts passed: tests=5 failed=0 skipped=0; Unicode, exit status, child cleanup, quiet log progress and frozen log timeout.')
     $global:LASTEXITCODE = 0
 } finally {
     $env:PATH = $originalPath

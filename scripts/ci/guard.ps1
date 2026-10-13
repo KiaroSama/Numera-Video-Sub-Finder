@@ -7,7 +7,8 @@ param(
     [Parameter(Mandatory)][Alias('Executable')][string]$FilePath,
     [string[]]$Arguments = @(),
     [string]$WorkingDirectory = (Get-Location).Path,
-    [string]$CaptureStdoutPath
+    [string]$CaptureStdoutPath,
+    [string]$ProgressDirectory
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -82,6 +83,23 @@ public sealed class NvsfCiOwnership : IDisposable {
     public void Terminate() { if (job != IntPtr.Zero && !TerminateJobObject(job, 124)) throw new Win32Exception(); }
     public void Dispose() { if (job != IntPtr.Zero) { CloseHandle(job); job = IntPtr.Zero; } }
 }
+public sealed class NvsfCiFileProgress : IDisposable {
+    readonly System.IO.FileSystemWatcher watcher;
+    int changed, failed;
+    public NvsfCiFileProgress(string path) {
+        watcher = new System.IO.FileSystemWatcher(path, "*.log");
+        watcher.IncludeSubdirectories = true;
+        watcher.NotifyFilter = System.IO.NotifyFilters.LastWrite | System.IO.NotifyFilters.Size;
+        watcher.Changed += (_, e) => System.Threading.Interlocked.Exchange(ref changed, 1);
+        watcher.Error += (_, e) => System.Threading.Interlocked.Exchange(ref failed, 1);
+        watcher.EnableRaisingEvents = true;
+    }
+    public bool Consume() {
+        if (System.Threading.Volatile.Read(ref failed) != 0) throw new InvalidOperationException("Owned build log watcher failed; progress is unverified.");
+        return System.Threading.Interlocked.Exchange(ref changed, 0) != 0;
+    }
+    public void Dispose() { watcher.Dispose(); }
+}
 '@
 }
 $process = [Diagnostics.Process]::new()
@@ -104,8 +122,21 @@ $rootExited = $false
 $ownedPid = $null
 $exitObserved = $null
 $exitCode = $null
+$fileProgress = $null
+$lastFileNotice = 0.0
 $stopwatch = [Diagnostics.Stopwatch]::StartNew()
 try {
+    if ($ProgressDirectory) {
+        $progressRoot = [IO.Path]::GetFullPath($ProgressDirectory, $root)
+        if (-not $progressRoot.StartsWith($root + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) { throw 'Build progress directory must remain inside this project.' }
+        $cursor = $progressRoot
+        while ($cursor.Length -gt $root.Length) {
+            if ((Test-Path -LiteralPath $cursor) -and ((Get-Item -LiteralPath $cursor -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Build progress directory ancestors may not be links.' }
+            $cursor = [IO.Path]::GetDirectoryName($cursor)
+        }
+        [IO.Directory]::CreateDirectory($progressRoot) | Out-Null
+        $fileProgress = [NvsfCiFileProgress]::new($progressRoot)
+    }
     $command = Get-Command $FilePath -CommandType Application -ErrorAction Stop | Select-Object -First 1
     $info = [Diagnostics.ProcessStartInfo]::new()
     $info.WorkingDirectory = [IO.Path]::GetFullPath($WorkingDirectory)
@@ -175,6 +206,13 @@ os.execv(exe, [exe, *argv])
     $reads = @($readers[0].ReadAsync($buffers[0], 0, 4096), $readers[1].ReadAsync($buffers[1], 0, 4096))
     $lastProgress = $stopwatch.Elapsed.TotalSeconds
     while ($true) {
+        if ($fileProgress -and $fileProgress.Consume()) {
+            $lastProgress = $stopwatch.Elapsed.TotalSeconds
+            if (($lastProgress - $lastFileNotice) -ge 30) {
+                Write-GuardLog 'INFO' 'Owned native build log changed; file content remains in the build diagnostics.'
+                $lastFileNotice = $lastProgress
+            }
+        }
         for ($i = 0; $i -lt 2; $i++) {
             if ($reads[$i] -and $reads[$i].IsCompleted) {
                 $count = $reads[$i].GetAwaiter().GetResult()
@@ -246,6 +284,7 @@ os.execv(exe, [exe, *argv])
             Write-GuardLog 'INFO' "Cleanup verified pid=$ownedPid"
         }
     } catch { $code = 1; [Console]::Error.WriteLine("Cleanup failure: $($_.Exception.Message)") }
+    if ($fileProgress) { $fileProgress.Dispose() }
     if ($job) { $job.Dispose() }
     $process.Dispose()
     foreach ($path in @($gate, $ready)) { if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Force } }

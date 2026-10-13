@@ -1,6 +1,7 @@
 [workspace]
 resolver = "3"
 members = ["crates/core", "crates/app", "crates/cli", "crates/ui", "crates/desktop", "xtask"]
+exclude = [".ci-work"]
 default-members = ["crates/core", "crates/app", "crates/cli", "xtask"]
 
 [workspace.package]
@@ -11,8 +12,8 @@ license = "GPL-3.0-or-later"
 repository = "https://github.com/KiaroSama/Numera-Video-Sub-Finder"
 
 [workspace.dependencies]
-nvsf-core = { path = "crates/core" }
-nvsf-app = { path = "crates/app" }
+nvsf-core = { path = "crates/core", version = "=0.1.0" }
+nvsf-app = { path = "crates/app", version = "=0.1.0" }
 serde = { version = "=1.0.229", features = ["derive"] }
 serde_json = "=1.0.154"
 thiserror = "=2.0.21"

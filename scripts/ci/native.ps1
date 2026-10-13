@@ -37,11 +37,12 @@ function Write-NativeLog([string]$Level, [string]$Text) {
 }
 $sequence = 0
 function Invoke-NativeCommand {
-    param([string]$Name, [string]$Executable, [string[]]$Arguments, [int]$Wall = 300, [int]$Idle = 120, [switch]$Capture)
+    param([string]$Name, [string]$Executable, [string[]]$Arguments, [int]$Wall = 300, [int]$Idle = 120, [switch]$Capture, [string]$ProgressDirectory)
     $script:sequence++
     $parameters = @{ Name = "$Name-$sequence"; WallSeconds = $Wall; IdleSeconds = $Idle; Executable = $Executable; Arguments = $Arguments; WorkingDirectory = $root }
     $capturePath = Join-Path $logs "$Name-$sequence.stdout"
     if ($Capture) { $parameters.CaptureStdoutPath = $capturePath }
+    if ($ProgressDirectory) { $parameters.ProgressDirectory = $ProgressDirectory }
     Write-NativeLog 'INFO' "Command stage=$Name wall_s=$Wall idle_s=$Idle"
     & $guard @parameters
     if ($LASTEXITCODE -ne 0) { throw "Native stage failed: $Name (exit=$LASTEXITCODE)." }
@@ -119,7 +120,7 @@ try {
         Invoke-NativeCommand -Name 'vcpkg-bootstrap' -Executable 'bash' -Arguments @((Join-Path $env:VCPKG_ROOT 'bootstrap-vcpkg.sh'), '-disableMetrics') -Wall 600 -Idle 180
     }
     $vcpkg = Join-Path $env:VCPKG_ROOT $(if ($IsWindows) { 'vcpkg.exe' } else { 'vcpkg' })
-    Invoke-NativeCommand -Name 'native-ports' -Executable $vcpkg -Arguments @('install', "--triplet=$($target.triplet)", "--host-triplet=$($target.triplet)", "--overlay-triplets=$overlay", "--x-manifest-root=$root", "--x-install-root=$work/installed", '--disable-metrics') -Wall 6600 -Idle 900
+    Invoke-NativeCommand -Name 'native-ports' -Executable $vcpkg -Arguments @('install', "--triplet=$($target.triplet)", "--host-triplet=$($target.triplet)", "--overlay-triplets=$overlay", "--x-manifest-root=$root", "--x-install-root=$work/installed", '--disable-metrics') -Wall 6600 -Idle 900 -ProgressDirectory (Join-Path $env:VCPKG_ROOT 'buildtrees')
     $prefix = Join-Path (Join-Path $work 'installed') $target.triplet
     foreach ($relative in @('include/libavcodec/avcodec.h', 'include/libavformat/avformat.h', 'include/libavutil/avutil.h', 'include/libswscale/swscale.h', 'include/tesseract/capi.h', 'share/ffmpeg/copyright', 'share/tesseract/copyright')) {
         if (-not (Test-Path -LiteralPath (Join-Path $prefix $relative))) { throw "Native installation missing required file: $relative." }
@@ -196,8 +197,10 @@ try {
             foreach ($entry in $entries -split "`n") { if ($entry -match '(^/|(^|/)\.\.(/|$)|^[A-Za-z]:)') { throw 'ONNX archive contains an unsafe entry path.' } }
             Invoke-NativeCommand -Name 'ort-extract' -Executable 'tar' -Arguments @('-xzf', $archive, '-C', $unpack)
         }
-        $ortRoot = $unpack
-        $ortLibraries = @(Get-ChildItem -LiteralPath $unpack -Recurse -File | Where-Object Name -match '^onnxruntime.*\.dll$|^libonnxruntime.*\.(so|dylib)(\.[0-9.]+)?$')
+        $ortRoots = @(Get-ChildItem -LiteralPath $unpack -Directory)
+        if ($ortRoots.Count -ne 1) { throw 'ONNX archive must contain one exact release root.' }
+        $ortRoot = $ortRoots[0].FullName
+        $ortLibraries = @(Get-ChildItem -LiteralPath (Join-Path $ortRoot 'lib') -File | Where-Object Name -match '^onnxruntime.*\.dll$|^libonnxruntime.*\.(so|dylib)(\.[0-9.]+)?$')
     }
     if ($ortLibraries.Count -eq 0) { throw 'ONNX provision produced no actual native shared library.' }
     foreach ($file in $ortLibraries) { Copy-NativeFile $file $runtimes }

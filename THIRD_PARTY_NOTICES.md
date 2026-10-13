@@ -10,6 +10,7 @@ Application-owned code is GPL-3.0-or-later; see LICENSE. Native dependencies, mo
 | Tesseract 5.5.3 / Leptonica | Same vcpkg baseline | Apache-2.0 / BSD-style; preserve native notices |
 | ONNX Runtime 1.31.0 | ci/targets.json official release hashes/source tag | MIT; preserve notices, runtime licenses and exact build provenance |
 | ort 2.0.0-rc.14 | Cargo.lock | MIT / Apache-2.0; exact prerelease explicitly approved |
+| webpki-root-certs 1.0.9 trust-anchor data | Cargo.lock; rustls/webpki-roots tag v/1.0.9 | CDLA-Permissive-2.0; full agreement in licenses/data/CDLA-Permissive-2.0.md is included with distributed data |
 | PaddleOCR v5 ONNX models | ci/models.json immutable official PaddlePaddle Hub revisions | Declared Apache-2.0; hashes identify bytes, not benchmark quality |
 | Tesseract language packs | ci/tessdata.json immutable tessdata_best revision | Apache-2.0 |
 | Japanese v3 ONNX specialist | ci/models.json immutable conversion/base revisions | Declared Apache-2.0; separate quality/native admission |

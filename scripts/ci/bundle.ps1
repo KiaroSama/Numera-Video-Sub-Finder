@@ -159,7 +159,7 @@ try {
     $resources = [ordered]@{}
     foreach ($entry in $manifest.files) {
         $rel = [string]$entry.file
-        if ($rel -match '^(runtimes/|data/models/|licenses/native/)' -or $rel -in @('LICENSE', 'THIRD_PARTY_NOTICES.md', 'README.md') -or ($IsWindows -and $rel -match '^[^/]+\.dll$')) {
+        if ($rel -match '^(runtimes/|data/models/|licenses/native/|licenses/data/)' -or $rel -in @('LICENSE', 'THIRD_PARTY_NOTICES.md', 'README.md') -or ($IsWindows -and $rel -match '^[^/]+\.dll$')) {
             $dest = Join-Path $payload $rel
             Copy-BundleFile (Join-Path $portable $rel) $dest
             $resources[$dest.Replace('\', '/')] = $rel

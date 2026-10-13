@@ -38,7 +38,7 @@ jobs:
         run: ./scripts/ci/guard.ps1 -Name mutation-validator-build -WallSeconds 600 -IdleSeconds 120 -Executable cargo -Arguments @('build','--locked','--release','-p','xtask')
       - name: Critical portable behavior mutation
         timeout-minutes: 95
-        run: ./scripts/ci/guard.ps1 -Name portable-mutants -WallSeconds 5400 -IdleSeconds 240 -Executable cargo -Arguments @('mutants','-p','nvsf-core','--file','crates/core/src/time.rs','--file','crates/core/src/tracking.rs','--file','crates/core/src/export.rs','--file','crates/core/src/edit.rs','--jobs','1','--jobserver-tasks','2','--timeout','30','--build-timeout','300','--output','.ci-work/mutation','--cargo-arg','--locked','--','--test-threads=2')
+        run: ./scripts/ci/guard.ps1 -Name portable-mutants -WallSeconds 5400 -IdleSeconds 240 -Executable cargo -Arguments @('mutants','--gitignore=true','-p','nvsf-core','--file','crates/core/src/time.rs','--file','crates/core/src/tracking.rs','--file','crates/core/src/export.rs','--file','crates/core/src/edit.rs','--jobs','1','--jobserver-tasks','2','--timeout','30','--build-timeout','300','--output','.ci-work/mutation','--cargo-arg','--locked','--','--test-threads=2')
       - name: Nonzero mutation denominator and retained floor
         run: |
           & target/release/xtask mutation --input '.ci-work/mutation/mutants.out/outcomes.json' --output '.ci-work/mutation/mutation-report.json'

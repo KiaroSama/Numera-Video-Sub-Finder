@@ -5,7 +5,7 @@ Updated: 2026-10-13. **NOT a release acceptance report.**
 | Area | Current evidence | State |
 |---|---|---|
 | Rust workspace, shared pipeline/CLI/UI source | Source authored; no local compilation allowed | Hosted verification pending |
-| Six native CI builds/tests | Initial source `7f581826` failed native provisioning on all six rows; shared process guard failures diagnosed | FAILED; application build/test not reached |
+| Six native CI builds/tests | Initial `7f581826` guard failures resolved: all six guard-contract steps passed on `d3a0ca1`; later prerequisite, ONNX symbol-copy and quiet-build progress failures collected | FAILED; full application build/test not reached |
 | Actual native OCR and GUI edits/export | Real harness source, not execution | NOT_RUN |
 | Locked dependencies and model pins | Live official metadata/source reviewed; lock resolved without compilation | Runtime/ABI admission pending |
 | Original logo | Owner-supplied image and 240px README sizing verified | Asset identity established; native package/render pending |
@@ -14,7 +14,7 @@ Updated: 2026-10-13. **NOT a release acceptance report.**
 | Physical accelerators | No device/self-hosted runner authorized | Unqualified, separate from hosted CPU |
 | Optional Japanese specialist/local visual retry | Source wired, pinned models, proposal-only/cancel tests authored | Native admission/real crop quality NOT_RUN |
 | Native installers, signing and relocation | Actual format/content/lifecycle harness source authored | NOT_RUN/unsigned |
-| Coverage/mutation/Miri/security | CodeQL Rust/actions passed on `7f581826`; mutation/Miri/dependency audit blocked before execution by guard | Remaining gates unmeasured; full WASM/changed-line/critical review open |
+| Coverage/mutation/Miri/security | CodeQL Rust/actions and RustSec audit passed on `d3a0ca1`; Miri sysroot workspace, mutation copy recursion and explicit license/path-version policy failures remain | Remaining gates failed/unmeasured; full WASM/changed-line/critical review open |
 | Fuzz/Loom/native sanitizers | Parser properties/threaded stress are supplementary, not substitutes | Required deeper evidence open |
 
 No successful CI, quality percentage, coverage number, screenshot, signing, GPU placement or release result is asserted without actual evidence. Required missing/failed evidence remains open rather than being waived to obtain a green badge. Build/test results must name their exact source SHA and actual target/jobs; hosted development checks and final release qualification are different gates.

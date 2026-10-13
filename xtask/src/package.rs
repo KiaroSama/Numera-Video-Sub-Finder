@@ -54,6 +54,7 @@ pub fn assemble(
         Path::new(".ci-work/native-notices"),
         &root.join("licenses/native"),
     )?;
+    copy_tree(Path::new("licenses/data"), &root.join("licenses/data"))?;
     copy_tree(Path::new(".ci-work/data/models"), &root.join("data/models"))?;
     std::fs::write(root.join("portable.flag"), b"")?;
     relocate(&root.join(cli_name), target)?;
