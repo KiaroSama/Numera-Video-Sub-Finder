@@ -67,8 +67,21 @@ jobs:
         if: matrix.os == 'macos'
         timeout-minutes: 20
         run: ./scripts/ci/guard.ps1 -Name macos-prerequisites -WallSeconds 900 -IdleSeconds 180 -Executable brew -Arguments @('install','nasm','autoconf','autoconf-archive','automake','libtool','pkg-config')
+      - name: Restore verified native dependency cache
+        id: native-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .ci-work/native/binary-cache
+          key: native-${{ matrix.id }}-${{ matrix.runner }}-${{ hashFiles('vcpkg.json', 'ci/triplets/*.cmake', 'scripts/ci/native.ps1') }}
       - name: Native dependency source builds and verified runtime
+        id: native-provision
         run: ./scripts/ci/native.ps1 -TargetId '${{ matrix.id }}'
+      - name: Retain successful native dependencies
+        if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.native-provision.outcome == 'success' && steps.native-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .ci-work/native/binary-cache
+          key: ${{ steps.native-cache.outputs.cache-primary-key }}
       - name: Native coverage instrumentation
         if: matrix.id == 'linux-x64'
         run: ./scripts/ci/coverage.ps1 -Phase start

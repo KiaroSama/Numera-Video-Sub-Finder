@@ -56,6 +56,74 @@ exit 0
     try {
         if ($survivor -and $survivor.StartTime.ToUniversalTime().ToString('o') -eq $ownedChild.start -and -not $survivor.HasExited) { throw 'Guard left its real regression child alive.' }
     } finally { if ($survivor) { $survivor.Dispose() } }
+    $cases = 5
+    if ($IsWindows) {
+        Add-Type -TypeDefinition @'
+using System;
+using System.Diagnostics;
+using System.IO;
+using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
+public sealed class NvsfRetainedProcess : IDisposable {
+    readonly CancellationTokenSource stop = new CancellationTokenSource();
+    readonly Task monitor;
+    Process child;
+    public NvsfRetainedProcess(string path) {
+        monitor = Task.Run(() => {
+            var elapsed = Stopwatch.StartNew();
+            while (!File.Exists(path)) {
+                stop.Token.ThrowIfCancellationRequested();
+                if (elapsed.Elapsed.TotalSeconds >= 10) throw new TimeoutException("Retained-handle child did not appear.");
+                Thread.Sleep(20);
+            }
+            var record = File.ReadAllLines(path, new UTF8Encoding(false));
+            if (record.Length != 2 || !int.TryParse(record[0], out int pid) || pid <= 0)
+                throw new InvalidOperationException("Retained-handle child identity is invalid.");
+            child = Process.GetProcessById(pid);
+            if (child.StartTime.ToUniversalTime().ToString("o") != record[1])
+                throw new InvalidOperationException("Retained-handle PID identity changed.");
+            if (child.Handle == IntPtr.Zero) throw new InvalidOperationException("Process handle was not opened.");
+            File.WriteAllText(Path.Combine(Path.GetDirectoryName(path), "held.ready"), "held", new UTF8Encoding(false));
+        });
+    }
+    public void Verify() {
+        if (!monitor.Wait(10000)) throw new TimeoutException("Retained-handle monitor did not finish.");
+        if (child == null || !child.HasExited || child.ExitCode != 0)
+            throw new InvalidOperationException("Retained child did not exit successfully while its real handle stayed open.");
+    }
+    public void Dispose() {
+        stop.Cancel();
+        try {
+            if (!monitor.Wait(1000)) throw new TimeoutException("Retained-handle monitor cleanup failed.");
+        } finally { child?.Dispose(); stop.Dispose(); }
+    }
+}
+'@
+        $heldCode = @'
+$ErrorActionPreference='Stop'
+$info=[Diagnostics.ProcessStartInfo]::new()
+$info.FileName=(Get-Command pwsh -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
+$info.UseShellExecute=$false
+$info.CreateNoWindow=$true
+$childCode='$deadline=[DateTime]::UtcNow.AddSeconds(10); while(-not [IO.File]::Exists("held.ready")) { if([DateTime]::UtcNow -ge $deadline) { exit 2 }; [Threading.Thread]::Sleep(20) }; exit 0'
+foreach($arg in @('-NoLogo','-NoProfile','-NonInteractive','-Command',$childCode)) { $info.ArgumentList.Add($arg) }
+$child=[Diagnostics.Process]::Start($info)
+try {
+    [IO.File]::WriteAllLines('held.tmp',@([string]$child.Id,$child.StartTime.ToUniversalTime().ToString('o')),[Text.UTF8Encoding]::new($false))
+    [IO.File]::Move('held.tmp','held.json')
+    if(-not $child.WaitForExit(3000)) { throw 'Retained regression child did not exit within its deadline.' }
+    if($child.ExitCode -ne 0) { throw 'Retained regression synchronization failed.' }
+} finally { $child.Dispose() }
+exit 0
+'@
+        $retained = [NvsfRetainedProcess]::new((Join-Path $work 'held.json'))
+        try {
+            Invoke-Contract 'retained-exited-handle' $heldCode (Join-Path $work 'held.stdout')
+            $retained.Verify()
+        } finally { $retained.Dispose() }
+        $cases++
+    }
     $progress = Join-Path $work 'buildlogs'
     [IO.Directory]::CreateDirectory($progress) | Out-Null
     $quietCode = @'
@@ -73,7 +141,7 @@ exit 0
     try { Invoke-Contract 'frozen-progress' '[Threading.Thread]::Sleep(60000); exit 0' (Join-Path $work 'frozen.stdout') $progress }
     catch { $rejected = $_.Exception.Message -match 'exit_code=124' }
     if (-not $rejected) { throw 'Existing unchanged build logs incorrectly reset the idle deadline.' }
-    [Console]::WriteLine('Guard contracts passed: tests=5 failed=0 skipped=0; Unicode, exit status, child cleanup, quiet log progress and frozen log timeout.')
+    [Console]::WriteLine("Guard contracts passed: tests=$cases failed=0 skipped=0; Unicode, exit status, child cleanup, quiet log progress, frozen log timeout and platform process-handle semantics.")
     $global:LASTEXITCODE = 0
 } finally {
     $env:PATH = $originalPath

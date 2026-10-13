@@ -38,10 +38,10 @@ impl Paths {
                     return sibling;
                 }
                 #[cfg(target_os = "macos")]
-                if dir.file_name().is_some_and(|n| n == "MacOS") {
-                    if let Some(contents) = dir.parent() {
-                        return contents.join("Resources/runtimes");
-                    }
+                if dir.file_name().is_some_and(|n| n == "MacOS")
+                    && let Some(contents) = dir.parent()
+                {
+                    return contents.join("Resources/runtimes");
                 }
                 #[cfg(target_os = "linux")]
                 if let Some(prefix) = dir.parent() {

@@ -256,10 +256,10 @@ pub fn smoke(gui: &Path, data: &Path, output: &Path) -> Result<()> {
             let (log, length) = diagnostic(&logs)?;
             let window = native_window(pid, evidence.path(), &mut helper_index)?;
             budget.observe(format!("startup:{length}:{}", window.is_some()))?;
-            if log.contains("[INFO] [APP] Startup version=") {
-                if let Some(window) = window {
-                    break window;
-                }
+            if log.contains("[INFO] [APP] Startup version=")
+                && let Some(window) = window
+            {
+                break window;
             }
             // Native readiness is observed on every iteration; no arbitrary fixed startup sleep.
             std::thread::park_timeout(Duration::from_millis(40));

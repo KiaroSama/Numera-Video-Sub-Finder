@@ -20,25 +20,25 @@ pub fn coverage(input: &Path, output: &Path) -> Result<()> {
                 .strip_prefix(&(root.clone() + "/"))
                 .filter(|p| p.starts_with("crates/") && p.contains("/src/"))
                 .map(str::to_owned);
-        } else if let Some(data) = line.strip_prefix("DA:") {
-            if let Some(name) = &current {
-                let mut fields = data.split(',');
-                let number = fields
-                    .next()
-                    .ok_or("Missing coverage line")?
-                    .parse::<u64>()?;
-                let hit = fields
-                    .next()
-                    .ok_or("Missing coverage count")?
-                    .parse::<u64>()?
-                    > 0;
-                files
-                    .entry(name.clone())
-                    .or_default()
-                    .entry(number)
-                    .and_modify(|old| *old |= hit)
-                    .or_insert(hit);
-            }
+        } else if let Some(data) = line.strip_prefix("DA:")
+            && let Some(name) = &current
+        {
+            let mut fields = data.split(',');
+            let number = fields
+                .next()
+                .ok_or("Missing coverage line")?
+                .parse::<u64>()?;
+            let hit = fields
+                .next()
+                .ok_or("Missing coverage count")?
+                .parse::<u64>()?
+                > 0;
+            files
+                .entry(name.clone())
+                .or_default()
+                .entry(number)
+                .and_modify(|old| *old |= hit)
+                .or_insert(hit);
         }
     }
     if files.is_empty() {

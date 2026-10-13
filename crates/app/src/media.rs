@@ -111,19 +111,19 @@ pub fn decode(
         decoder.height(),
         Flags::BILINEAR,
     )?;
-    if start_ms > 0 {
-        if let Some(origin) = origin {
-            let offset = i64::try_from(start_ms)
-                .map_err(|_| fail("Seek time overflow"))?
-                .checked_mul(1000)
-                .ok_or_else(|| fail("Seek time overflow"))?;
-            let timestamp = origin
-                .micros()
-                .checked_add(offset)
-                .ok_or_else(|| fail("Seek time overflow"))?;
-            input.seek(timestamp, ..timestamp)?;
-            decoder.flush();
-        }
+    if start_ms > 0
+        && let Some(origin) = origin
+    {
+        let offset = i64::try_from(start_ms)
+            .map_err(|_| fail("Seek time overflow"))?
+            .checked_mul(1000)
+            .ok_or_else(|| fail("Seek time overflow"))?;
+        let timestamp = origin
+            .micros()
+            .checked_add(offset)
+            .ok_or_else(|| fail("Seek time overflow"))?;
+        input.seek(timestamp, ..timestamp)?;
+        decoder.flush();
     }
     let mut origin = origin;
     let mut last = None;

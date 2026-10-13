@@ -1,6 +1,6 @@
 # macOS build and distribution
 
-Build only in GitHub Actions on macOS 15 Intel and Apple Silicon hosted runners. The declared minimum deployment target is macOS 13; a build on macOS 15 is not runtime evidence for 13. Pinned native FFmpeg/Tesseract dynamic dependencies are built via vcpkg; hosted build prerequisites include NASM and the autoconf/autoconf-archive/automake/libtool toolchain. ONNX Runtime API31 uses an official ARM64 archive and an exact 1.31 source build on Intel, with telemetry disabled.
+Build only in GitHub Actions on macOS 15 Intel and Apple Silicon hosted runners. The declared minimum deployment target is macOS 13; a build on macOS 15 is not runtime evidence for 13. Pinned native FFmpeg/Tesseract dynamic dependencies are built via vcpkg; hosted build prerequisites include NASM and the autoconf/autoconf-archive/automake/libtool toolchain. Fontconfig is an explicit pinned vcpkg dependency so subtitle/font libraries cannot silently depend on Homebrew's install path. ONNX Runtime API31 uses an official ARM64 archive and an exact 1.31 source build on Intel, with telemetry disabled.
 
 Cargo executables use @executable_path/runtimes. Native dylib identities use @rpath/name and internal dependencies use @loader_path/name. Bundle resources contain matching runtimes/models/notices; GUI/CLI paths resolve the app's Contents layout without developer search-path overrides. Official ICNS is generated in CI.
 

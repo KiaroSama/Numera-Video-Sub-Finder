@@ -96,13 +96,12 @@ impl Log {
             Utc::now().format("%Y-%m-%d %H:%M:%S UTC")
         );
         if let Some(f) = &self.file {
-            if let Ok(mut f) = f.lock() {
-                if f.write_all(line.as_bytes())
+            if let Ok(mut f) = f.lock()
+                && f.write_all(line.as_bytes())
                     .and_then(|_| f.flush())
                     .is_err()
-                {
-                    eprintln!("WARNING: Diagnostic log write failed");
-                }
+            {
+                eprintln!("WARNING: Diagnostic log write failed");
             }
         } else {
             eprint!("{line}");
@@ -123,8 +122,8 @@ fn redact_fields(message: &str) -> String {
                 mask_next = true;
                 return word.to_string();
             }
-            if let Some((key, _)) = word.split_once(['=', ':']) {
-                if [
+            if let Some((key, _)) = word.split_once(['=', ':'])
+                && [
                     "token",
                     "password",
                     "secret",
@@ -133,9 +132,8 @@ fn redact_fields(message: &str) -> String {
                     "authorization",
                 ]
                 .contains(&key.to_ascii_lowercase().as_str())
-                {
-                    return format!("{key}=[REDACTED]");
-                }
+            {
+                return format!("{key}=[REDACTED]");
             }
             word.to_string()
         })
@@ -185,10 +183,10 @@ fn retain_logs(
 
 impl Drop for Log {
     fn drop(&mut self) {
-        if let Some(file) = &self.file {
-            if Arc::strong_count(file) == 1 {
-                self.event("INFO", "APP", "Shutdown; log handler closed");
-            }
+        if let Some(file) = &self.file
+            && Arc::strong_count(file) == 1
+        {
+            self.event("INFO", "APP", "Shutdown; log handler closed");
         }
     }
 }

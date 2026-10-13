@@ -92,7 +92,7 @@ try {
     $manifest = Get-Content -LiteralPath (Join-Path $root 'vcpkg.json') -Raw -Encoding utf8 | ConvertFrom-Json
     if ($manifest.'builtin-baseline' -ne $baseline) { throw 'Native manifest baseline differs from the reviewed source revision.' }
     if (-not (Test-Path -LiteralPath (Join-Path $overlay "$($target.triplet).cmake"))) { throw 'Required dynamic release overlay triplet is missing.' }
-    foreach ($entry in @{ VCPKG_DISABLE_METRICS = '1'; VCPKG_MAX_CONCURRENCY = '2'; CMAKE_BUILD_PARALLEL_LEVEL = '2'; CARGO_BUILD_JOBS = '2'; OMP_NUM_THREADS = '2'; VCPKG_DOWNLOADS = (Join-Path $work 'downloads'); VCPKG_DEFAULT_BINARY_CACHE = (Join-Path $work 'binary-cache'); TEMP = (Join-Path $work 'temp'); TMP = (Join-Path $work 'temp'); TMPDIR = (Join-Path $work 'temp'); GIT_TERMINAL_PROMPT = '0' }.GetEnumerator()) {
+    foreach ($entry in @{ VCPKG_DISABLE_METRICS = '1'; VCPKG_MAX_CONCURRENCY = '2'; CMAKE_BUILD_PARALLEL_LEVEL = '2'; MSBUILDDISABLENODEREUSE = '1'; MSBUILD_TELEMETRY_OPTOUT = '1'; CARGO_BUILD_JOBS = '2'; OMP_NUM_THREADS = '2'; VCPKG_DOWNLOADS = (Join-Path $work 'downloads'); VCPKG_DEFAULT_BINARY_CACHE = (Join-Path $work 'binary-cache'); TEMP = (Join-Path $work 'temp'); TMP = (Join-Path $work 'temp'); TMPDIR = (Join-Path $work 'temp'); GIT_TERMINAL_PROMPT = '0' }.GetEnumerator()) {
         [Environment]::SetEnvironmentVariable($entry.Key, $entry.Value, 'Process')
     }
     $env:VCPKG_ROOT = Join-Path $work 'vcpkg'
@@ -281,7 +281,10 @@ try {
     Invoke-NativeCommand -Name 'llama-checkout' -Executable 'git' -Arguments @('-C', $llamaSource, 'checkout', '--detach', $llamaCommit)
     $llamaBuild = Join-Path $work 'llama-build'
     $configure = @('-S', $llamaSource, '-B', $llamaBuild, '-DCMAKE_BUILD_TYPE=Release', '-DBUILD_SHARED_LIBS=OFF', '-DLLAMA_BUILD_IS_DEV=OFF', '-DLLAMA_BUILD_TOOLS=ON', '-DLLAMA_BUILD_TESTS=OFF', '-DLLAMA_BUILD_EXAMPLES=OFF', '-DLLAMA_BUILD_SERVER=OFF', '-DLLAMA_BUILD_APP=OFF', '-DLLAMA_OPENSSL=OFF', '-DLLAMA_SUBPROCESS=OFF', '-DMTMD_VIDEO=OFF', '-DGGML_NATIVE=OFF', '-DGGML_METAL=OFF', '-DGGML_BLAS=OFF', '-DGGML_CUDA=OFF', '-DGGML_OPENMP=OFF', '-DGGML_CPU_KLEIDIAI=OFF')
-    if ($IsWindows) { $configure += @('-A', $(if ($target.arch -eq 'arm64') { 'ARM64' } else { 'x64' })) }
+    if ($IsWindows) {
+        $configure += @('-A', $(if ($target.arch -eq 'arm64') { 'ARM64' } else { 'x64' }))
+        if ($target.arch -eq 'arm64') { $configure += @('-T', 'ClangCL', '-DGGML_CPU_ARM_ARCH=armv8-a') }
+    }
     elseif ($IsMacOS) { $configure += @('-DCMAKE_OSX_DEPLOYMENT_TARGET=13.0', $(if ($target.arch -eq 'arm64') { '-DCMAKE_OSX_ARCHITECTURES=arm64' } else { '-DCMAKE_OSX_ARCHITECTURES=x86_64' })) }
     Invoke-NativeCommand -Name 'llama-configure' -Executable 'cmake' -Arguments $configure -Wall 300 -Idle 120
     Invoke-NativeCommand -Name 'llama-build' -Executable 'cmake' -Arguments @('--build', $llamaBuild, '--config', 'Release', '--target', 'llama-mtmd-cli', '--parallel', '2') -Wall 3600 -Idle 600

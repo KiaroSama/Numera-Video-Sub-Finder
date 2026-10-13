@@ -209,16 +209,16 @@ pub fn run(
                                 r.confidence = None;
                             }
                         }
-                        if let Some(t) = &mut fallback {
-                            if let Ok(v) = t.recognize(&text_crop, bh > bw.saturating_mul(2)) {
-                                // Scores from different engines are not calibrated against each other.
-                                // A disagreement remains a primary candidate requiring manual review.
-                                if !r.text.trim().is_empty() && v.text.trim() != r.text.trim() {
-                                    r.confidence = None;
-                                } else if r.text.trim().is_empty() && !v.text.trim().is_empty() {
-                                    r.text = v.text;
-                                    r.confidence = None;
-                                }
+                        if let Some(t) = &mut fallback
+                            && let Ok(v) = t.recognize(&text_crop, bh > bw.saturating_mul(2))
+                        {
+                            // Scores from different engines are not calibrated against each other.
+                            // A disagreement remains a primary candidate requiring manual review.
+                            if !r.text.trim().is_empty() && v.text.trim() != r.text.trim() {
+                                r.confidence = None;
+                            } else if r.text.trim().is_empty() && !v.text.trim().is_empty() {
+                                r.text = v.text;
+                                r.confidence = None;
                             }
                         }
                     }
@@ -307,20 +307,20 @@ pub fn run(
         Ok(true)
     });
     let mut decoded = decoded;
-    if decoded.is_ok() {
-        if let Some(last) = pending.take() {
-            let mut end = last
-                .time_ms
-                .saturating_add(last.estimated_duration_ms.max(1));
-            if let Some(limit) = config.end_ms.or(media.duration_ms) {
-                end = end.min(limit);
-            }
-            decoded = if end <= last.time_ms {
-                Err(fail("No positive final frame duration"))
-            } else {
-                process(last, end)
-            };
+    if decoded.is_ok()
+        && let Some(last) = pending.take()
+    {
+        let mut end = last
+            .time_ms
+            .saturating_add(last.estimated_duration_ms.max(1));
+        if let Some(limit) = config.end_ms.or(media.duration_ms) {
+            end = end.min(limit);
         }
+        decoded = if end <= last.time_ms {
+            Err(fail("No positive final frame duration"))
+        } else {
+            process(last, end)
+        };
     }
     drop(process);
     project

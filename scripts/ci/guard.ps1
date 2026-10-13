@@ -52,14 +52,13 @@ public sealed class NvsfCiOwnership : IDisposable {
     [StructLayout(LayoutKind.Sequential)] struct Extended {
         public Basic basic; public Io io; public UIntPtr processMemory, jobMemory, peakProcess, peakJob;
     }
-    [StructLayout(LayoutKind.Sequential)] struct Accounting {
-        public long user, kernel, periodUser, periodKernel;
-        public uint faults, total, active, terminated;
-    }
     [DllImport("kernel32.dll", SetLastError=true)] static extern IntPtr CreateJobObject(IntPtr attrs, string name);
     [DllImport("kernel32.dll", SetLastError=true)] static extern bool SetInformationJobObject(IntPtr h, int type, ref Extended info, uint size);
     [DllImport("kernel32.dll", SetLastError=true)] static extern bool AssignProcessToJobObject(IntPtr h, IntPtr process);
-    [DllImport("kernel32.dll", SetLastError=true)] static extern bool QueryInformationJobObject(IntPtr h, int type, out Accounting info, uint size, IntPtr returned);
+    [DllImport("kernel32.dll", SetLastError=true)] static extern bool QueryInformationJobObject(IntPtr h, int type, IntPtr info, uint size, IntPtr returned);
+    [DllImport("kernel32.dll", SetLastError=true)] static extern IntPtr OpenProcess(uint access, bool inherit, uint pid);
+    [DllImport("kernel32.dll", SetLastError=true)] static extern bool IsProcessInJob(IntPtr process, IntPtr h, out bool inside);
+    [DllImport("kernel32.dll", SetLastError=true)] static extern uint WaitForSingleObject(IntPtr h, uint milliseconds);
     [DllImport("kernel32.dll", SetLastError=true)] static extern bool TerminateJobObject(IntPtr h, uint code);
     [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr h);
     [DllImport("libc", SetLastError=true)] static extern int kill(int pid, int sig);
@@ -76,9 +75,31 @@ public sealed class NvsfCiOwnership : IDisposable {
     }
     public void Assign(Process p) { if (!AssignProcessToJobObject(job, p.Handle)) throw new Win32Exception(); }
     public uint Active() {
-        Accounting a;
-        if (!QueryInformationJobObject(job, 1, out a, (uint)Marshal.SizeOf<Accounting>(), IntPtr.Zero)) throw new Win32Exception();
-        return a.active;
+        const int capacity = 4096;
+        int bytes = 8 + capacity * IntPtr.Size;
+        IntPtr buffer = Marshal.AllocHGlobal(bytes);
+        try {
+            if (!QueryInformationJobObject(job, 3, buffer, (uint)bytes, IntPtr.Zero)) throw new Win32Exception();
+            int assigned = Marshal.ReadInt32(buffer), count = Marshal.ReadInt32(buffer, 4);
+            if (assigned < 0 || assigned > capacity || count < 0 || count > capacity || count < assigned) throw new InvalidOperationException("Owned job process inventory exceeded its bound.");
+            uint active = 0;
+            for (int i = 0; i < count; i++) {
+                uint pid = checked((uint)Marshal.ReadIntPtr(buffer, 8 + i * IntPtr.Size).ToInt64());
+                IntPtr handle = OpenProcess(0x00101000, false, pid); // SYNCHRONIZE | QUERY_LIMITED_INFORMATION
+                if (handle == IntPtr.Zero) {
+                    if (Marshal.GetLastWin32Error() == 87) continue; // Exited before opening its handle.
+                    throw new Win32Exception();
+                }
+                try {
+                    if (!IsProcessInJob(handle, job, out bool inside)) throw new Win32Exception();
+                    if (!inside) continue; // PID reused by an unrelated process: never count or terminate it.
+                    uint state = WaitForSingleObject(handle, 0);
+                    if (state == 0x102) active++;
+                    else if (state != 0) throw new Win32Exception();
+                } finally { CloseHandle(handle); }
+            }
+            return active;
+        } finally { Marshal.FreeHGlobal(buffer); }
     }
     public void Terminate() { if (job != IntPtr.Zero && !TerminateJobObject(job, 124)) throw new Win32Exception(); }
     public void Dispose() { if (job != IntPtr.Zero) { CloseHandle(job); job = IntPtr.Zero; } }

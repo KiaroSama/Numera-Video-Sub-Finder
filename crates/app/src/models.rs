@@ -118,10 +118,10 @@ struct TessManifest {
 }
 
 pub fn install(paths: &Paths, selected: Option<&str>, cancel: &AtomicBool) -> Result<()> {
-    if let Some(id) = selected {
-        if !specs()?.iter().any(|s| s.id == id) {
-            return Err(fail("Unknown model identifier"));
-        }
+    if let Some(id) = selected
+        && !specs()?.iter().any(|s| s.id == id)
+    {
+        return Err(fail("Unknown model identifier"));
     }
     for spec in specs()?
         .into_iter()
