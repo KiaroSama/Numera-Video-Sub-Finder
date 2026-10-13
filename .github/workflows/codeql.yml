@@ -27,7 +27,7 @@ jobs:
           build-mode: none
           db-location: .ci-work/codeql/${{ matrix.language }}
           queries: security-extended
-      - uses: github/codeql-action/analyze@cee97f86b972a3ded3c58d04148362b193ddc518
+      - uses: github/codeql-action/analyze@24c54180a607b1449ed407dd24f251e4e9147c8d
         with:
           category: /language:${{ matrix.language }}
           output: .ci-work/codeql-results
