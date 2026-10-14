@@ -50,7 +50,7 @@ pub fn Models(ui: Ui) -> impl IntoView {
         });
     };
     view! {<section class="panel"><div class="panel-heading"><div><span class="eyebrow">"OFFLINE RESOURCES"</span><h2>"Recognition models"</h2></div>
-        <button data-testid="models-verify" disabled=move ||ui.busy.get() on:click=move |_|ui.request::<Vec<Model>>("model_catalog",json!({}),move |models|ui.models.set(models))>"Verify installed models"</button></div>
+        <button data-testid="models-verify" disabled=move ||ui.busy.get() on:click={move |_|ui.request::<Vec<Model>>("model_catalog",json!({}),move |models|ui.models.set(models))}>"Verify installed models"</button></div>
         <p class="muted">"Checksummed language resources. Downloads occur only when you explicitly install them. Interrupted downloads resume on the next explicit install; extraction stays local."</p>
         <Show when=move ||ui.models.with(Vec::is_empty)><p class="empty-list">"No catalog loaded. Verify models to see the actual installed state."</p></Show>
         {move ||ui.models.get().into_iter().map(|model|{

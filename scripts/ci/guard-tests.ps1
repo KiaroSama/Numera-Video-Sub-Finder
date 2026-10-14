@@ -126,6 +126,14 @@ exit 0
     }
     $progress = Join-Path $work 'buildlogs'
     [IO.Directory]::CreateDirectory($progress) | Out-Null
+    # An actual multi-port inventory exceeds one 128-entry sampler page without creating source-tree work.
+    for ($port = 0; $port -lt 43; $port++) {
+        $directory = Join-Path $progress "port-$port"
+        [IO.Directory]::CreateDirectory($directory) | Out-Null
+        for ($stage = 0; $stage -lt 4; $stage++) {
+            [IO.File]::WriteAllText((Join-Path $directory "stage-$stage.log"), 'owned baseline', $utf8)
+        }
+    }
     $quietCode = @'
 [IO.Directory]::CreateDirectory('buildlogs/ffmpeg/source/deep')|Out-Null
 for($i=0;$i -lt 1000;$i++) {

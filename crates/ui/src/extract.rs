@@ -52,7 +52,7 @@ pub fn Extract(ui: Ui) -> impl IntoView {
                     <label class="check"><input type="checkbox" prop:checked=move || ui.config.with(|c|c.overwrite) on:change=move |e|ui.config.update(|c|c.overwrite=event_target_checked(&e))/><span>"Allow replacing the selected output"</span></label>
                 </details>
                 <hr/><span class="eyebrow">"03 / DESTINATION"</span>
-                <button class="wide" disabled=move || ui.busy.get() on:click=move |_|ui.request::<Option<crate::ipc::Destination>>("choose_output",json!({}),move |d|if let Some(d)=d{ui.output.set(Some(d));})>"Choose SRT destination"</button>
+                <button class="wide" disabled=move || ui.busy.get() on:click={move |_|ui.request::<Option<crate::ipc::Destination>>("choose_output",json!({}),move |d|if let Some(d)=d{ui.output.set(Some(d));})}>"Choose SRT destination"</button>
                 <p class="hint" dir="auto">{move ||ui.output.with(|d|d.as_ref().map(|d|d.name.clone()).unwrap_or_else(||"Choose where to save your subtitles.".into()))}</p>
                 <div class="action-stack">
                     <button id="extract-start" class="primary wide" disabled=move ||ui.busy.get()||ui.active()||ui.source.with(Option::is_none)||ui.output.with(Option::is_none) on:click=move |_|if let Some(q)=ui.current_queue(){ui.begin(q);}>"Extract subtitles"</button>
@@ -123,20 +123,20 @@ fn Regions(ui: Ui) -> impl IntoView {
             <p class="hint">"Normalized x,y,width,height (0–1). The initial bottom region is a manual starting point, not a detected subtitle. Draw on the preview or edit coordinates."</p>
             <div class="region-list">{move ||ui.config.with(|c|c.regions.iter().copied().enumerate().map(|(i,r)|view!{
                 <label class="region-row"><span>{format!("Region {}",i+1)}</span><input aria-label=format!("Region {} normalized coordinates",i+1) prop:value=format!("{:.4},{:.4},{:.4},{:.4}",r.x,r.y,r.width,r.height)
-                    on:change=move |e|match event_target_value(&e).parse::<Rect>(){Ok(r)=>ui.config.update(|c|if let Some(old)=c.regions.get_mut(i){*old=r;}),Err(e)=>ui.error.set(Some(e.to_string()))}/>
+                    on:change={move |e|match event_target_value(&e).parse::<Rect>(){Ok(r)=>ui.config.update(|c|if let Some(old)=c.regions.get_mut(i){*old=r;}),Err(e)=>ui.error.set(Some(e.to_string()))}}/>
                     <button aria-label=format!("Remove region {}",i+1) on:click=move |_|ui.config.update(|c|if c.regions.len()>1&&i<c.regions.len(){c.regions.remove(i);})>"Remove"</button></label>
             }).collect_view())}</div>
             <div class="region-list">{move ||ui.config.with(|c|c.exclusions.iter().copied().enumerate().map(|(i,r)|view!{
                 <label class="region-row"><span>{format!("Exclude {}",i+1)}</span><input aria-label=format!("Exclusion {} normalized coordinates",i+1) prop:value=format!("{:.4},{:.4},{:.4},{:.4}",r.x,r.y,r.width,r.height)
-                    on:change=move |e|match event_target_value(&e).parse::<Rect>(){Ok(r)=>ui.config.update(|c|if let Some(old)=c.exclusions.get_mut(i){*old=r;}),Err(e)=>ui.error.set(Some(e.to_string()))}/>
+                    on:change={move |e|match event_target_value(&e).parse::<Rect>(){Ok(r)=>ui.config.update(|c|if let Some(old)=c.exclusions.get_mut(i){*old=r;}),Err(e)=>ui.error.set(Some(e.to_string()))}}/>
                     <button aria-label=format!("Remove exclusion {}",i+1) on:click=move |_|ui.config.update(|c|if i<c.exclusions.len(){c.exclusions.remove(i);})>"Remove"</button></label>
             }).collect_view())}</div>
             <div class="region-add"><label for="new-region" class="sr-only">"New normalized region coordinates"</label>
                 <input id="new-region" prop:value=move ||value.get() on:input=move |e|value.set(event_target_value(&e))/>
                 <label class="check"><input type="checkbox" on:change=move |e|exclude.set(event_target_checked(&e))/><span>"Exclude"</span></label>
-                <button on:click=move |_|match value.get_untracked().parse::<Rect>(){
+                <button on:click={move |_|match value.get_untracked().parse::<Rect>(){
                     Ok(r)=>ui.config.update(|c|{let regions=if exclude.get_untracked(){&mut c.exclusions}else{&mut c.regions};let max=if exclude.get_untracked(){32}else{8};if regions.len()<max{regions.push(r);}else{ui.error.set(Some("Region limit reached (8 regions / 32 exclusions)".into()));}}),Err(e)=>ui.error.set(Some(e.to_string()))
-                }>"Add region"</button>
+                }}>"Add region"</button>
             </div>
         </details>
     }

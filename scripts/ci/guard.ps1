@@ -74,7 +74,9 @@ public sealed class NvsfCiOwnership : IDisposable {
         }
     }
     public void Assign(Process p) { if (!AssignProcessToJobObject(job, p.Handle)) throw new Win32Exception(); }
-    public uint Active() {
+    public string LiveProcesses { get; private set; } = "";
+    public uint Active(bool collectNames = false) {
+        var live = collectNames ? new System.Collections.Generic.List<string>() : null;
         const int capacity = 4096;
         int bytes = 8 + capacity * IntPtr.Size;
         IntPtr buffer = Marshal.AllocHGlobal(bytes);
@@ -94,66 +96,93 @@ public sealed class NvsfCiOwnership : IDisposable {
                     if (!IsProcessInJob(handle, job, out bool inside)) throw new Win32Exception();
                     if (!inside) continue; // PID reused by an unrelated process: never count or terminate it.
                     uint state = WaitForSingleObject(handle, 0);
-                    if (state == 0x102) active++;
-                    else if (state != 0) throw new Win32Exception();
+                    if (state == 0x102) {
+                        active++;
+                        if (!collectNames) continue;
+                        string name;
+                        try {
+                            using var process = Process.GetProcessById(checked((int)pid));
+                            name = process.ProcessName;
+                        } catch (ArgumentException) { name = "exited-during-name-read"; }
+                        catch (InvalidOperationException) { name = "unavailable"; }
+                        catch (Win32Exception) { name = "unavailable"; }
+                        live.Add($"{pid}:{name}");
+                    } else if (state != 0) throw new Win32Exception();
                 } finally { CloseHandle(handle); }
             }
+            if (collectNames) LiveProcesses = string.Join(",", live);
             return active;
         } finally { Marshal.FreeHGlobal(buffer); }
     }
     public void Terminate() { if (job != IntPtr.Zero && !TerminateJobObject(job, 124)) throw new Win32Exception(); }
     public void Dispose() { if (job != IntPtr.Zero) { CloseHandle(job); job = IntPtr.Zero; } }
 }
-public sealed class NvsfCiFileProgress {
+public sealed class NvsfCiFileProgress : IDisposable {
     readonly string root;
     readonly Stopwatch clock = Stopwatch.StartNew();
-    System.Collections.Generic.Dictionary<string, (long size, long written)> previous;
-    double lastSample;
+    System.Collections.Generic.Dictionary<string, (long size, long written)> previous = new(StringComparer.Ordinal);
+    System.Collections.Generic.Dictionary<string, (long size, long written)> current = new(StringComparer.Ordinal);
+    System.Collections.Generic.IEnumerator<System.IO.DirectoryInfo> ports;
+    System.Collections.Generic.IEnumerator<System.IO.FileInfo> files;
+    bool baseline = true;
+    int directories;
+    double lastSample = -250;
     public NvsfCiFileProgress(string path) {
         root = path;
-        previous = Sample();
-        lastSample = clock.Elapsed.TotalMilliseconds;
+        try { BeginCycle(); } catch { Dispose(); throw; }
     }
-    System.Collections.Generic.Dictionary<string, (long size, long written)> Sample() {
-        var elapsed = Stopwatch.StartNew();
-        var result = new System.Collections.Generic.Dictionary<string, (long size, long written)>(StringComparer.Ordinal);
-        var directories = new System.Collections.Generic.List<System.IO.DirectoryInfo> { new System.IO.DirectoryInfo(root) };
-        foreach (var directory in directories[0].EnumerateDirectories()) {
-            if (directories.Count >= 513 || elapsed.Elapsed.TotalSeconds >= 1)
-                throw new InvalidOperationException("Owned build log directory inventory exceeded its bound.");
-            directories.Add(directory);
-        }
-        // vcpkg writes stage logs directly in each port directory; never walk extracted source trees.
-        foreach (var directory in directories) {
-            directory.Refresh();
-            if (!directory.Exists || (directory.Attributes & System.IO.FileAttributes.ReparsePoint) != 0)
-                throw new InvalidOperationException("Owned build log directory is missing or linked.");
-            foreach (var file in directory.EnumerateFiles("*.log")) {
-                if (result.Count >= 8192 || elapsed.Elapsed.TotalSeconds >= 1)
-                    throw new InvalidOperationException("Owned build log file inventory exceeded its bound.");
-                file.Refresh();
-                if (!file.Exists) continue;
-                if ((file.Attributes & System.IO.FileAttributes.ReparsePoint) != 0)
-                    throw new InvalidOperationException("Owned build log file may not be linked.");
-                result.Add(file.FullName, (file.Length, file.LastWriteTimeUtc.Ticks));
-            }
-        }
-        if (elapsed.Elapsed.TotalSeconds >= 1)
-            throw new InvalidOperationException("Owned build log metadata sample exceeded its deadline.");
-        return result;
+    void SelectDirectory(System.IO.DirectoryInfo directory) {
+        if (!directory.Exists || (directory.Attributes & System.IO.FileAttributes.ReparsePoint) != 0)
+            throw new InvalidOperationException("Owned build log directory is missing or linked.");
+        files = directory.EnumerateFiles("*.log").GetEnumerator();
+    }
+    void BeginCycle() {
+        var directory = new System.IO.DirectoryInfo(root);
+        directories = 1;
+        SelectDirectory(directory);
+        ports = directory.EnumerateDirectories().GetEnumerator();
     }
     public bool Consume() {
         if (clock.Elapsed.TotalMilliseconds - lastSample < 250) return false;
-        var current = Sample();
+        var elapsed = Stopwatch.StartNew();
         bool changed = false;
-        foreach (var entry in current) {
-            if (previous.TryGetValue(entry.Key, out var old)) changed |= old != entry.Value;
-            else changed |= entry.Value.size > 0;
+        // Advance only a small shallow page; a whole buildtree never blocks one guard tick.
+        for (int entries = 0; entries < 128 && elapsed.ElapsedMilliseconds < 100; entries++) {
+            if (files.MoveNext()) {
+                var file = files.Current;
+                if (current.Count >= 8192)
+                    throw new InvalidOperationException("Owned build log file count exceeded maximum=8192.");
+                // EnumerateFiles prepopulates fresh attributes, size and write time; Refresh repeats that I/O.
+                if ((file.Attributes & System.IO.FileAttributes.ReparsePoint) != 0)
+                    throw new InvalidOperationException("Owned build log may not be linked.");
+                var value = (file.Length, file.LastWriteTimeUtc.Ticks);
+                current.Add(file.FullName, value);
+                if (!baseline)
+                    changed |= previous.TryGetValue(file.FullName, out var old) ? old != value : value.Item1 > 0;
+            } else {
+                files.Dispose(); files = null;
+                if (ports.MoveNext()) {
+                    if (++directories > 513)
+                        throw new InvalidOperationException("Owned build log directory count exceeded maximum=513.");
+                    SelectDirectory(ports.Current);
+                } else {
+                    ports.Dispose(); ports = null;
+                    previous = current;
+                    current = new(StringComparer.Ordinal);
+                    baseline = false;
+                    BeginCycle();
+                    break;
+                }
+            }
+            if (elapsed.ElapsedMilliseconds >= 1000)
+                throw new InvalidOperationException($"Owned build log metadata operation exceeded maximum_ms=1000 elapsed_ms={elapsed.ElapsedMilliseconds} directories={directories} files={current.Count}.");
         }
-        previous = current;
+        if (elapsed.ElapsedMilliseconds >= 1000)
+            throw new InvalidOperationException($"Owned build log metadata operation exceeded maximum_ms=1000 elapsed_ms={elapsed.ElapsedMilliseconds}.");
         lastSample = clock.Elapsed.TotalMilliseconds;
         return changed;
     }
+    public void Dispose() { files?.Dispose(); ports?.Dispose(); }
 }
 '@
 }
@@ -295,7 +324,8 @@ os.execv(exe, [exe, *argv])
             $descendants = if ($IsWindows) { $job.Active() } else { [int]([NvsfCiOwnership]::SignalGroup($group, 0) -eq 0) }
             if ($descendants -eq 0 -and -not $reads[0] -and -not $reads[1]) { $code = $exitCode; break }
             if (($stopwatch.Elapsed.TotalSeconds - $exitObserved) -ge 2) {
-                throw "Owned root exited without bounded stream/tree completion; rejecting leaked process tree. root_exit_code=$exitCode live_tree=$descendants stdout_pending=$([bool]$reads[0]) stderr_pending=$([bool]$reads[1])"
+                if ($IsWindows) { $job.Active($true) | Out-Null }
+                throw "Owned root exited without bounded stream/tree completion; rejecting leaked process tree. root_exit_code=$exitCode live_tree=$descendants stdout_pending=$([bool]$reads[0]) stderr_pending=$([bool]$reads[1]) live_processes=$(if($IsWindows){$job.LiveProcesses}else{'group-present'})"
             }
         }
         if ($stopwatch.Elapsed.TotalSeconds -ge $WallSeconds -or ($stopwatch.Elapsed.TotalSeconds - $lastProgress) -ge $IdleSeconds) {
@@ -339,6 +369,7 @@ os.execv(exe, [exe, *argv])
             Write-GuardLog 'INFO' "Cleanup verified pid=$ownedPid"
         }
     } catch { $code = 1; [Console]::Error.WriteLine("Cleanup failure: $($_.Exception.Message)") }
+    if ($fileProgress) { $fileProgress.Dispose() }
     if ($job) { $job.Dispose() }
     $process.Dispose()
     foreach ($path in @($gate, $ready)) { if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Force } }

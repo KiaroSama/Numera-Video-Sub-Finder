@@ -165,7 +165,7 @@ fn App(initial_theme: String) -> impl IntoView {
             <div class="workspace">
                 <header class="topbar"><div><span class="eyebrow">"NUMERA / WORKSPACE"</span><h1>{move ||ui.route.get()}</h1></div>
                     <div class="topbar-actions"><Show when=move ||ui.busy.get()><span role="status" class="muted">"Native operation in progress…"</span></Show>
-                        <button title="Open a saved review project" disabled=move ||ui.busy.get()||ui.active() on:click=move |_|ui.request::<Option<nvsf_core::Project>>("pick_project",json!({}),move |p|if let Some(p)=p{ui.load(p);})>"Open project"</button>
+                        <button title="Open a saved review project" disabled=move ||ui.busy.get()||ui.active() on:click={move |_|ui.request::<Option<nvsf_core::Project>>("pick_project",json!({}),move |p|if let Some(p)=p{ui.load(p);})}>"Open project"</button>
                         <label class="sr-only" for="header-theme">"Workspace theme"</label><select id="header-theme" class="theme-select" prop:value=move ||ui.theme.get() on:change=move |e|ui.set_theme(event_target_value(&e))>
                             <option value="system">"System"</option><option value="dark">"Dark"</option><option value="light">"Light"</option>
                         </select>

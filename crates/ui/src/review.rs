@@ -37,7 +37,7 @@ pub fn Review(ui: Ui) -> impl IntoView {
     view! {
         <Show when=move ||ui.project.with(Option::is_some) fallback=move ||view!{
             <section class="panel empty-state"><h2>"No review project open"</h2><p>"Extract a video or open a saved project. Original OCR and corrected text stay separate."</p>
-                <button class="primary" on:click=move |_|ui.request::<Option<nvsf_core::Project>>("pick_project",json!({}),move |p|if let Some(p)=p{ui.load(p);}) disabled=move ||ui.busy.get()>"Open project"</button></section>
+                <button class="primary" on:click={move |_|ui.request::<Option<nvsf_core::Project>>("pick_project",json!({}),move |p|if let Some(p)=p{ui.load(p);})} disabled=move ||ui.busy.get()>"Open project"</button></section>
         }>
             <div class="review-toolbar panel">
                 <label class="search"><span class="sr-only">"Search cue text"</span><input type="search" placeholder="Search subtitles…" prop:value=move ||query.get() on:input=move |e|{query.set(event_target_value(&e));scroll.set(0);}/></label>
