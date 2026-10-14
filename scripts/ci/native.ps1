@@ -105,8 +105,41 @@ try {
     if ($IsWindows) {
         $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
         if (-not (Test-Path -LiteralPath $vswhere)) { throw 'Hosted Visual Studio discovery tool is missing.' }
-        $vs = Invoke-NativeCommand -Name 'vs-discovery' -Executable $vswhere -Arguments @('-latest', '-products', '*', '-property', 'installationPath') -Capture
+        $component = if ($hostArch -eq 'arm64') { 'Microsoft.VisualStudio.Component.VC.Tools.ARM64' } else { 'Microsoft.VisualStudio.Component.VC.Tools.x86.x64' }
+        $vs = Invoke-NativeCommand -Name 'vs-discovery' -Executable $vswhere -Arguments @('-latest', '-products', '*', '-requires', $component, '-property', 'installationPath') -Capture
         if (-not $vs -or -not (Test-Path -LiteralPath $vs)) { throw 'Hosted Visual Studio installation was not found.' }
+        $devShell = Join-Path $vs 'Common7/Tools/Launch-VsDevShell.ps1'
+        if (-not (Test-Path -LiteralPath $devShell -PathType Leaf)) { throw 'Installed Visual Studio developer environment entry point is missing.' }
+        $devArchitecture = if ($hostArch -eq 'arm64') { 'arm64' } else { 'amd64' }
+        $devPath = [Convert]::ToBase64String($utf8.GetBytes($devShell))
+        # Capture only compiler variables; never export the runner's complete environment or replace owned temp roots.
+        $devCode = @"
+`$ErrorActionPreference = 'Stop'
+`$path = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('$devPath'))
+& `$path -Arch $devArchitecture -HostArch $devArchitecture -SkipAutomaticLocation 6>`$null | Out-Null
+`$record = @{}
+foreach (`$name in @('PATH','INCLUDE','LIB','LIBPATH','VCINSTALLDIR','VCToolsInstallDir','VCToolsVersion','VSINSTALLDIR','WindowsSdkDir','WindowsSDKVersion','WindowsSdkBinPath','WindowsSdkVerBinPath','UniversalCRTSdkDir','UCRTVersion','VSCMD_ARG_HOST_ARCH','VSCMD_ARG_TGT_ARCH')) {
+    `$value = [Environment]::GetEnvironmentVariable(`$name, 'Process')
+    if (`$value) { `$record[`$name] = `$value }
+}
+[Console]::OutputEncoding = [Text.UTF8Encoding]::new(`$false)
+[Console]::WriteLine((ConvertTo-Json `$record -Compress))
+"@
+        $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($devCode))
+        $developer = Invoke-NativeCommand -Name 'vs-environment' -Executable 'pwsh' -Arguments @('-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', $encoded) -Wall 60 -Idle 30 -Capture | ConvertFrom-Json -AsHashtable
+        foreach ($key in @('PATH','INCLUDE','LIB','VCINSTALLDIR','WindowsSdkDir','WindowsSDKVersion','VSCMD_ARG_HOST_ARCH','VSCMD_ARG_TGT_ARCH')) {
+            if (-not $developer.ContainsKey($key) -or -not $developer[$key]) { throw "Installed developer environment omitted required compiler field: $key." }
+        }
+        if (($developer.VSCMD_ARG_HOST_ARCH -replace '^amd64$', 'x64') -ne $hostArch -or ($developer.VSCMD_ARG_TGT_ARCH -replace '^amd64$', 'x64') -ne $hostArch) { throw 'Developer environment host/target architecture mismatches the native runner.' }
+        $includePaths = @($developer.INCLUDE -split ';' | Where-Object { $_ })
+        foreach ($header in @('errno.h', 'windows.h')) {
+            if (-not @($includePaths | Where-Object { Test-Path -LiteralPath (Join-Path $_ $header) -PathType Leaf }).Count) { throw "Installed developer environment cannot resolve required header: $header." }
+        }
+        foreach ($entry in $developer.GetEnumerator()) { Export-CiEnvironment $entry.Key $entry.Value }
+        $compiler = Get-Command cl -CommandType Application -ErrorAction Stop | Select-Object -First 1
+        $machine = if ($hostArch -eq 'arm64') { 0xAA64 } else { 0x8664 }
+        if ((Get-PeMachine $compiler.Source) -ne $machine) { throw 'Developer environment resolved a non-native compiler executable.' }
+        Write-NativeLog 'INFO' "Developer environment verified host=$devArchitecture target=$devArchitecture sdk_headers=2 compiler_native=true"
         $candidates = @($env:LIBCLANG_PATH, (Join-Path $env:ProgramFiles 'LLVM/bin'), (Join-Path $vs 'VC/Tools/LLVM/ARM64/bin'), (Join-Path $vs 'VC/Tools/LLVM/x64/bin'), (Join-Path $vs 'VC/Tools/LLVM/bin'))
         $clang = Get-Command clang -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
         if ($clang) { $candidates += Split-Path $clang.Source -Parent }

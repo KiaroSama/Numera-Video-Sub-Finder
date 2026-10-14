@@ -285,7 +285,7 @@ fn run_worker(request: &Path, control_dir: &Path) -> Result<()> {
     let _ = watcher.join();
     match output {
         Ok(p) => {
-            emit(&worker::Event::Completed(p));
+            emit(&worker::Event::Completed(Box::new(p)));
             Ok(())
         }
         Err(e) => {

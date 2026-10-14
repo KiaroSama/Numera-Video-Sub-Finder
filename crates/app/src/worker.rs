@@ -14,7 +14,7 @@ use std::{
 #[serde(tag = "type", content = "data")]
 pub enum Event {
     Progress(Progress),
-    Completed(Project),
+    Completed(Box<Project>),
     Failed(String),
 }
 
@@ -142,7 +142,7 @@ pub fn supervise(
                     callback(progress);
                 }
                 Ok(Ok(Event::Completed(project))) => {
-                    output = Some(project);
+                    output = Some(*project);
                 }
                 Ok(Ok(Event::Failed(message))) => {
                     failure = Some(fail(message));

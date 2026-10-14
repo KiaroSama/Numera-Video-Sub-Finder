@@ -102,6 +102,47 @@ fn complete_partial_download_activates_without_network_and_bad_hash_preserves_mo
 }
 
 #[test]
+fn completed_worker_event_keeps_the_project_wire_shape_after_boxing() {
+    let project = nvsf_core::Project {
+        schema: 1,
+        source_hash: "source".into(),
+        config_hash: "config".into(),
+        model_hash: "model".into(),
+        config: nvsf_core::ExtractConfig {
+            input: "a.mp4".into(),
+            output: "a.srt".into(),
+            ..Default::default()
+        },
+        media: nvsf_core::MediaInfo {
+            width: 640,
+            height: 360,
+            duration_ms: Some(1000),
+            codec: "ffv1".into(),
+            time_base_num: 1,
+            time_base_den: 1000,
+            subtitle_streams: 0,
+            rotation: 0,
+        },
+        cues: vec![],
+        processed_ms: 1000,
+        active_appearances: vec![],
+        completed: true,
+        warnings: vec![],
+    };
+    let expected = serde_json::json!({"type":"Completed", "data": &project});
+    let event = nvsf_app::worker::Event::Completed(Box::new(project));
+    assert_eq!(serde_json::to_value(&event).unwrap(), expected);
+    let restored: nvsf_app::worker::Event = serde_json::from_value(expected).unwrap();
+    match restored {
+        nvsf_app::worker::Event::Completed(project) => {
+            assert_eq!(project.source_hash, "source");
+            assert!(project.completed);
+        }
+        _ => panic!("Completed wire event changed type"),
+    }
+}
+
+#[test]
 fn malformed_model_import_preserves_existing_bytes_and_unknown_ids_fail() {
     let dir = tempfile::tempdir().unwrap();
     let paths = Paths::new(Some(dir.path())).unwrap();

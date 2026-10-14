@@ -127,7 +127,7 @@ fn activate(partial: &Path, destination: &Path, bytes: u64, sha256: &str) -> Res
         .parent()
         .ok_or_else(|| fail("Missing model parent"))?;
     let mut tmp = tempfile::NamedTempFile::new_in(parent)?;
-    std::io::copy(&mut std::fs::File::open(&partial)?, &mut tmp)?;
+    std::io::copy(&mut std::fs::File::open(partial)?, &mut tmp)?;
     tmp.as_file().sync_all()?;
     if tmp.as_file().metadata()?.len() != bytes || hash_file(tmp.path())? != sha256 {
         return Err(fail(

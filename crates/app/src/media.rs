@@ -133,7 +133,7 @@ pub fn decode(
             let mut frame = Video::empty();
             match decoder.receive_frame(&mut frame) {
                 Ok(()) => {}
-                Err(ffmpeg::Error::Other { errno }) if errno == 11 => break,
+                Err(ffmpeg::Error::Other { errno: 11 }) => break,
                 Err(ffmpeg::Error::Eof) => break,
                 Err(e) => return Err(e.into()),
             }

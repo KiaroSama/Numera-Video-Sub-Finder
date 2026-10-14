@@ -78,7 +78,7 @@ jobs:
         timeout-minutes: 25
         run: |
           ./scripts/ci/guard.ps1 -Name miri-setup -WallSeconds 600 -IdleSeconds 120 -Executable cargo -Arguments @('+nightly-2026-10-12','miri','setup')
-          ./scripts/ci/guard.ps1 -Name miri-core -WallSeconds 1200 -IdleSeconds 180 -Executable cargo -Arguments @('+nightly-2026-10-12','miri','test','--locked','-p','nvsf-core','--test','contracts','--test','editing','--','--test-threads=2')
+          ./scripts/ci/guard.ps1 -Name miri-core -WallSeconds 1200 -IdleSeconds 180 -Executable cargo -Arguments @('+nightly-2026-10-12','miri','test','--locked','-p','nvsf-core','--test','contracts','--test','editing','--test','boundaries','--','--test-threads=2')
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         if: failure()
         with:

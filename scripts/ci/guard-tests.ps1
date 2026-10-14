@@ -127,18 +127,29 @@ exit 0
     $progress = Join-Path $work 'buildlogs'
     [IO.Directory]::CreateDirectory($progress) | Out-Null
     $quietCode = @'
-[IO.Directory]::CreateDirectory('buildlogs')|Out-Null
+[IO.Directory]::CreateDirectory('buildlogs/ffmpeg/source/deep')|Out-Null
+for($i=0;$i -lt 1000;$i++) {
+    [IO.File]::WriteAllText("buildlogs/ffmpeg/source/deep/unit-$i.c",'owned harmless source noise',[Text.UTF8Encoding]::new($false))
+}
 for($i=0;$i -lt 12;$i++) {
-    [IO.File]::AppendAllText('buildlogs/build.log',"completed-unit=$i`n",[Text.UTF8Encoding]::new($false))
+    [IO.File]::AppendAllText('buildlogs/ffmpeg/build.log',"completed-unit=$i`n",[Text.UTF8Encoding]::new($false))
     # Controlled quiet-build cadence exceeds the guard idle limit in total, not between writes.
     [Threading.Thread]::Sleep(500)
 }
 exit 0
 '@
     Invoke-Contract 'file-progress' $quietCode (Join-Path $work 'quiet.stdout') $progress
-    if ([IO.File]::ReadAllLines((Join-Path $progress 'build.log'), $utf8).Count -ne 12) { throw 'Quiet build did not complete every actual log write.' }
+    if ([IO.File]::ReadAllLines((Join-Path $progress 'ffmpeg/build.log'), $utf8).Count -ne 12) { throw 'Quiet build did not complete every actual log write.' }
     $rejected = $false
-    try { Invoke-Contract 'frozen-progress' '[Threading.Thread]::Sleep(60000); exit 0' (Join-Path $work 'frozen.stdout') $progress }
+    $frozenCode = @'
+$deadline=[DateTime]::UtcNow.AddSeconds(12)
+while([DateTime]::UtcNow -lt $deadline) {
+    [IO.File]::AppendAllText('buildlogs/ffmpeg/source/deep/noise.log',"source-not-build-progress`n",[Text.UTF8Encoding]::new($false))
+    [Threading.Thread]::Sleep(20)
+}
+exit 0
+'@
+    try { Invoke-Contract 'frozen-progress' $frozenCode (Join-Path $work 'frozen.stdout') $progress }
     catch { $rejected = $_.Exception.Message -match 'exit_code=124' }
     if (-not $rejected) { throw 'Existing unchanged build logs incorrectly reset the idle deadline.' }
     [Console]::WriteLine("Guard contracts passed: tests=$cases failed=0 skipped=0; Unicode, exit status, child cleanup, quiet log progress, frozen log timeout and platform process-handle semantics.")

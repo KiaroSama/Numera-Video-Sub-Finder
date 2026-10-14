@@ -172,7 +172,7 @@ fn retain_logs(
         }
         files.push((modified, path));
     }
-    files.sort_by(|a, b| b.0.cmp(&a.0));
+    files.sort_by_key(|a| std::cmp::Reverse(a.0));
     for (index, (modified, path)) in files.into_iter().enumerate() {
         if index >= 100 || cutoff.is_some_and(|c| modified < c) {
             std::fs::remove_file(path)?;
