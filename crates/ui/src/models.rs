@@ -55,7 +55,7 @@ pub fn Models(ui: Ui) -> impl IntoView {
         <Show when=move ||ui.models.with(Vec::is_empty)><p class="empty-list">"No catalog loaded. Verify models to see the actual installed state."</p></Show>
         {move ||ui.models.get().into_iter().map(|model|{
             let install_id=model.id.clone();let import_id=model.id.clone();let export_id=model.id.clone();let verified=model.verified;
-            view!{<article class="model-row" data-model-id=model.id.clone()><div><h3>{model.id}</h3><p class="hint">{format!("Languages: {}",model.languages.join(", "))}</p><p>{model.message}</p>
+            view!{<article class="model-row" data-model-id=model.id.clone()><div><h3>{model.id.clone()}</h3><p class="hint">{format!("Languages: {}",model.languages.join(", "))}</p><p>{model.message}</p>
                 <div class="button-row"><button data-testid="model-install" disabled=move ||ui.busy.get()||ui.active() on:click=move |_|install(Some(install_id.clone()))>"Install selected model"</button>
                     <button data-testid="model-import" disabled=move ||ui.busy.get()||ui.active() on:click=move |_|artifact("import_model",import_id.clone())>"Import ONNX…"</button>
                     <button data-testid="model-export" disabled=move ||ui.busy.get()||ui.active()||!verified on:click=move |_|artifact("export_model",export_id.clone())>"Export ONNX…"</button></div></div>

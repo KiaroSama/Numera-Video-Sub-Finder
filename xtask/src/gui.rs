@@ -175,6 +175,18 @@ pub fn smoke(gui: &Path, fixtures: &Path, data: &Path, output: &Path) -> Result<
             serde_json::to_vec_pretty(&styles)?,
         )?;
     }
+    driver.click("nav[aria-label='Workspace navigation'] .nav-item:nth-of-type(4)")?;
+    driver.wait(
+        "return document.querySelector('h1')?.textContent === 'Models';",
+        5,
+    )?;
+    driver.click("[data-testid=models-verify]")?;
+    driver.wait("return ['det','fa','en-ja','ja-specialist'].every(id=>{const row=document.querySelector(`[data-model-id='${id}']`);return row?.querySelector('h3')?.textContent===id && row.querySelector('[data-testid=model-install]') && row.querySelector('[data-testid=model-import]') && row.querySelector('[data-testid=model-export]');});", 30)?;
+    driver.click("nav[aria-label='Workspace navigation'] .nav-item:nth-of-type(1)")?;
+    driver.wait(
+        "return document.querySelector('h1')?.textContent === 'Extract';",
+        5,
+    )?;
     driver.select("#language", "en")?;
     driver.select("#device", "cpu")?;
     driver.select("#quality", "accurate")?;
@@ -209,7 +221,7 @@ pub fn smoke(gui: &Path, fixtures: &Path, data: &Path, output: &Path) -> Result<
     std::fs::write(
         output.join("gui-report.json"),
         serde_json::to_vec_pretty(
-            &json!({"schema":1,"source_sha":std::env::var("GITHUB_SHA")?,"target":std::env::var("NVSF_TARGET_ID")?,"passed":true,"tests":5,"failed":0,"skipped":0,"profile":"instrumented","proof":["native startup","fixed source admission and source frame","three persisted themes","actual worker extraction","Unicode edit and exported bytes"],"not_proved":["physical IME composition","production listener absence","real-language quality","platform installers"]}),
+            &json!({"schema":1,"source_sha":std::env::var("GITHUB_SHA")?,"target":std::env::var("NVSF_TARGET_ID")?,"passed":true,"tests":6,"failed":0,"skipped":0,"profile":"instrumented","proof":["native startup","fixed source admission and source frame","three persisted themes","model catalog IDs and controls","actual worker extraction","Unicode edit and exported bytes"],"not_proved":["physical IME composition","production listener absence","real-language quality","platform installers"]}),
         )?,
     )?;
     drop(driver);

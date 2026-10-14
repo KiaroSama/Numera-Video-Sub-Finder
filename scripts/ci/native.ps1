@@ -103,6 +103,21 @@ try {
     $actual = Invoke-NativeCommand -Name 'vcpkg-revision' -Executable 'git' -Arguments @('-C', $env:VCPKG_ROOT, 'rev-parse', 'HEAD') -Capture
     if ($actual -ne $baseline) { throw 'Pinned native dependency checkout verification failed.' }
     if ($IsWindows) {
+        # Microsoft documents this version-independent optional-telemetry policy; Policies is shared across WOW64 views.
+        $registry = [Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::LocalMachine, [Microsoft.Win32.RegistryView]::Registry64)
+        $policy = $null
+        try {
+            $policy = $registry.CreateSubKey('SOFTWARE\Policies\Microsoft\VisualStudio\SQM', $true)
+            if (-not $policy) { throw 'Hosted Visual Studio telemetry policy key could not be opened.' }
+            $policy.SetValue('OptIn', 0, [Microsoft.Win32.RegistryValueKind]::DWord)
+            $policy.Flush()
+            $policy.Dispose(); $policy = $registry.OpenSubKey('SOFTWARE\Policies\Microsoft\VisualStudio\SQM', $false)
+            if (-not $policy -or $policy.GetValueKind('OptIn') -ne [Microsoft.Win32.RegistryValueKind]::DWord -or $policy.GetValue('OptIn', $null) -ne 0) { throw 'Hosted Visual Studio telemetry opt-out readback failed.' }
+            Write-NativeLog 'INFO' 'Hosted Visual Studio optional telemetry policy verified OptIn=0; owned-tree checks remain mandatory.'
+        } finally {
+            if ($policy) { $policy.Dispose() }
+            $registry.Dispose()
+        }
         $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
         if (-not (Test-Path -LiteralPath $vswhere)) { throw 'Hosted Visual Studio discovery tool is missing.' }
         $component = if ($hostArch -eq 'arm64') { 'Microsoft.VisualStudio.Component.VC.Tools.ARM64' } else { 'Microsoft.VisualStudio.Component.VC.Tools.x86.x64' }

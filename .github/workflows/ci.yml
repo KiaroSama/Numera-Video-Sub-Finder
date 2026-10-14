@@ -107,8 +107,38 @@ jobs:
           $env:PATH = "$env:GITHUB_WORKSPACE/.ci-work/tools/bin$([IO.Path]::PathSeparator)$env:PATH"
       - name: Instrumented native GUI build
         run: |
-          ./scripts/ci/guard.ps1 -Name tauri-install -WallSeconds 1200 -IdleSeconds 180 -Executable cargo -Arguments @('install','tauri-cli','--version','2.12.2','--locked','--root','.ci-work/tools')
-          if ($LASTEXITCODE -ne 0) { throw 'Tauri CLI installation failed' }
+          if ($IsMacOS -and '${{ matrix.arch }}' -eq 'x64') {
+            $stage = Join-Path $env:GITHUB_WORKSPACE ('.ci-work/tools/tauri-stage-' + [Guid]::NewGuid().ToString('N'))
+            New-Item -ItemType Directory -Path $stage -ErrorAction Stop | Out-Null
+            $archive = Join-Path $stage 'tauri.zip'
+            ./scripts/ci/guard.ps1 -Name tauri-download -WallSeconds 210 -IdleSeconds 60 -Executable curl -Arguments @('--fail','--location','--proto','=https','--proto-redir','=https','--connect-timeout','30','--max-time','180','--output',$archive,'https://github.com/tauri-apps/tauri/releases/download/tauri-cli-v2.12.2/cargo-tauri-x86_64-apple-darwin.zip')
+            if ($LASTEXITCODE -ne 0) { throw 'Official Intel Tauri CLI download failed' }
+            if ((Get-Item -LiteralPath $archive).Length -ne 8453590 -or (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant() -ne '0f81160909873e2c37c1856d08be50603dc908acd67e08e4ee9c505b90ff5e16') { throw 'Official Tauri CLI archive identity mismatch' }
+            $zip = [IO.Compression.ZipFile]::OpenRead($archive)
+            try {
+              $expected = @('LICENSE-APACHE-2.0','LICENSE-MIT','README.md','cargo-tauri')
+              if ($zip.Entries.Count -ne $expected.Count) { throw 'Unexpected Tauri CLI archive inventory' }
+              foreach ($entry in $zip.Entries) {
+                if ($entry.FullName -notin $expected -or $entry.Length -lt 1 -or $entry.Length -gt 33554432 -or (($entry.ExternalAttributes -shr 16) -band 0xF000) -eq 0xA000) { throw 'Unsafe Tauri CLI archive entry' }
+              }
+              if (@($zip.Entries.FullName | Sort-Object -Unique).Count -ne $expected.Count) { throw 'Duplicate Tauri CLI archive entry' }
+            } finally { $zip.Dispose() }
+            $unpack = Join-Path $stage 'unpacked'
+            Expand-Archive -LiteralPath $archive -DestinationPath $unpack -ErrorAction Stop
+            $tool = Join-Path $unpack 'cargo-tauri'
+            ./scripts/ci/guard.ps1 -Name tauri-architecture -WallSeconds 15 -IdleSeconds 5 -Executable lipo -Arguments @('-archs',$tool) -CaptureStdoutPath (Join-Path $stage 'architecture.txt')
+            if ($LASTEXITCODE -ne 0 -or [IO.File]::ReadAllText((Join-Path $stage 'architecture.txt'),[Text.Encoding]::UTF8).Trim() -ne 'x86_64') { throw 'Tauri CLI is not the required native Intel binary' }
+            $bin = Join-Path $env:GITHUB_WORKSPACE '.ci-work/tools/bin/cargo-tauri'
+            Copy-Item -LiteralPath $tool -Destination $bin -ErrorAction Stop
+            ./scripts/ci/guard.ps1 -Name tauri-mode -WallSeconds 15 -IdleSeconds 5 -Executable chmod -Arguments @('755',$bin)
+            if ($LASTEXITCODE -ne 0) { throw 'Tauri CLI executable mode setup failed' }
+          } else {
+            ./scripts/ci/guard.ps1 -Name tauri-install -WallSeconds 1200 -IdleSeconds 180 -Executable cargo -Arguments @('install','tauri-cli','--version','2.12.2','--locked','--root','.ci-work/tools')
+            if ($LASTEXITCODE -ne 0) { throw 'Tauri CLI installation failed' }
+          }
+          ./scripts/ci/guard.ps1 -Name tauri-version -WallSeconds 15 -IdleSeconds 5 -Executable "$env:GITHUB_WORKSPACE/.ci-work/tools/bin/cargo-tauri$(if ($IsWindows) { '.exe' } else { '' })" -Arguments @('--version') -CaptureStdoutPath "$env:GITHUB_WORKSPACE/.ci-work/tools/tauri-version.txt"
+          if ($LASTEXITCODE -ne 0 -or [IO.File]::ReadAllText("$env:GITHUB_WORKSPACE/.ci-work/tools/tauri-version.txt",[Text.Encoding]::UTF8).Trim() -ne 'tauri-cli 2.12.2') { throw 'Installed Tauri CLI version mismatch' }
+          if ($IsMacOS -and '${{ matrix.arch }}' -eq 'x64') { Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction Stop }
           "$env:GITHUB_WORKSPACE/.ci-work/tools/bin" >> $env:GITHUB_PATH
           $env:PATH = "$env:GITHUB_WORKSPACE/.ci-work/tools/bin$([IO.Path]::PathSeparator)$env:PATH"
           cargo tauri icon assets/logo.png --output crates/desktop/icons
