@@ -64,10 +64,10 @@ impl Paths {
             std::fs::create_dir_all(d)?;
         }
         crate::models::seed_bundled(&paths)?;
-        if std::env::var_os("NVSF_RUNTIME_ROOT").is_none() {
-            if let Ok(Some(managed)) = crate::runtimes::managed(&paths) {
-                paths.runtimes = managed;
-            }
+        if std::env::var_os("NVSF_RUNTIME_ROOT").is_none()
+            && let Ok(Some(managed)) = crate::runtimes::managed(&paths)
+        {
+            paths.runtimes = managed;
         }
         Ok(paths)
     }

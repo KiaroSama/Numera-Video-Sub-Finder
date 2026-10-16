@@ -130,10 +130,10 @@ pub unsafe extern "C" fn nvsf_media_health_v1(
             source_sha: nvsf_core::BUILD_SOURCE_SHA.map(str::to_owned),
             versions,
             compiled_majors: MediaVersions {
-                avcodec: ffmpeg_next::ffi::LIBAVCODEC_VERSION_MAJOR,
-                avformat: ffmpeg_next::ffi::LIBAVFORMAT_VERSION_MAJOR,
-                avutil: ffmpeg_next::ffi::LIBAVUTIL_VERSION_MAJOR,
-                swscale: ffmpeg_next::ffi::LIBSWSCALE_VERSION_MAJOR,
+                avcodec: ffmpeg_next::ffi::LIBAVCODEC_VERSION_MAJOR as u32,
+                avformat: ffmpeg_next::ffi::LIBAVFORMAT_VERSION_MAJOR as u32,
+                avutil: ffmpeg_next::ffi::LIBAVUTIL_VERSION_MAJOR as u32,
+                swscale: ffmpeg_next::ffi::LIBSWSCALE_VERSION_MAJOR as u32,
             },
         };
         send_json(&health, callback, context)

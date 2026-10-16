@@ -112,6 +112,17 @@ function Repair-NativeClosure([string[]]$Seeds) {
                 $dep = $match.Groups[1].Value
                 if ($dep -match '^(vcruntime|msvcp|concrt|vccorlib|ucrtbase).*d\.dll$') { throw "Nonredistributable debug CRT import: $dep." }
                 $packaged = Join-Path $runtimes $dep
+                if ($dep -ieq 'xmllite.dll') {
+                    if (Test-Path -LiteralPath $packaged) { throw 'Windows-serviced XmlLite must not be redistributed in the runtime pack.' }
+                    $systemDirectory = [Environment]::GetFolderPath([Environment+SpecialFolder]::System)
+                    if (-not $systemDirectory) { throw 'Native Windows system directory is unavailable.' }
+                    $systemXml = Join-Path $systemDirectory 'xmllite.dll'
+                    if (-not (Test-Path -LiteralPath $systemXml -PathType Leaf)) { throw 'Required Windows-serviced XmlLite is missing.' }
+                    $machine = Get-PeMachine $systemXml
+                    $expected = if ($target.arch -eq 'arm64') { 0xAA64 } else { 0x8664 }
+                    if ($machine -ne $expected -and -not ($target.arch -eq 'arm64' -and $machine -eq 0xA64E)) { throw 'Windows-serviced XmlLite architecture is incompatible.' }
+                    continue
+                }
                 if (Test-Path -LiteralPath $packaged -PathType Leaf) { $queue.Enqueue($packaged); continue }
                 if ($dep -match '^(api-ms-|ext-ms-)|^(kernel32|kernelbase|ntdll|advapi32|bcrypt|bcryptprimitives|crypt32|ncrypt|secur32|wintrust|cryptsp|cryptbase|ws2_32|wsock32|mswsock|dnsapi|netapi32|wldap32|sechost|sspicli|user32|userenv|gdi32|gdi32full|ole32|oleaut32|combase|shell32|shlwapi|shcore|uxtheme|dwmapi|msimg32|winmm|avicap32|msvfw32|mf|mfplat|mfreadwrite|mfuuid|mmdevapi|avrt|d3d9|d3d10|d3d11|d3d12|dxgi|dxva2|dxcore|d2d1|dwrite|opengl32|glu32|windowscodecs|version|setupapi|cfgmgr32|comdlg32|comctl32|imm32|rpcrt4|psapi|dbghelp|imagehlp|iphlpapi|normaliz|powrprof|winhttp|wininet|wtsapi32|msvcrt|ucrtbase)\.dll$|^winspool\.drv$') { continue }
                 $crt = Join-Path $crtDirs[0].FullName $dep
