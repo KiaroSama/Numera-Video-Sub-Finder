@@ -188,7 +188,7 @@ jobs:
           ./scripts/ci/guard.ps1 -Name provision-models -WallSeconds 1200 -IdleSeconds 240 -Executable "$env:GITHUB_WORKSPACE/$xtask" -Arguments @('runtime-models','--data-root','.ci-work/data')
           if ($LASTEXITCODE -ne 0) { throw 'Model provisioning failed' }
           $ffmpeg = ".ci-work/native/installed/${{ matrix.triplet }}/tools/ffmpeg/ffmpeg$ext"
-          ./scripts/ci/guard.ps1 -Name generate-fixtures -WallSeconds 60 -IdleSeconds 30 -Executable "$env:GITHUB_WORKSPACE/$xtask" -Arguments @('fixtures','--ffmpeg',"$env:GITHUB_WORKSPACE/$ffmpeg",'--output','.ci-work/fixtures')
+          ./scripts/ci/guard.ps1 -Name generate-fixtures -WallSeconds 120 -IdleSeconds 60 -Executable "$env:GITHUB_WORKSPACE/$xtask" -Arguments @('fixtures','--ffmpeg',"$env:GITHUB_WORKSPACE/$ffmpeg",'--output','.ci-work/fixtures')
           if ($LASTEXITCODE -ne 0) { throw 'Fixture generation failed' }
           ./scripts/ci/guard.ps1 -Name cli-smoke -WallSeconds 210 -IdleSeconds 90 -Executable "$env:GITHUB_WORKSPACE/$xtask" -Arguments @('smoke','--cli',"target/release/nvsf$ext",'--fixture-dir','.ci-work/fixtures','--data-root','.ci-work/data')
           if ($LASTEXITCODE -ne 0) { throw 'Actual native extraction smoke failed' }
@@ -276,6 +276,10 @@ jobs:
           path: |
             .ci-work/logs/
             .ci-work/data/logs/
+            .ci-work/gui-evidence/
+            .ci-work/fixtures/
+            .ci-work/multilingual/*-extract.log
+            .ci-work/multilingual/*.srt
             .ci-work/native/vcpkg/buildtrees/ffmpeg/*.log
             .ci-work/native/vcpkg/buildtrees/ffmpeg/*/ffbuild/config.log
           if-no-files-found: ignore

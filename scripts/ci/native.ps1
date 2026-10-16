@@ -337,6 +337,20 @@ foreach (`$name in @('PATH','INCLUDE','LIB','LIBPATH','VCINSTALLDIR','VCToolsIns
         $libclang = @($candidates | Where-Object { $_ -and (Test-Path -LiteralPath (Join-Path $_ 'libclang.dll')) } | Where-Object { (Get-PeMachine (Join-Path $_ 'libclang.dll')) -eq $machine }) | Select-Object -First 1
         if (-not $libclang) { throw "No actual host-$hostArch libclang.dll found; bindgen cannot load a target-only compiler DLL." }
         Export-CiEnvironment 'LIBCLANG_PATH' $libclang
+        $llvm = @($candidates | Where-Object {
+            $directory = $_
+            $directory -and @('clang-cl.exe', 'llvm-lib.exe', 'lld-link.exe').Where({
+                $tool = Join-Path $directory $_
+                (Test-Path -LiteralPath $tool -PathType Leaf) -and (Get-PeMachine $tool) -eq $machine
+            }).Count -eq 3
+        }) | Select-Object -First 1
+        if (-not $llvm) { throw 'Native LLVM compiler, librarian and linker are required for owned Windows Rust builds.' }
+        $triple = $target.target.Replace('-', '_')
+        Export-CiEnvironment "CC_$triple" (Join-Path $llvm 'clang-cl.exe')
+        Export-CiEnvironment "CXX_$triple" (Join-Path $llvm 'clang-cl.exe')
+        Export-CiEnvironment "AR_$triple" (Join-Path $llvm 'llvm-lib.exe')
+        Export-CiEnvironment "CARGO_TARGET_$($triple.ToUpperInvariant())_LINKER" (Join-Path $llvm 'lld-link.exe')
+        Write-NativeLog 'INFO' "Windows Rust toolchain selected LLVM target=$($target.target) native_tools=3; actual owned-tree checks remain mandatory."
         Export-CiEnvironment 'VCPKG_VISUAL_STUDIO_PATH' $vs
         Invoke-NativeCommand -Name 'vcpkg-bootstrap' -Executable (Join-Path $env:VCPKG_ROOT 'bootstrap-vcpkg.bat') -Arguments @('-disableMetrics') -Wall 600 -Idle 180
     } else {

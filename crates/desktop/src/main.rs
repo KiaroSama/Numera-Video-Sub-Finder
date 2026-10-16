@@ -119,8 +119,12 @@ fn main() {
     let app = builder
         .build(tauri::generate_context!())
         .expect("Native desktop initialization failed");
-    let shutdown = app.state::<Host>().inner().clone();
-    app.run(move |app, event| match event {
+    app.run(move |app, event| {
+        // Tauri manages Host in setup during Ready, after Builder::build returns.
+        let Some(shutdown) = app.try_state::<Host>().map(|state| state.inner().clone()) else {
+            return;
+        };
+        match event {
         tauri::RunEvent::ExitRequested { api, .. } => {
             shutdown.0.closing.store(true, std::sync::atomic::Ordering::Release);
             if !shutdown.shutdown() {
@@ -161,5 +165,6 @@ fn main() {
             }
         }
         _ => {}
+        }
     });
 }

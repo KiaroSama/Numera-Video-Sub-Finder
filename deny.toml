@@ -25,3 +25,4 @@ wildcards = "deny"
 [sources]
 unknown-registry = "deny"
 unknown-git = "deny"
+allow-git = ["https://github.com/Choochmeque/tauri-plugin-webdriver"]

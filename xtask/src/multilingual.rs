@@ -172,6 +172,41 @@ fn download(
     Ok(())
 }
 
+pub fn provision_font(root: &Path, id: &str) -> Result<std::path::PathBuf> {
+    let font = FONTS
+        .iter()
+        .find(|font| font.id == id)
+        .ok_or("Unknown fixture font")?;
+    let client = reqwest::blocking::Client::builder()
+        .https_only(true)
+        .connect_timeout(Duration::from_secs(10))
+        .timeout(Duration::from_secs(30))
+        .redirect(reqwest::redirect::Policy::none())
+        .build()?;
+    for (kind, remote, local, bytes, hash) in [
+        ("font", font.name, "fixture.ttf", font.bytes, font.sha256),
+        (
+            "license",
+            "OFL.txt",
+            "OFL.txt",
+            font.license_bytes,
+            font.license_sha256,
+        ),
+    ] {
+        let directory = root.join("resources").join(font.id).join(kind);
+        std::fs::create_dir_all(&directory)?;
+        let url = format!(
+            "https://raw.githubusercontent.com/google/fonts/{FONT_REVISION}/ofl/{}/{remote}",
+            font.upstream
+        );
+        download(&client, &url, &directory.join(local), bytes, hash)?;
+    }
+    Ok(root
+        .join("resources")
+        .join(font.id)
+        .join("font/fixture.ttf"))
+}
+
 fn render(ffmpeg: &Path, root: &Path, case: &Case) -> Result<()> {
     let script = format!(
         "[Script Info]\nScriptType: v4.00+\nPlayResX: 640\nPlayResY: 360\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: Default,{},36,&H00000000,&H00000000,&H00FFFFFF,&H00FFFFFF,0,0,0,0,100,100,0,0,1,0,0,2,10,10,25,1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\nDialogue: 0,0:00:00.00,0:00:02.00,Default,,0,0,0,,{}\n",
@@ -362,35 +397,8 @@ pub fn verify(cli: &Path, ffmpeg: &Path, data_root: &Path, output: &Path) -> Res
         }
         models::verify(&paths, id)?;
     }
-    let client = reqwest::blocking::Client::builder()
-        .https_only(true)
-        .connect_timeout(Duration::from_secs(10))
-        .timeout(Duration::from_secs(30))
-        .redirect(reqwest::redirect::Policy::none())
-        .build()?;
     for font in &FONTS {
-        eprintln!(
-            "[INFO] [LANGUAGE-WITNESS] Verifying immutable font {}",
-            font.id
-        );
-        for (kind, remote, local, bytes, hash) in [
-            ("font", font.name, "fixture.ttf", font.bytes, font.sha256),
-            (
-                "license",
-                "OFL.txt",
-                "OFL.txt",
-                font.license_bytes,
-                font.license_sha256,
-            ),
-        ] {
-            let directory = root.join("resources").join(font.id).join(kind);
-            std::fs::create_dir_all(&directory)?;
-            let url = format!(
-                "https://raw.githubusercontent.com/google/fonts/{FONT_REVISION}/ofl/{}/{remote}",
-                font.upstream
-            );
-            download(&client, &url, &directory.join(local), bytes, hash)?;
-        }
+        provision_font(&root, font.id)?;
     }
     let mut rows = Vec::new();
     for case in &CASES {

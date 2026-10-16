@@ -1,12 +1,6 @@
 use nvsf_core::{Cue, export_srt, parse_srt};
 use sha2::{Digest, Sha256};
-use std::{
-    error::Error,
-    io::Read,
-    path::{Path, PathBuf},
-    process::Command,
-    time::Duration,
-};
+use std::{error::Error, io::Read, path::Path, process::Command, time::Duration};
 
 pub fn provision_models(root: &Path) -> Result<(), Box<dyn Error>> {
     let model_dir = root.join("models");
@@ -53,16 +47,7 @@ pub fn provision_models(root: &Path) -> Result<(), Box<dyn Error>> {
 
 pub fn generate(ffmpeg: &Path, output: &Path) -> Result<(), Box<dyn Error>> {
     std::fs::create_dir_all(output)?;
-    let font = if cfg!(windows) {
-        PathBuf::from("C:/Windows/Fonts/arial.ttf")
-    } else if cfg!(target_os = "macos") {
-        PathBuf::from("/System/Library/Fonts/Supplemental/Arial.ttf")
-    } else {
-        PathBuf::from("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf")
-    };
-    if !font.is_file() {
-        return Err("Fixture English font unavailable".into());
-    }
+    let font = crate::multilingual::provision_font(output, "latin")?;
     let cues = vec![
         Cue::new(1, 0, 0, 2000, "Hello world".into())?,
         Cue::new(2, 0, 3000, 5000, "Hello world".into())?,
@@ -92,6 +77,8 @@ pub fn generate(ffmpeg: &Path, output: &Path) -> Result<(), Box<dyn Error>> {
         "-hide_banner",
         "-loglevel",
         "error",
+        "-filter_threads",
+        "2",
         "-f",
         "lavfi",
         "-i",
@@ -100,6 +87,8 @@ pub fn generate(ffmpeg: &Path, output: &Path) -> Result<(), Box<dyn Error>> {
         &filter,
         "-c:v",
         "mpeg4",
+        "-threads",
+        "2",
         "-q:v",
         "2",
         "-y",
@@ -150,7 +139,11 @@ pub fn smoke(cli: &Path, fixture_dir: &Path, data_root: &Path) -> Result<(), Box
         .iter()
         .any(|c| c.text.to_lowercase().contains("hello"))
     {
-        return Err("OCR failed to recognize known visible Hello text".into());
+        let observed: Vec<_> = actual.iter().take(10).map(|cue| &cue.text).collect();
+        return Err(format!(
+            "OCR failed to recognize known visible Hello text; synthetic observations={observed:?}; evidence={}",
+            output.display()
+        ).into());
     }
     if actual.iter().any(|c| c.end_ms <= c.start_ms) {
         return Err("Invalid extracted timing".into());

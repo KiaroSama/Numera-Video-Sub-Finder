@@ -122,8 +122,12 @@ pub fn smoke(gui: &Path, fixtures: &Path, data: &Path, output: &Path) -> Result<
     let base = "http://127.0.0.1:4445".to_string();
     let ready = Instant::now() + Duration::from_secs(30);
     loop {
-        if process.status()?.is_some() {
-            return Err("GUI exited before driver readiness; inspect capture".into());
+        if let Some(status) = process.status()? {
+            return Err(format!(
+                "GUI exited before driver readiness: {status}; capture={}",
+                capture.display()
+            )
+            .into());
         }
         if client
             .get(format!("{base}/status"))
