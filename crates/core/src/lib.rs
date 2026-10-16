@@ -1,6 +1,9 @@
 mod edit;
 mod export;
 mod geometry;
+pub mod languages;
+pub mod maintenance;
+pub mod media_abi;
 mod time;
 mod tracking;
 mod types;
@@ -21,6 +24,8 @@ pub enum Error {
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
+
+pub const BUILD_SOURCE_SHA: Option<&str> = option_env!("GITHUB_SHA");
 
 pub fn normalize_persian(text: &str, enabled: bool) -> String {
     if enabled {

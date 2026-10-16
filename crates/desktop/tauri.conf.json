@@ -9,34 +9,58 @@
   },
   "app": {
     "withGlobalTauri": true,
-    "windows": [{
-      "label": "main",
-      "title": "Numera Video Sub Finder",
-      "width": 1280,
-      "height": 860,
-      "minWidth": 720,
-      "minHeight": 580,
-      "visible": false,
-      "dragDropEnabled": false
-    }],
+    "windows": [
+      {
+        "label": "main",
+        "title": "Numera Video Sub Finder",
+        "width": 1280,
+        "height": 860,
+        "minWidth": 720,
+        "minHeight": 580,
+        "visible": false,
+        "dragDropEnabled": false
+      }
+    ],
     "security": {
       "csp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; connect-src 'self' ipc: http://ipc.localhost; object-src 'none'; base-uri 'self'; frame-src 'none'",
-      "capabilities": ["workspace"]
+      "capabilities": [
+        "workspace"
+      ]
     }
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis", "app", "dmg", "appimage", "deb", "rpm"],
-    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"],
-    "resources": {"../../assets/logo.png": "assets/logo.png"},
+    "targets": [
+      "nsis",
+      "app",
+      "dmg",
+      "appimage",
+      "deb",
+      "rpm"
+    ],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "resources": {
+      "../../assets/logo.png": "assets/logo.png"
+    },
     "useLocalToolsDir": true,
     "createUpdaterArtifacts": false,
     "license": "GPL-3.0-or-later",
     "licenseFile": "../../LICENSE",
-    "macOS": {"minimumSystemVersion": "13.0"},
+    "macOS": {
+      "minimumSystemVersion": "13.0"
+    },
     "windows": {
       "allowDowngrades": false,
-      "webviewInstallMode": {"type": "downloadBootstrapper", "silent": true},
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper",
+        "silent": true
+      },
       "nsis": {
         "installMode": "currentUser",
         "installerIcon": "icons/icon.ico",
@@ -46,5 +70,15 @@
     "category": "Utility",
     "shortDescription": "Local hardcoded subtitle extraction and review",
     "longDescription": "Extract visible subtitles locally, review original source frames, and preserve timed Unicode corrections."
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDk5NDZDMDFGNjQ5MzczQkQKUldTOWM1TmtIOEJHbVlSVTMzalcvRUpLazc3RnZKTGZMRU96UTBZWTRUSHM3ZUE3bnRZRUtWNTIK",
+      "requireSignedVersion": true,
+      "allowDowngrades": false,
+      "endpoints": [
+        "https://github.com/KiaroSama/Numera-Video-Sub-Finder/releases/latest/download/latest.json"
+      ]
+    }
   }
 }

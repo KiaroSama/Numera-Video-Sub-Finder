@@ -66,6 +66,18 @@ fn complete_partial_download_activates_without_network_and_bad_hash_preserves_mo
     let partial = target.with_extension("partial");
     let hash = "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9";
     std::fs::write(&partial, b"hello world").unwrap();
+    assert!(matches!(
+        nvsf_app::model_download::install(
+            "https://invalid.example/model",
+            11,
+            hash,
+            &target,
+            &AtomicBool::new(true),
+        ),
+        Err(nvsf_app::AppError::Cancelled)
+    ));
+    assert!(!target.exists());
+    assert_eq!(std::fs::read(&partial).unwrap(), b"hello world");
     nvsf_app::model_download::install(
         "https://invalid.example/model",
         11,

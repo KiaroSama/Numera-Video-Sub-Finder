@@ -21,15 +21,18 @@ nvsf-app.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 image.workspace = true
-tauri = { version = "=2.12.3", features = [] }
-tauri-plugin-dialog = "=2.8.2"
+tempfile.workspace = true
+tokio = { version = "=1.53.3", features = ["time"] }
+tauri = { version = "=2.12.4", features = [] }
+tauri-plugin-dialog = "=2.8.3"
+tauri-plugin-updater = { version = "=2.14.0", default-features = false, features = ["rustls-tls"] }
 tauri-plugin-webdriver = { version = "=0.2.3", optional = true }
 
 [dev-dependencies]
 tempfile.workspace = true
 
 [build-dependencies]
-tauri-build = { version = "=2.7.2", features = [] }
+tauri-build = { version = "=2.7.3", features = [] }
 
 [lints]
 workspace = true

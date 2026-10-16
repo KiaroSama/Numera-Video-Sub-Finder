@@ -1,9 +1,9 @@
 name: Desktop CI
 on:
-  push:
-    branches: [main]
-  pull_request:
-  workflow_dispatch:
+  workflow_call:
+    secrets:
+      TAURI_SIGNING_PRIVATE_KEY:
+        required: true
 permissions:
   contents: read
 concurrency:
@@ -77,7 +77,7 @@ jobs:
         id: native-provision
         run: ./scripts/ci/native.ps1 -TargetId '${{ matrix.id }}'
       - name: Retain successful native dependencies
-        if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.native-provision.outcome == 'success' && steps.native-cache.outputs.cache-hit != 'true' }}
+        if: ${{ !cancelled() && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && steps.native-provision.outcome == 'success' && steps.native-cache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: .ci-work/native/binary-cache
@@ -95,8 +95,15 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Committed dependency lock mismatch' }
       - name: Core and native static analysis
         run: |
-          ./scripts/ci/guard.ps1 -Name rust-clippy -WallSeconds 1200 -IdleSeconds 180 -Executable cargo -Arguments @('clippy','--locked','-p','nvsf-core','-p','nvsf-app','-p','nvsf-cli','-p','xtask','--','-D','warnings')
+          ./scripts/ci/guard.ps1 -Name rust-clippy -WallSeconds 1200 -IdleSeconds 180 -Executable cargo -Arguments @('clippy','--locked','-p','nvsf-core','-p','nvsf-app','-p','nvsf-media-native','-p','nvsf-cli','-p','xtask','--','-D','warnings')
           if ($LASTEXITCODE -ne 0) { throw 'Rust static analysis failed' }
+      - name: Same-target native media adapter and loader closure
+        timeout-minutes: 35
+        run: |
+          ./scripts/ci/guard.ps1 -Name media-adapter-release -WallSeconds 1800 -IdleSeconds 360 -Executable cargo -Arguments @('build','--locked','--release','--target','${{ matrix.target }}','-p','nvsf-media-native')
+          if ($LASTEXITCODE -ne 0) { throw 'Native media adapter build failed' }
+          ./scripts/ci/native.ps1 -TargetId '${{ matrix.id }}' -StageMediaAdapter
+          if ($LASTEXITCODE -ne 0) { throw 'Native media adapter loader staging failed' }
       - name: CLI and frontend build
         run: |
           ./scripts/ci/guard.ps1 -Name native-release -WallSeconds 1800 -IdleSeconds 360 -Executable cargo -Arguments @('build','--locked','--release','-p','nvsf-cli','-p','xtask')
@@ -111,9 +118,9 @@ jobs:
             $stage = Join-Path $env:GITHUB_WORKSPACE ('.ci-work/tools/tauri-stage-' + [Guid]::NewGuid().ToString('N'))
             New-Item -ItemType Directory -Path $stage -ErrorAction Stop | Out-Null
             $archive = Join-Path $stage 'tauri.zip'
-            ./scripts/ci/guard.ps1 -Name tauri-download -WallSeconds 210 -IdleSeconds 60 -Executable curl -Arguments @('--fail','--location','--proto','=https','--proto-redir','=https','--connect-timeout','30','--max-time','180','--output',$archive,'https://github.com/tauri-apps/tauri/releases/download/tauri-cli-v2.12.2/cargo-tauri-x86_64-apple-darwin.zip')
+            ./scripts/ci/guard.ps1 -Name tauri-download -WallSeconds 210 -IdleSeconds 60 -Executable curl -Arguments @('--fail','--location','--proto','=https','--proto-redir','=https','--connect-timeout','30','--max-time','180','--output',$archive,'https://github.com/tauri-apps/tauri/releases/download/tauri-cli-v2.12.3/cargo-tauri-x86_64-apple-darwin.zip')
             if ($LASTEXITCODE -ne 0) { throw 'Official Intel Tauri CLI download failed' }
-            if ((Get-Item -LiteralPath $archive).Length -ne 8453590 -or (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant() -ne '0f81160909873e2c37c1856d08be50603dc908acd67e08e4ee9c505b90ff5e16') { throw 'Official Tauri CLI archive identity mismatch' }
+            if ((Get-Item -LiteralPath $archive).Length -ne 8403582 -or (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant() -ne '333987e244ef46152c107d3e922313fd09cfd8e43cd851512609c2264348fc9b') { throw 'Official Tauri CLI archive identity mismatch' }
             $zip = [IO.Compression.ZipFile]::OpenRead($archive)
             try {
               $expected = @('LICENSE-APACHE-2.0','LICENSE-MIT','README.md','cargo-tauri')
@@ -133,11 +140,11 @@ jobs:
             ./scripts/ci/guard.ps1 -Name tauri-mode -WallSeconds 15 -IdleSeconds 5 -Executable chmod -Arguments @('755',$bin)
             if ($LASTEXITCODE -ne 0) { throw 'Tauri CLI executable mode setup failed' }
           } else {
-            ./scripts/ci/guard.ps1 -Name tauri-install -WallSeconds 1200 -IdleSeconds 180 -Executable cargo -Arguments @('install','tauri-cli','--version','2.12.2','--locked','--root','.ci-work/tools')
+            ./scripts/ci/guard.ps1 -Name tauri-install -WallSeconds 1200 -IdleSeconds 180 -Executable cargo -Arguments @('install','tauri-cli','--version','2.12.3','--locked','--root','.ci-work/tools')
             if ($LASTEXITCODE -ne 0) { throw 'Tauri CLI installation failed' }
           }
           ./scripts/ci/guard.ps1 -Name tauri-version -WallSeconds 15 -IdleSeconds 5 -Executable "$env:GITHUB_WORKSPACE/.ci-work/tools/bin/cargo-tauri$(if ($IsWindows) { '.exe' } else { '' })" -Arguments @('--version') -CaptureStdoutPath "$env:GITHUB_WORKSPACE/.ci-work/tools/tauri-version.txt"
-          if ($LASTEXITCODE -ne 0 -or [IO.File]::ReadAllText("$env:GITHUB_WORKSPACE/.ci-work/tools/tauri-version.txt",[Text.Encoding]::UTF8).Trim() -ne 'tauri-cli 2.12.2') { throw 'Installed Tauri CLI version mismatch' }
+          if ($LASTEXITCODE -ne 0 -or [IO.File]::ReadAllText("$env:GITHUB_WORKSPACE/.ci-work/tools/tauri-version.txt",[Text.Encoding]::UTF8).Trim() -ne 'tauri-cli 2.12.3') { throw 'Installed Tauri CLI version mismatch' }
           if ($IsMacOS -and '${{ matrix.arch }}' -eq 'x64') { Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction Stop }
           "$env:GITHUB_WORKSPACE/.ci-work/tools/bin" >> $env:GITHUB_PATH
           $env:PATH = "$env:GITHUB_WORKSPACE/.ci-work/tools/bin$([IO.Path]::PathSeparator)$env:PATH"
@@ -160,6 +167,13 @@ jobs:
       - name: All required Rust contract suites and nonzero evidence
         timeout-minutes: 45
         run: ./scripts/ci/tests.ps1 -TargetId '${{ matrix.id }}'
+      - name: Missing-native bootstrap and maintenance CLI contracts
+        timeout-minutes: 2
+        run: |
+          $ext = if ($IsWindows) { '.exe' } else { '' }
+          ./scripts/ci/guard.ps1 -Name maintenance-cli -WallSeconds 90 -IdleSeconds 30 -Executable "$env:GITHUB_WORKSPACE/target/release/xtask$ext" -Arguments @('maintenance','--cli',"target/release/nvsf$ext",'--runtimes','.ci-work/runtimes','--output','.ci-work/maintenance')
+          if ($LASTEXITCODE -ne 0) { throw 'Actual bootstrap/maintenance CLI witness failed' }
+          Copy-Item '.ci-work/maintenance/maintenance-report.json' '.ci-work/packages/reports/${{ matrix.id }}-maintenance.json'
       - name: Native desktop package build
         timeout-minutes: 30
         run: |
@@ -178,6 +192,14 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Fixture generation failed' }
           ./scripts/ci/guard.ps1 -Name cli-smoke -WallSeconds 210 -IdleSeconds 90 -Executable "$env:GITHUB_WORKSPACE/$xtask" -Arguments @('smoke','--cli',"target/release/nvsf$ext",'--fixture-dir','.ci-work/fixtures','--data-root','.ci-work/data')
           if ($LASTEXITCODE -ne 0) { throw 'Actual native extraction smoke failed' }
+      - name: Actual representative language extraction and cue recognition
+        timeout-minutes: 9
+        run: |
+          $ext = if ($IsWindows) { '.exe' } else { '' }
+          $ffmpeg = "$env:GITHUB_WORKSPACE/.ci-work/native/installed/${{ matrix.triplet }}/tools/ffmpeg/ffmpeg$ext"
+          ./scripts/ci/guard.ps1 -Name multilingual -WallSeconds 510 -IdleSeconds 90 -Executable "$env:GITHUB_WORKSPACE/target/release/xtask$ext" -Arguments @('multilingual','--cli',"$env:GITHUB_WORKSPACE/target/release/nvsf$ext",'--ffmpeg',$ffmpeg,'--data-root','.ci-work/data','--output','.ci-work/multilingual')
+          if ($LASTEXITCODE -ne 0) { throw 'Actual representative multilingual OCR witness failed' }
+          Copy-Item '.ci-work/multilingual/multilingual-report.json' '.ci-work/packages/reports/${{ matrix.id }}-multilingual.json'
       - name: Actual native GUI extraction and correction
         timeout-minutes: 5
         run: |
@@ -194,6 +216,15 @@ jobs:
           $ext = if ($IsWindows) { '.exe' } else { '' }
           & "target/release/xtask$ext" package --target '${{ matrix.id }}' --cli "target/release/nvsf$ext" --gui "target/release/numera-video-sub-finder$ext" --runtimes '.ci-work/runtimes' --output '.ci-work/packages'
           if ($LASTEXITCODE -ne 0) { throw 'Native artifact assembly failed' }
+      - name: Authenticated candidate runtime assets and actual native health
+        timeout-minutes: 4
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ''
+        run: |
+          $ext = if ($IsWindows) { '.exe' } else { '' }
+          ./scripts/ci/guard.ps1 -Name runtime-pack -WallSeconds 180 -IdleSeconds 60 -Executable "$env:GITHUB_WORKSPACE/target/release/xtask$ext" -Arguments @('runtime-pack','--target','${{ matrix.id }}','--runtimes','.ci-work/runtimes','--output','.ci-work/packages/${{ matrix.id }}')
+          if ($LASTEXITCODE -ne 0) { throw 'Runtime asset signature or actual native health failed' }
       - name: Relocated artifact-only extraction
         run: |
           $ext = if ($IsWindows) { '.exe' } else { '' }
@@ -203,6 +234,15 @@ jobs:
         timeout-minutes: 35
         run: |
           ./scripts/ci/bundle.ps1 -TargetId '${{ matrix.id }}' -PackagesRoot '.ci-work/packages'
+      - name: Signed internal updater payload and metadata candidates
+        timeout-minutes: 8
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ''
+        run: |
+          $ext = if ($IsWindows) { '.exe' } else { '' }
+          ./scripts/ci/guard.ps1 -Name update-assets -WallSeconds 420 -IdleSeconds 90 -Executable "$env:GITHUB_WORKSPACE/target/release/xtask$ext" -Arguments @('update-assets','--target','${{ matrix.id }}','--packages','.ci-work/packages')
+          if ($LASTEXITCODE -ne 0) { throw 'Internal update candidate admission failed; no publication authorized' }
       - name: Actual production GUI without test listener
         timeout-minutes: 3
         run: |
@@ -263,8 +303,14 @@ jobs:
         run: |
           for id in $(jq -r '.targets[].id' ci/targets.json); do
             jq -e --arg sha "$GITHUB_SHA" --arg id "$id" '.schema==1 and .source_sha==$sha and .target==$id and (.files|length>=2) and all(.files[]; (.sha256|test("^[a-f0-9]{64}$")))' ".ci-work/downloaded/reports/$id.json"
-            for kind in standalone gui production suites bundles; do
-              jq -e --arg sha "$GITHUB_SHA" --arg id "$id" '.schema==1 and .source_sha==$sha and .target==$id and .passed==true and .tests>0 and .failed==0 and .skipped==0' ".ci-work/downloaded/reports/$id-$kind.json"
+            for kind in standalone gui production suites bundles maintenance multilingual runtime-pack update-assets; do
+              minimum=1
+              case "$kind" in
+                standalone) minimum=3 ;; gui) minimum=9 ;; production) minimum=4 ;;
+                bundles|update-assets) minimum=2 ;; maintenance|runtime-pack) minimum=5 ;;
+                multilingual) minimum=7; case "$id" in windows-*) minimum=6 ;; esac ;;
+              esac
+              jq -e --arg sha "$GITHUB_SHA" --arg id "$id" --argjson minimum "$minimum" '.schema==1 and .source_sha==$sha and .target==$id and .passed==true and .tests>=$minimum and .failed==0 and .skipped==0' ".ci-work/downloaded/reports/$id-$kind.json"
             done
           done
           jq -e --arg sha "$GITHUB_SHA" '.source_sha==$sha and .passed==true and .coverage>=0.80 and .critical_coverage>=0.90' .ci-work/downloaded/reports/coverage.json

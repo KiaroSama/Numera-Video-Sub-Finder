@@ -6,7 +6,7 @@ use std::{
     io::{Read, Write},
     path::Path,
     sync::atomic::{AtomicBool, Ordering},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 pub fn install(
@@ -16,6 +16,7 @@ pub fn install(
     destination: &Path,
     cancel: &AtomicBool,
 ) -> Result<()> {
+    let deadline = Instant::now() + Duration::from_secs(600);
     if !url.starts_with("https://")
         || bytes == 0
         || bytes > 2 * 1024 * 1024 * 1024
@@ -45,15 +46,14 @@ pub fn install(
             "Partial model exceeds expected bytes; preserve it and choose a clean destination",
         ));
     }
-    if cancel.load(Ordering::Acquire) {
-        return Err(crate::AppError::Cancelled);
-    }
+    check_transfer(cancel, deadline)?;
     if offset == bytes {
-        return activate(&partial, destination, bytes, sha256);
+        return activate(&partial, destination, bytes, sha256, cancel, deadline);
     }
     let client = reqwest::blocking::Client::builder()
+        .https_only(true)
         .connect_timeout(Duration::from_secs(15))
-        .timeout(Duration::from_secs(600))
+        .timeout(Duration::from_secs(20))
         .redirect(reqwest::redirect::Policy::limited(4))
         .build()
         .map_err(|e| fail(e.to_string()))?;
@@ -61,9 +61,7 @@ pub fn install(
     if offset > 0 {
         request = request.header(reqwest::header::RANGE, format!("bytes={offset}-"));
     }
-    if cancel.load(Ordering::Acquire) {
-        return Err(crate::AppError::Cancelled);
-    }
+    check_transfer(cancel, deadline)?;
     let mut response = request
         .send()
         .and_then(|r| r.error_for_status())
@@ -82,6 +80,7 @@ pub fn install(
             return Err(fail("Invalid resumed model response range"));
         }
     }
+    check_transfer(cancel, deadline)?;
     let mut file = std::fs::OpenOptions::new()
         .create(true)
         .write(true)
@@ -92,10 +91,7 @@ pub fn install(
     let mut buffer = [0u8; 65536];
     let mut received = offset;
     loop {
-        if cancel.load(Ordering::Acquire) {
-            file.flush()?;
-            return Err(crate::AppError::Cancelled);
-        }
+        check_transfer(cancel, deadline)?;
         let n = response.read(&mut buffer)?;
         if n == 0 {
             break;
@@ -114,10 +110,30 @@ pub fn install(
     if received != bytes {
         return Err(fail("Incomplete model download; partial bytes retained"));
     }
-    activate(&partial, destination, bytes, sha256)
+    activate(&partial, destination, bytes, sha256, cancel, deadline)
 }
 
-fn activate(partial: &Path, destination: &Path, bytes: u64, sha256: &str) -> Result<()> {
+fn check_transfer(cancel: &AtomicBool, deadline: Instant) -> Result<()> {
+    if cancel.load(Ordering::Acquire) {
+        return Err(crate::AppError::Cancelled);
+    }
+    if Instant::now() >= deadline {
+        return Err(fail(
+            "Model transfer exceeded 600-second deadline; partial bytes retained",
+        ));
+    }
+    Ok(())
+}
+
+fn activate(
+    partial: &Path,
+    destination: &Path,
+    bytes: u64,
+    sha256: &str,
+    cancel: &AtomicBool,
+    deadline: Instant,
+) -> Result<()> {
+    check_transfer(cancel, deadline)?;
     if partial.metadata()?.len() != bytes || hash_file(partial)? != sha256 {
         return Err(fail(
             "Model integrity failed; partial bytes retained, existing model unchanged",
@@ -126,14 +142,26 @@ fn activate(partial: &Path, destination: &Path, bytes: u64, sha256: &str) -> Res
     let parent = destination
         .parent()
         .ok_or_else(|| fail("Missing model parent"))?;
+    check_transfer(cancel, deadline)?;
     let mut tmp = tempfile::NamedTempFile::new_in(parent)?;
-    std::io::copy(&mut std::fs::File::open(partial)?, &mut tmp)?;
+    let mut source = std::fs::File::open(partial)?.take(bytes + 1);
+    let mut buffer = [0u8; 65536];
+    loop {
+        check_transfer(cancel, deadline)?;
+        let count = source.read(&mut buffer)?;
+        if count == 0 {
+            break;
+        }
+        tmp.write_all(&buffer[..count])?;
+    }
+    drop(source);
     tmp.as_file().sync_all()?;
     if tmp.as_file().metadata()?.len() != bytes || hash_file(tmp.path())? != sha256 {
         return Err(fail(
             "Model changed during activation; existing model preserved",
         ));
     }
+    check_transfer(cancel, deadline)?;
     tmp.persist(destination).map_err(|e| e.error)?;
     std::fs::remove_file(partial)?;
     Ok(())

@@ -111,7 +111,7 @@ pub fn smoke(gui: &Path, fixtures: &Path, data: &Path, output: &Path) -> Result<
     let data = data.canonicalize()?;
     let mut command = Command::new(gui);
     command
-        .env("NVSF_DATA_ROOT", data)
+        .env("NVSF_DATA_ROOT", &data)
         .env("NVSF_E2E_FIXTURE_ROOT", &fixtures)
         .env("TAURI_WEBDRIVER_PORT", "4445");
     let mut process = OwnedProcess::spawn(&mut command, &capture)?;
@@ -181,12 +181,31 @@ pub fn smoke(gui: &Path, fixtures: &Path, data: &Path, output: &Path) -> Result<
         5,
     )?;
     driver.click("[data-testid=models-verify]")?;
-    driver.wait("return ['det','fa','en-ja','ja-specialist'].every(id=>{const row=document.querySelector(`[data-model-id='${id}']`);return row?.querySelector('h3')?.textContent===id && row.querySelector('[data-testid=model-install]') && row.querySelector('[data-testid=model-import]') && row.querySelector('[data-testid=model-export]');});", 30)?;
+    driver.wait("return document.querySelector('[data-testid=models-verify]')?.disabled===false && ['det','fa','en-ja','ja-specialist'].every(id=>{const row=document.querySelector(`[data-model-id='${id}']`);return row?.querySelector('h3')?.textContent===id && row.querySelector('[data-testid=model-install]') && row.querySelector('[data-testid=model-import]') && row.querySelector('[data-testid=model-export]');});", 30)?;
+    driver.select("#language-pack", "rus")?;
+    driver.click("[data-testid=languages-verify]")?;
+    driver.wait("return document.querySelector('[data-testid=languages-verify]')?.disabled===false && document.querySelector('#language-pack')?.options.length===123 && document.querySelector('[data-testid=language-pack-status]')?.textContent.includes('Tesseract CPU');", 10)?;
+    driver.click("nav[aria-label='Workspace navigation'] .nav-item:nth-of-type(6)")?;
+    driver.wait("return document.querySelector('h1')?.textContent==='Settings' && document.querySelector('[data-testid=automatic-update-checks]')?.checked===true && document.querySelector('[data-testid=native-diagnostics]')?.disabled===false;", 5)?;
+    driver.click("[data-testid=automatic-update-checks]")?;
+    driver.wait("return document.querySelector('[data-testid=automatic-update-checks]')?.checked===false && document.querySelector('[data-testid=native-diagnostics]')?.disabled===false;", 5)?;
+    let preferences: Value = serde_json::from_slice(&std::fs::read(data.join("updates.json"))?)?;
+    if preferences["enabled"] != false {
+        return Err(
+            "Automatic update disable did not persist through ordinary Settings control".into(),
+        );
+    }
+    driver.click("[data-testid=native-diagnostics]")?;
+    driver.wait("return document.querySelector('[data-testid=native-diagnostics]')?.disabled===false && document.querySelector('.diagnostics') && document.querySelector('[data-testid=runtime-repair]')?.disabled===true && Array.from(document.querySelectorAll('[role=status]')).some(e=>e.textContent.includes('FFmpeg native adapter')&&e.textContent.includes('verified'));", 10)?;
     driver.click("nav[aria-label='Workspace navigation'] .nav-item:nth-of-type(1)")?;
     driver.wait(
         "return document.querySelector('h1')?.textContent === 'Extract';",
         5,
     )?;
+    let languages = driver.script("return ['fra','rus','hin','ara','kor'].every(code=>Array.from(document.querySelector('#language')?.options||[]).some(option=>option.value===code));")?;
+    if languages.as_bool() != Some(true) {
+        return Err("Ordinary extraction selector omitted nonpriority language families".into());
+    }
     driver.select("#language", "en")?;
     driver.select("#device", "cpu")?;
     driver.select("#quality", "accurate")?;
@@ -218,17 +237,17 @@ pub fn smoke(gui: &Path, fixtures: &Path, data: &Path, output: &Path) -> Result<
         output.join("actual-gui.png"),
         decode_base64(screenshot.as_str().ok_or("Missing actual screenshot")?)?,
     )?;
-    std::fs::write(
-        output.join("gui-report.json"),
-        serde_json::to_vec_pretty(
-            &json!({"schema":1,"source_sha":std::env::var("GITHUB_SHA")?,"target":std::env::var("NVSF_TARGET_ID")?,"passed":true,"tests":6,"failed":0,"skipped":0,"profile":"instrumented","proof":["native startup","fixed source admission and source frame","three persisted themes","model catalog IDs and controls","actual worker extraction","Unicode edit and exported bytes"],"not_proved":["physical IME composition","production listener absence","real-language quality","platform installers"]}),
-        )?,
-    )?;
     drop(driver);
     process.stop();
     if process.started.elapsed() > Duration::from_secs(240) {
         return Err("GUI smoke exceeded overall budget".into());
     }
+    std::fs::write(
+        output.join("gui-report.json"),
+        serde_json::to_vec_pretty(
+            &json!({"schema":1,"source_sha":std::env::var("GITHUB_SHA")?,"target":std::env::var("NVSF_TARGET_ID")?,"passed":true,"tests":9,"failed":0,"skipped":0,"profile":"instrumented","proof":["native startup","fixed source admission and source frame","three persisted themes","model catalog IDs and controls","full language catalog and nonpriority extraction choices","automatic update disable persisted through Settings","native diagnostics and unapproved repair guard","actual worker extraction","Unicode edit and exported bytes"],"not_proved":["physical IME composition","production listener absence","real-language quality","positive signed repair/update lifecycle","platform installers"]}),
+        )?,
+    )?;
     Ok(())
 }
 

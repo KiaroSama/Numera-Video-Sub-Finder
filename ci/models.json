@@ -26,9 +26,7 @@
       "bytes": 7998947,
       "metadata": "assets/model-metadata/fa.yml",
       "metadata_sha256": "21368419e6c016c31db55d316d59e11c128e1913e6e6fe10287084710043d3a6",
-      "languages": [
-        "fa"
-      ],
+      "languages": ["fa", "ara", "urd", "pus", "uig", "snd"],
       "license": "Apache-2.0",
       "status": "upstream-declared; CI inference admission pending"
     },
@@ -41,10 +39,7 @@
       "bytes": 16534782,
       "metadata": "assets/model-metadata/en-ja.yml",
       "metadata_sha256": "5dfeb2777f6d0db8177d8128a8acfcf6e6276dc4ac73ea3bf0dc06d6a5e85d8e",
-      "languages": [
-        "en",
-        "ja"
-      ],
+      "languages": ["en", "ja", "chi_sim", "chi_tra"],
       "license": "Apache-2.0",
       "status": "upstream-declared; CI inference admission pending"
     },

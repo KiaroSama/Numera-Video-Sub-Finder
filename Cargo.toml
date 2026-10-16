@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/core", "crates/app", "crates/cli", "crates/ui", "crates/desktop", "xtask"]
+members = ["crates/core", "crates/app", "crates/media-native", "crates/cli", "crates/ui", "crates/desktop", "xtask"]
 exclude = [".ci-work"]
 default-members = ["crates/core", "crates/app", "crates/cli", "xtask"]
 

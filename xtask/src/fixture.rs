@@ -229,3 +229,27 @@ pub fn sha(path: &Path) -> Result<String, Box<dyn Error>> {
     }
     Ok(h.finalize().iter().map(|b| format!("{b:02x}")).collect())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn package_command_removes_loader_overrides_without_losing_unrelated_settings() {
+        let mut command = Command::new("relocated/gui");
+        command
+            .env("LD_LIBRARY_PATH", "checkout/runtimes")
+            .env("DYLD_LIBRARY_PATH", "checkout/runtimes")
+            .env("NVSF_RUNTIME_ROOT", "checkout/runtimes")
+            .env("NVSF_DATA_ROOT", "isolated-data");
+        clean_runtime_environment(&mut command);
+        let environment: std::collections::BTreeMap<_, _> = command.get_envs().collect();
+        for key in ["LD_LIBRARY_PATH", "DYLD_LIBRARY_PATH", "NVSF_RUNTIME_ROOT"] {
+            assert_eq!(environment.get(std::ffi::OsStr::new(key)), Some(&None));
+        }
+        assert_eq!(
+            environment.get(std::ffi::OsStr::new("NVSF_DATA_ROOT")),
+            Some(&Some(std::ffi::OsStr::new("isolated-data")))
+        );
+    }
+}

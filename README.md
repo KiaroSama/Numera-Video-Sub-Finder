@@ -4,7 +4,7 @@
 
 # Numera Video Sub Finder
 
-[![Desktop CI](https://github.com/KiaroSama/Numera-Video-Sub-Finder/actions/workflows/ci.yml/badge.svg)](https://github.com/KiaroSama/Numera-Video-Sub-Finder/actions/workflows/ci.yml)
+[![Final verification](https://github.com/KiaroSama/Numera-Video-Sub-Finder/actions/workflows/verify.yml/badge.svg)](https://github.com/KiaroSama/Numera-Video-Sub-Finder/actions/workflows/verify.yml)
 [![License GPL-3.0-or-later](https://img.shields.io/badge/License-GPL--3.0--or--later-blue)](LICENSE)
 [![Rust 1.99](https://img.shields.io/badge/Rust-1.99-orange)](rust-toolchain.toml)
 [![Edition 2024](https://img.shields.io/badge/Edition-2024-orange)](Cargo.toml)
@@ -27,12 +27,16 @@ An offline-first desktop workspace for extracting **visible, burned-in subtitles
 
 **Development; not a qualified release.** Source and CI definitions do not prove successful builds or OCR quality. The live CI badge is authoritative for hosted checks. See [validation status](docs/validation.md) for remaining gates. Android and iPhone applications are not included.
 
-The six native targets are Windows, macOS and Linux, each x64 and ARM64. Hosted CPU CI is separate from real-device accelerator qualification. Packages are unsigned unless their manifest states otherwise; no signing, notarization, GPU placement or quality certification is implied.
+The six native targets are Windows, macOS and Linux, each x64 and ARM64. Hosted CPU CI is separate from real-device accelerator qualification. Final distribution requires verified platform signatures; missing Windows signing and Apple signing/notarization inputs currently block publication. The dedicated updater key is not a platform certificate. No signing, GPU placement or quality certification is implied by source availability.
+
+## Installation and setup
+
+Start with the [installation guide](docs/installation.md): select the exact OS/architecture, verify the package, install required resources and run a first extraction. **No ready-build release is claimed while the required native checks and signing gates remain open.** Development prereleases, when published, are explicitly experimental and are never offered on the stable updater channel.
 
 ## Workflow
 
 1. Open a local video and choose a distinct `.srt` output through native file dialogs.
-2. Set English, Persian or Japanese, subtitle regions/exclusions, source-time range, quality and device policy. Automatic region detection provides editable suggestions; scene signs are not automatically accepted as dialogue.
+2. Choose from the **123 official Tesseract language and vertical variants**, then set subtitle regions/exclusions, source-time range, quality and device policy. Compatible admitted Paddle recognizers are used where available; other languages require their selected Tesseract pack. English/Persian/Japanese retain their original qualification targets; catalog availability does not certify accuracy. Automatic region detection provides editable suggestions; scene signs are not automatically accepted as dialogue.
 3. Start extraction. Pause/cancel controls preserve compatible checkpoints; missing models produce an actionable error instead of a download during inference.
 4. Review original frames, change text/times, split/merge, undo/redo, and explicitly accept re-recognition proposals.
 5. Save the project or export SRT, WebVTT, basic ASS, or JSON evidence. Existing-file replacement is explicit; raw OCR and user corrections remain distinct.
@@ -65,7 +69,21 @@ nvsf probe "video with subtitles.mp4"
 nvsf doctor
 ```
 
-`doctor` reports resources, not proven operator placement. `--gpu-required` / `--accelerator-required` fail when the requested execution policy cannot be established. `auto` may use CPU only with a reported fallback; an ordinary CPU package does not contain CUDA/DirectML/CoreML runtime qualification.
+List additional language codes, then explicitly install only the language you need:
+
+```bash
+nvsf languages list
+```
+
+```bash
+nvsf languages install fra
+```
+
+```bash
+nvsf dependencies
+```
+
+`dependencies --repair --consent` requests a matching signed application-local native pack when a component is missing or incompatible; it never installs system FFmpeg or changes PATH. A matching published pack is required. Restart after repair. `doctor` reports actual native API/version checks, not proven operator placement. `--gpu-required` / `--accelerator-required` fail when the requested execution policy cannot be established. `auto` may use CPU only with a reported fallback; an ordinary CPU package does not contain CUDA/DirectML/CoreML runtime qualification.
 
 `batch`, `resume`, `export`, and `benchmark` share the native application service. Run each subcommand's `--help` for exact options. Benchmark elapsed time is a measurement of that run, not a universal speed or quality claim.
 
@@ -73,7 +91,9 @@ nvsf doctor
 
 Writable models, projects, logs and cache use the OS's local application-data directory under `Numera Video Sub Finder`. `--data-root` or `NVSF_DATA_ROOT` chooses an explicit location. A `portable.flag` next to the executable uses its sibling `data` directory. `NVSF_RUNTIME_ROOT` is an explicit native-runtime override; ordinary packages use their bundled runtimes.
 
-Video and subtitle text remain local during inference. Only explicit model provisioning uses the network. Model bytes are checked against pinned hashes. Checkpoints are tied to source, configuration and model identities. Private media, crop evidence, projects and logs are never uploaded by the application.
+Video and subtitle text remain local during inference. The desktop checks signed official stable-release metadata at startup and at most daily while open; disable automatic checks in Settings or check manually. **No update payload downloads or installs without separate approval.** Explicit model/language provisioning and approved dependency repair also use the network. Model bytes are checked against pinned hashes; managed runtime packs and update metadata require signatures. No stable release/feed is claimed before publication.
+
+Installed Windows, macOS `.app` and Linux AppImage are the intended automatic-update formats; portable archives, deb and rpm use verified download and manual format-specific installation. Save review edits and finish jobs/resource operations before installation. Checkpoints bind source/configuration/selected resources; installing unrelated language packs does not change their identity. Private media, crop evidence, projects and logs are never uploaded by the application.
 
 ## Logging
 
@@ -83,7 +103,7 @@ Logs and original crop evidence are local. At startup, matching application logs
 
 ## Builds and tests
 
-**Builds run only in GitHub Actions.** The committed lockfile, native source baseline, model manifests and six-target inventory drive the pipeline. Local Cargo/Trunk/Tauri compilation is not part of the project's authorized workflow.
+**Builds run only in GitHub Actions.** Manually dispatch **Final verification** (`verify.yml`) after all changes are pushed; it calls native, portable-quality, dependency and source-analysis lanes once for that commit. Pushes and pull requests do not start CI automatically. The committed lockfile, native source baseline, model manifests and six-target inventory drive the pipeline. Local Cargo/Trunk/Tauri compilation is not part of the project's authorized workflow.
 
 See [testing](docs/testing.md), [architecture](docs/architecture.md), [OCR contracts](docs/ocr-models.md), [performance policy](docs/performance.md), [platform support](docs/platform-support.md), [CI matrix](docs/ci-matrix.md), [troubleshooting](docs/troubleshooting.md), [references](docs/references.md), and [third-party notices](THIRD_PARTY_NOTICES.md). Generated synthetic fixtures cover integration/timing mechanics only, not held-out real-world CER or subtitle-event recall.
 

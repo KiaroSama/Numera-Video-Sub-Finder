@@ -1,0 +1,39 @@
+name: Final verification
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+  security-events: write
+concurrency:
+  group: final-verification-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  native:
+    uses: ./.github/workflows/ci.yml
+    secrets:
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+  portable:
+    uses: ./.github/workflows/quality.yml
+  dependencies:
+    uses: ./.github/workflows/security.yml
+  source-analysis:
+    uses: ./.github/workflows/codeql.yml
+  required:
+    if: always()
+    needs: [native, portable, dependencies, source-analysis]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - name: Require every exact-source verification lane
+        env:
+          NATIVE: ${{ needs.native.result }}
+          PORTABLE: ${{ needs.portable.result }}
+          DEPENDENCIES: ${{ needs.dependencies.result }}
+          SOURCE_ANALYSIS: ${{ needs.source-analysis.result }}
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          test "$NATIVE" = success
+          test "$PORTABLE" = success
+          test "$DEPENDENCIES" = success
+          test "$SOURCE_ANALYSIS" = success
+          printf 'All required lanes passed for %s\n' "$SOURCE_SHA"

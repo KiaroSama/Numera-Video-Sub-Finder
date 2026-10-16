@@ -68,6 +68,7 @@ pub struct Inner {
     pub source_busy: std::sync::atomic::AtomicBool,
     pub unsaved: std::sync::atomic::AtomicBool,
     pub closing: std::sync::atomic::AtomicBool,
+    pub maintenance: crate::updates::Maintenance,
 }
 
 #[derive(Clone)]
@@ -101,6 +102,7 @@ impl Host {
             source_busy: std::sync::atomic::AtomicBool::new(false),
             unsaved: std::sync::atomic::AtomicBool::new(false),
             closing: std::sync::atomic::AtomicBool::new(false),
+            maintenance: crate::updates::Maintenance::default(),
         }))
     }
     pub fn token(&self, kind: &str) -> String {
@@ -136,6 +138,15 @@ impl Host {
         Ok(path)
     }
     pub fn ensure_idle(&self) -> Result<()> {
+        if self.0.closing.load(Ordering::Acquire)
+            || self.0.source_busy.load(Ordering::Acquire)
+            || self.0.maintenance.installing.load(Ordering::Acquire)
+        {
+            return Err(
+                "Wait for source operations, update installation or application shutdown to finish"
+                    .into(),
+            );
+        }
         let job = lock(&self.0.job)?;
         if let Some(job) = job.as_ref() {
             if !job.thread.as_ref().is_none_or(JoinHandle::is_finished) {
@@ -150,6 +161,14 @@ impl Host {
         Ok(())
     }
     pub fn shutdown(&self) -> bool {
+        if self.0.maintenance.installing.load(Ordering::Acquire) {
+            self.0.log.event(
+                "WARNING",
+                "UPDATES",
+                "Close deferred until native update installation finishes",
+            );
+            return false;
+        }
         if self.0.model_busy.load(Ordering::Acquire) {
             self.0.model_cancel.store(true, Ordering::Release);
             self.0.log.event(
@@ -185,6 +204,14 @@ impl Host {
                     return false;
                 }
             }
+        }
+        if !self.0.maintenance.stop() {
+            self.0.log.event(
+                "WARNING",
+                "UPDATES",
+                "Waiting for bounded metadata check before exit",
+            );
+            return false;
         }
         self.0
             .log

@@ -1,6 +1,6 @@
 # Acceptance traceability
 
-The initial desktop implementation has 30 requirement groups. This matrix distinguishes source responsibility from executed proof. None is automatically accepted because a file exists; actual evidence lives in exact-source CI reports and validation status.
+The desktop specification has 34 requirement groups, including the confirmed maintenance, language-catalog and setup/publication additions. This matrix distinguishes source responsibility from executed proof. None is automatically accepted because a file exists; actual evidence lives in exact-source CI reports and validation status.
 
 | IDs | Scope | Implementation / required proof |
 |---|---|---|
@@ -19,5 +19,9 @@ The initial desktop implementation has 30 requirement groups. This matrix distin
 | FR-025,026,027 | CI/test/quality floors | ci test inventory/qualification, exact-source reports; missing/partial is not PASS |
 | FR-028,029 | Legal/branding/publication | LICENSE/notices/logo/README/native icons; exact package inventory and identity |
 | FR-030 | Fail-closed release | ci/qualification.json and release gate; physical/signing/quality missing blocks promotion |
+| FR-031 | Consent-gated updates | core policy/app signed metadata/desktop updater/UI; hosted signed download/install/cancel and active-job/edit evidence required |
+| FR-032 | Reachable native diagnosis and app-local repair | media cdylib/selected Paths/Pack/CLI/Settings; missing-native bootstrap witness and signed candidate assets supplement, not replace, actual repair/restart |
+| FR-033 | Official multilingual catalog | 123 measured packs/shared aliases/explicit recognizer policy/CLI/UI; actual representative script OCR and original priority quality remain required |
+| FR-034 | Repository, setup and development publication | Topics/setup guide/manual final CI; six same-source signed native asset sets required before experimental prerelease, never stable-feed promotion |
 
 CT-01–CT-30 are catalogued in ci/test-inventory.json. CT-23 is owner-cancelled mobile scope, not a passing mobile test. Real-language quality thresholds, source coverage and mutation floors are retained unchanged; any incomplete lane is explicitly reported and blocks full release qualification.

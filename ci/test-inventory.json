@@ -4,14 +4,14 @@
   "families": [
     {"id":"CT-01","area":"static/build/contracts","command":"cargo fmt; cargo clippy; six native builds","state":"AUTHORED"},
     {"id":"CT-02","area":"portable core","command":"cargo test -p nvsf-core","state":"AUTHORED"},
-    {"id":"CT-03","area":"native FFmpeg","command":"xtask smoke; xtask gui","state":"PARTIAL"},
+    {"id":"CT-03","area":"native FFmpeg","command":"cargo test -p nvsf-media-native; xtask maintenance; xtask smoke; xtask gui","state":"PARTIAL"},
     {"id":"CT-04","area":"timing/tracking","command":"core contracts/stress; actual CLI smoke","state":"PARTIAL"},
     {"id":"CT-05","area":"properties","command":"core contracts/stress proptest","state":"AUTHORED"},
     {"id":"CT-06","area":"fuzzing","command":"bounded hostile parser properties","state":"PARTIAL"},
     {"id":"CT-07","area":"concurrency","command":"core threaded tracker stress; queue ownership","state":"PARTIAL"},
     {"id":"CT-08","area":"Miri","command":null,"state":"NOT_RUN"},
     {"id":"CT-09","area":"sanitizers/FFI","command":null,"state":"NOT_RUN"},
-    {"id":"CT-10","area":"real multilingual OCR","command":null,"state":"BLOCKED","reason":"Independent real fa/ja annotations absent"},
+    {"id":"CT-10","area":"real multilingual OCR","command":"xtask multilingual (synthetic integration only)","state":"BLOCKED","reason":"Independent real fa/ja annotations absent; representative synthetic script witnesses do not qualify real quality"},
     {"id":"CT-11","area":"model admission/precision","command":"model metadata/CTC contracts; native model load","state":"PARTIAL"},
     {"id":"CT-12","area":"physical accelerators","command":null,"state":"BLOCKED","reason":"No authorized hardware runner"},
     {"id":"CT-13","area":"provider policy","command":"strict required CPU failure; native initialization","state":"PARTIAL"},
@@ -30,7 +30,7 @@
     {"id":"CT-26","area":"Unicode/export interoperability","command":"core literal formats; actual GUI exported bytes","state":"PARTIAL"},
     {"id":"CT-27","area":"hostile input/permissions","command":"core invalid contracts; desktop ACL/e2e traversal; visual proposal rejection","state":"PARTIAL"},
     {"id":"CT-28","area":"production isolation","command":"default/e2e separated builds and command tables","state":"PARTIAL"},
-    {"id":"CT-29","area":"failure/recovery","command":"storage corruption/overwrite; checkpoint; model partial download","state":"PARTIAL"},
+    {"id":"CT-29","area":"failure/recovery","command":"storage corruption/overwrite; checkpoint; model partial download; xtask maintenance missing-native/denied repair; app update/runtime negative contracts","state":"PARTIAL"},
     {"id":"CT-30","area":"gate correctness","command":"xtask gate negative contracts","state":"PARTIAL"}
   ],
   "note":"AUTHORED/PARTIAL is source status, never PASS; all execution evidence must bind exact SHA. Full release gate rejects any missing mandatory family/quality/package/hardware evidence."

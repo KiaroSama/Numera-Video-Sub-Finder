@@ -68,7 +68,9 @@ pub(crate) fn regrant(
                 .into(),
         );
     }
-    let media = nvsf_app::media::probe(&source).map_err(|e| e.to_string())?;
+    let media = nvsf_app::media::MediaRuntime::load(&host.0.paths)
+        .and_then(|runtime| runtime.probe(&source))
+        .map_err(|e| e.to_string())?;
     let source_token = host.token("source");
     let output_token = host.token("output");
     let mut sources = lock(&host.0.sources)?;

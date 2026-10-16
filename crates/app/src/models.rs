@@ -157,24 +157,7 @@ pub fn install(paths: &Paths, selected: Option<&str>, cancel: &AtomicBool) -> Re
 }
 
 pub fn verify_tessdata(paths: &Paths, id: &str) -> Result<std::path::PathBuf> {
-    let manifest: TessManifest = serde_json::from_str(include_str!("../../../ci/tessdata.json"))?;
-    let spec = manifest
-        .models
-        .into_iter()
-        .find(|s| s.id == id)
-        .ok_or_else(|| fail("Unknown Tesseract language"))?;
-    let path = paths
-        .models
-        .join("tessdata")
-        .join(format!("{id}.traineddata"));
-    if !path.is_file() || path.metadata()?.len() != spec.bytes || hash_file(&path)? != spec.sha256 {
-        return Err(fail("Tesseract language pack missing or corrupt"));
-    }
-    let canonical = path.canonicalize()?;
-    if !canonical.starts_with(paths.models.canonicalize()?) {
-        return Err(fail("Tesseract language path escapes model root"));
-    }
-    Ok(canonical)
+    crate::languages::verify(paths, id)
 }
 
 pub fn seed_bundled(paths: &Paths) -> Result<()> {

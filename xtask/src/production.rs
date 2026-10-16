@@ -235,6 +235,7 @@ pub fn smoke(gui: &Path, data: &Path, output: &Path) -> Result<()> {
     let logs = state.path().join("logs");
     no_listener()?;
     let mut command = Command::new(&gui);
+    crate::fixture::clean_runtime_environment(&mut command);
     command
         .current_dir(evidence.path())
         .env("NVSF_DATA_ROOT", state.path())

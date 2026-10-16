@@ -70,7 +70,9 @@ pub async fn e2e_fixture(
         {
             return Err("CI fixture needs a regular input and distinct SRT output".into());
         }
-        let media = nvsf_app::media::probe(&source_path).map_err(|e| e.to_string())?;
+        let media = nvsf_app::media::MediaRuntime::load(&host.0.paths)
+            .and_then(|runtime| runtime.probe(&source_path))
+            .map_err(|e| e.to_string())?;
         let source_token = host.token("source");
         let output_token = host.token("output");
         lock(&host.0.sources)?.insert(source_token.clone(), source_path.clone());

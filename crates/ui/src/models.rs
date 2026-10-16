@@ -69,6 +69,7 @@ pub fn Models(ui: Ui) -> impl IntoView {
             }>{move ||if cancelling.get(){"Stopping download…"}else{"Cancel download"}}</button></Show></div>
         <p class="hint">"Default provisioning includes primary models and verifier language files; the Japanese specialist requires explicit selected install. ONNX import/export moves only that checksummed model artifact, not a complete offline verifier-data archive. Existing export destinations are never overwritten."</p>
         <p class="hint">"Model mutation is blocked during extraction. Integrity/download/import errors remain visible; installed status does not certify OCR quality or acceleration."</p>
+        <crate::languages::LanguagePacks ui/>
         <crate::visual_retry::VisualPack ui/>
     </section>}
 }

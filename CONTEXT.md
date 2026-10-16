@@ -35,3 +35,19 @@ _Avoid_: Language when referring to a spatial group
 **Qualification**:
 Observed evidence for a target, package, language, or acceleration path; build success alone is not functional or hardware qualification.
 _Avoid_: Supported without naming which evidence exists
+
+**Update offer**:
+A newer official application release presented for approval; discovery is not permission to download or install it.
+_Avoid_: Automatic installation when describing a notification
+
+**Managed runtime pack**:
+A verified application-local dependency collection that can be repaired without replacing another program's tools.
+_Avoid_: System installation
+
+**Language pack**:
+An identified recognition resource for a catalog language; availability is distinct from measured subtitle accuracy.
+_Avoid_: Accuracy-qualified language when only the pack exists
+
+**Development prerelease**:
+Published experimental native builds with explicit remaining qualification limits, not a stable release or certified hardware support.
+_Avoid_: Qualified release

@@ -52,7 +52,7 @@ impl Paths {
                 }
                 sibling
             });
-        let paths = Self {
+        let mut paths = Self {
             models: root.join("models"),
             projects: root.join("projects"),
             logs: root.join("logs"),
@@ -64,11 +64,52 @@ impl Paths {
             std::fs::create_dir_all(d)?;
         }
         crate::models::seed_bundled(&paths)?;
+        if std::env::var_os("NVSF_RUNTIME_ROOT").is_none() {
+            if let Ok(Some(managed)) = crate::runtimes::managed(&paths) {
+                paths.runtimes = managed;
+            }
+        }
         Ok(paths)
     }
 
+    pub fn use_bundled_runtimes(&mut self, bundled: &Path) -> Result<()> {
+        if std::env::var_os("NVSF_RUNTIME_ROOT").is_none() {
+            if bundled.is_dir() {
+                let mut resources = self.clone();
+                resources.runtimes = bundled.to_path_buf();
+                crate::models::seed_bundled(&resources)?;
+            }
+            match crate::runtimes::managed(self) {
+                Ok(Some(managed)) => self.runtimes = managed,
+                _ if bundled.is_dir() => self.runtimes = bundled.to_path_buf(),
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+
+    pub fn library(&self, name: &str) -> Result<libloading::Library> {
+        let path = self.runtime(name)?;
+        #[cfg(windows)]
+        // SAFETY: explicit contained path; dependency search excludes caller CWD and PATH.
+        let library = unsafe {
+            use libloading::os::windows::{
+                LOAD_LIBRARY_SEARCH_DEFAULT_DIRS, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR, Library,
+            };
+            Library::load_with_flags(
+                &path,
+                LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS,
+            )
+        }
+        .map(Into::into);
+        #[cfg(not(windows))]
+        // SAFETY: explicit contained path; the signed package owns its native loader closure.
+        let library = unsafe { libloading::Library::new(&path) };
+        library.map_err(|e| fail(format!("Native runtime {name} could not load: {e}")))
+    }
+
     pub fn runtime(&self, name: &str) -> Result<PathBuf> {
-        if name.contains(['/', '\\']) || name.contains("..") {
+        if name.is_empty() || name.contains(['/', '\\', ':', '\0']) || name.contains("..") {
             return Err(fail("Invalid runtime resource name"));
         }
         let file = self.runtimes.join(name);

@@ -226,7 +226,9 @@ pub fn register(
         return Err("Queue output must not replace source media".into());
     }
     let source_hash = nvsf_app::storage::hash_file(&source).map_err(|e| e.to_string())?;
-    let media = nvsf_app::media::probe(&source).map_err(|e| e.to_string())?;
+    let media = nvsf_app::media::MediaRuntime::load(&host.0.paths)
+        .and_then(|runtime| runtime.probe(&source))
+        .map_err(|e| e.to_string())?;
     let id = host.token("queue");
     let record = Record {
         id: id.clone(),

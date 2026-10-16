@@ -28,6 +28,7 @@ pub fn mount() {
 #[component]
 fn App(initial_theme: String) -> impl IntoView {
     let ui = Ui::new(initial_theme.clone());
+    crate::maintenance::watch(ui);
     let main = NodeRef::<leptos::html::Main>::new();
     let routes = [
         ("Extract", "M4 5h16v14H4z M10 9l6 3-6 3z"),
@@ -40,6 +41,19 @@ fn App(initial_theme: String) -> impl IntoView {
     wasm_bindgen_futures::spawn_local(async move {
         if let Err(e) = ipc::call::<()>("ui_ready", json!({"theme":initial_theme})).await {
             ui.error.set(Some(e));
+        }
+        match ipc::call::<ipc::Doctor>("doctor", json!({})).await {
+            Ok(report) => {
+                if report
+                    .dependencies
+                    .iter()
+                    .any(|row| row.state != "verified")
+                {
+                    ui.notice.set("A native dependency is missing or incompatible. Open Settings → Resources and diagnostics to review and approve application-local repair.".into());
+                }
+                ui.diagnostics.set(Some(report));
+            }
+            Err(error) => ui.error.set(Some(error)),
         }
         match ipc::call::<Vec<ipc::QueueEntry>>("queue_list", json!({})).await {
             Ok(entries) => ui.queue.set(entries),
@@ -175,6 +189,7 @@ fn App(initial_theme: String) -> impl IntoView {
                     {fixture_controls}
                     <Show when=move ||ui.error.with(Option::is_some)><div class="message error" role="alert"><strong>"Action could not complete"</strong><p>{move ||ui.error.get().unwrap_or_default()}</p><button on:click=move |_|ui.error.set(None)>"Dismiss error"</button></div></Show>
                     <Show when=move ||!ui.notice.get().is_empty()><div class="message notice" role="status"><span>{move ||ui.notice.get()}</span><button on:click=move |_|ui.notice.set(String::new())>"Dismiss"</button></div></Show>
+                    <Show when=move ||ui.maintenance.with(|s|s.state=="available")&&ui.route.get()!="Settings"><div class="message notice" role="status"><span>"A newer stable release is available. No update payload has been downloaded."</span><button on:click=move |_|ui.route.set("Settings".into())>"Review update"</button></div></Show>
                     <div hidden=move ||ui.route.get()!="Extract"><Extract ui/></div>
                     <div hidden=move ||ui.route.get()!="Queue"><Queue ui/></div>
                     <div hidden=move ||ui.route.get()!="Review"><Review ui/></div>
@@ -182,7 +197,7 @@ fn App(initial_theme: String) -> impl IntoView {
                     <div hidden=move ||ui.route.get()!="History"><History ui/></div>
                     <div hidden=move ||ui.route.get()!="Settings"><Settings ui/></div>
                 </main>
-                <footer class="statusbar"><span>"Local processing · explicit model downloads only"</span><span>{move ||if ui.active(){"Job active — checkpoints preserved"}else{"No active extraction"}}</span></footer>
+                <footer class="statusbar"><span>"Local processing · optional release checks · approved downloads"</span><span>{move ||if ui.active(){"Job active — checkpoints preserved"}else{"No active extraction"}}</span></footer>
             </div>
         </div>
     }

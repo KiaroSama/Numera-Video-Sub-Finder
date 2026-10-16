@@ -8,7 +8,7 @@ type Handle = *mut c_void;
 struct Api {
     create: unsafe extern "C" fn() -> Handle,
     delete: unsafe extern "C" fn(Handle),
-    init: unsafe extern "C" fn(Handle, *const c_char, *const c_char) -> c_int,
+    init: unsafe extern "C" fn(Handle, *const c_char, *const c_char, c_int) -> c_int,
     set_image: unsafe extern "C" fn(Handle, *const u8, c_int, c_int, c_int, c_int),
     set_mode: unsafe extern "C" fn(Handle, c_int),
     recognize: unsafe extern "C" fn(Handle, Handle) -> c_int,
@@ -27,15 +27,7 @@ pub struct Tesseract {
 }
 impl Tesseract {
     pub fn new(paths: &Paths, language: &str) -> Result<Self> {
-        let path = paths.runtime(if cfg!(windows) {
-            "tesseract55.dll"
-        } else if cfg!(target_os = "macos") {
-            "libtesseract.dylib"
-        } else {
-            "libtesseract.so"
-        })?;
-        // SAFETY: load only an explicit packaged library; copied function pointers retain its owner.
-        let library = unsafe { Library::new(path) }.map_err(|e| fail(e.to_string()))?;
+        let library = paths.library(crate::runtimes::TESSERACT_LIBRARY)?;
         unsafe fn symbol<T: Copy>(lib: &Library, name: &[u8]) -> Result<T> {
             // SAFETY: caller supplies signatures verified against Tesseract5.5.3 capi.h.
             Ok(*unsafe { lib.get::<T>(name) }.map_err(|e| fail(e.to_string()))?)
@@ -45,7 +37,7 @@ impl Tesseract {
             Api {
                 create: symbol(&library, b"TessBaseAPICreate\0")?,
                 delete: symbol(&library, b"TessBaseAPIDelete\0")?,
-                init: symbol(&library, b"TessBaseAPIInit3\0")?,
+                init: symbol(&library, b"TessBaseAPIInit2\0")?,
                 set_image: symbol(&library, b"TessBaseAPISetImage\0")?,
                 set_mode: symbol(&library, b"TessBaseAPISetPageSegMode\0")?,
                 recognize: symbol(&library, b"TessBaseAPIRecognize\0")?,
@@ -57,12 +49,10 @@ impl Tesseract {
                 monitor_deadline: symbol(&library, b"TessMonitorSetDeadlineMSecs\0")?,
             }
         };
-        let lang = match language {
-            "en" => "eng",
-            "fa" => "fas",
-            "ja" => "jpn",
-            _ => return Err(fail("Unsupported Tesseract language")),
-        };
+        let lang = nvsf_core::languages::find(language)
+            .ok_or_else(|| fail("Unsupported Tesseract language"))?
+            .code
+            .as_str();
         let data = paths.models.join("tessdata");
         crate::models::verify_tessdata(paths, lang)?;
         let data = CString::new(
@@ -82,7 +72,8 @@ impl Tesseract {
             _library: library,
         };
         // SAFETY: nonnull owned handle, initialized C strings.
-        if unsafe { (result.api.init)(handle, data.as_ptr(), lang.as_ptr()) } != 0 {
+        // Official tessdata_best resources contain only the LSTM engine (OEM_LSTM_ONLY=1).
+        if unsafe { (result.api.init)(handle, data.as_ptr(), lang.as_ptr(), 1) } != 0 {
             return Err(fail("Tesseract initialization failed"));
         }
         Ok(result)

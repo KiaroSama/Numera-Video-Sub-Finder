@@ -16,7 +16,7 @@
   "evidence": {
     "real_corpus_annotation": {"state": "BLOCKED", "reason": "Licensed real candidates exist; independent visible-text/frame-PTS annotations are not yet admitted for fa/ja"},
     "physical_gpu": {"state": "BLOCKED", "reason": "Only standard public hosted runners authorized; no physical device runner available"},
-    "signing": {"state": "NOT_RUN", "reason": "No signing/notarization credential operation authorized"},
+    "signing": {"state": "BLOCKED", "reason": "Windows Authenticode and Apple Developer ID/notarization inputs unavailable; the authorized updater key does not establish native platform trust"},
     "six_native_cpu": {"state": "NOT_RUN", "reason": "Source and workflow authored; exact source SHA results pending"}
   }
 }

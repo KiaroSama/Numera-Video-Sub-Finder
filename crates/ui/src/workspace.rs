@@ -61,15 +61,37 @@ pub fn History(ui: Ui) -> impl IntoView {
 
 #[component]
 pub fn Settings(ui: Ui) -> impl IntoView {
+    let repair_approved = RwSignal::new(false);
+    let repairing = RwSignal::new(false);
+    let repair = move |_| {
+        if ui.busy.get_untracked() || !repair_approved.get_untracked() {
+            return;
+        }
+        ui.busy.set(true);
+        repairing.set(true);
+        wasm_bindgen_futures::spawn_local(async move {
+            match crate::ipc::call::<String>("repair_runtimes", json!({"consent":true})).await {
+                Ok(message) => ui.notice.set(message),
+                Err(error) => ui.error.set(Some(error)),
+            }
+            repair_approved.set(false);
+            repairing.set(false);
+            ui.busy.set(false);
+        });
+    };
     view! {<div class="workspace-column"><section class="panel"><span class="eyebrow">"WORKSPACE PREFERENCES"</span><h2>"Appearance"</h2>
         <label for="theme">"Color theme"</label><select id="theme" prop:value=move ||ui.theme.get() on:change=move |e|ui.set_theme(event_target_value(&e))>
             <option value="system">"System · follows OS changes"</option><option value="dark">"Dark"</option><option value="light">"Light"</option></select>
         <p class="hint">"The saved preference is applied before this window appears. Reduced motion follows the operating system; original frame pixels are never recolored."</p>
         <h3>"Keyboard and text"</h3><dl class="shortcut-list"><dt>"Ctrl/Cmd + S"</dt><dd>"Save current review project"</dd><dt>"Ctrl/Cmd + Z / Shift + Z"</dt><dd>"Undo / redo cue edits (outside text fields)"</dd><dt>"Tab / Shift + Tab"</dt><dd>"Navigate every control"</dd></dl>
         <p class="hint">"Persian text is kept in logical Unicode with direction determined by its content. Japanese composition is not intercepted. Timestamps use ASCII digits."</p>
-    </section><section class="panel"><div class="panel-heading"><h2>"Resources and diagnostics"</h2><button disabled=move ||ui.busy.get() on:click={move |_|ui.request::<Doctor>("doctor",json!({}),move |d|ui.diagnostics.set(Some(d)))}>"Run resource checks"</button></div>
+    </section><section class="panel"><div class="panel-heading"><h2>"Resources and diagnostics"</h2><button data-testid="native-diagnostics" disabled=move ||ui.busy.get() on:click={move |_|ui.request::<Doctor>("doctor",json!({}),move |d|ui.diagnostics.set(Some(d)))}>"Run resource checks"</button></div>
         <Show when=move ||ui.diagnostics.with(Option::is_some) fallback=||view!{<p class="muted">"Check actual data paths, model status and diagnostic logging. Directory presence is not proof of a functioning acceleration provider."</p>}>
-            {move ||ui.diagnostics.get().map(|d|view!{<dl class="diagnostics"><dt>"Platform"</dt><dd>{d.platform}</dd><dt>"Data root"</dt><dd class="mono" dir="auto">{d.data_root}</dd><dt>"Models"</dt><dd class="mono" dir="auto">{d.models_root}</dd><dt>"Packaged runtime directory"</dt><dd>{if d.runtimes_present{"Present (not execution-verified)"}else{"Missing"}}</dd><dt>"Diagnostic file log"</dt><dd>{if d.log_available{"Initialized"}else{"Unavailable; console fallback"}}</dd><dt>"Catalog entries"</dt><dd>{d.models.len()}</dd></dl><p class="hint">{d.message}</p>})}
+            {move ||ui.diagnostics.get().map(|d|view!{<dl class="diagnostics"><dt>"Platform"</dt><dd>{d.platform}</dd><dt>"Data root"</dt><dd class="mono" dir="auto">{d.data_root}</dd><dt>"Models"</dt><dd class="mono" dir="auto">{d.models_root}</dd><dt>"Packaged runtime directory"</dt><dd>{if d.runtimes_present{"Present (not execution-verified)"}else{"Missing"}}</dd><dt>"Diagnostic file log"</dt><dd>{if d.log_available{"Initialized"}else{"Unavailable; console fallback"}}</dd><dt>"Catalog entries"</dt><dd>{d.models.len()}</dd></dl><p class="hint">{d.message}</p>{d.dependencies.into_iter().map(|row|view!{<p role="status"><strong>{row.component}</strong>{format!(" · {} · {}",row.state,row.message)}</p>}).collect_view()}})}
         </Show>
-    </section></div>}
+        <p class="hint">"Repair uses a matching signed application-local pack only when a native component is missing or incompatible. It does not install system tools, change PATH, or download OCR models. Restart after repair; existing projects are retained."</p>
+        <label class="check"><input type="checkbox" prop:checked=move ||repair_approved.get() on:change=move |e|repair_approved.set(event_target_checked(&e))/><span>"I approve downloading and installing missing application-local dependencies"</span></label>
+        <div class="button-row"><button data-testid="runtime-repair" disabled=move ||ui.busy.get()||ui.active()||ui.preview_busy.get()||ui.dirty.get()||ui.draft_dirty.get()||!repair_approved.get() on:click=repair>"Repair approved dependencies"</button>
+        <Show when=move ||repairing.get()><button on:click=move |_|wasm_bindgen_futures::spawn_local(async move{if let Err(error)=crate::ipc::call::<()>("cancel_model_install",json!({})).await{ui.error.set(Some(error));}})>"Cancel dependency repair"</button></Show></div>
+    </section><crate::maintenance::Updates ui/></div>}
 }

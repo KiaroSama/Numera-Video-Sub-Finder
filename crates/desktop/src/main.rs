@@ -4,24 +4,30 @@
 mod e2e;
 mod files;
 mod jobs;
+mod language_manager;
 mod model_manager;
 mod queue;
 mod recognition;
 mod resume;
 #[cfg(test)]
 mod resume_tests;
+mod runtime_manager;
 mod state;
+#[cfg(test)]
+mod update_tests;
+mod updates;
 mod visual_retry;
 
 use state::Host;
 use tauri::Manager;
 
 #[tauri::command]
-fn set_unsaved(host: tauri::State<'_, Host>, dirty: bool) {
-    host.inner()
-        .0
+fn set_unsaved(host: tauri::State<'_, Host>, dirty: bool) -> state::Result<()> {
+    let host = host.inner();
+    host.0
         .unsaved
         .store(dirty, std::sync::atomic::Ordering::Release);
+    Ok(())
 }
 
 #[tauri::command]
@@ -48,23 +54,26 @@ fn main() {
     let builder = tauri::Builder::default()
         .setup(move |app| {
             let mut paths = paths.clone();
-            if std::env::var_os("NVSF_RUNTIME_ROOT").is_none() {
-                let bundled = app.path().resource_dir()?.join("runtimes");
-                if bundled.is_dir() {
-                    paths.runtimes = bundled;
-                    nvsf_app::models::seed_bundled(&paths)?;
-                }
-            }
+            paths.use_bundled_runtimes(&app.path().resource_dir()?.join("runtimes"))?;
             app.manage(Host::new(paths));
+            updates::schedule(app.handle());
             Ok(())
         })
-        .plugin(tauri_plugin_dialog::init());
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build());
     #[cfg(feature = "e2e")]
     let builder = builder.plugin(tauri_plugin_webdriver::init());
     macro_rules! commands {
         ($($extra:path),* $(,)?) => { tauri::generate_handler![
             ui_ready,
             set_unsaved,
+            updates::update_status,
+            updates::check_updates,
+            updates::set_update_checks,
+            updates::download_update,
+            updates::install_update,
+            updates::cancel_update,
+            updates::save_update,
             files::pick_source,
             files::choose_output,
             files::preview_frame,
@@ -85,11 +94,16 @@ fn main() {
             files::list_history,
             files::open_history,
             jobs::model_catalog,
+            language_manager::language_catalog,
+            language_manager::install_language,
+            language_manager::import_language,
+            language_manager::export_language,
             model_manager::install_models,
             model_manager::cancel_model_install,
             model_manager::import_model,
             model_manager::export_model,
             jobs::doctor,
+            runtime_manager::repair_runtimes,
             recognition::suggest_regions,
             recognition::recognize_cue,
             visual_retry::install_visual_retry,
@@ -108,7 +122,11 @@ fn main() {
     let shutdown = app.state::<Host>().inner().clone();
     app.run(move |app, event| match event {
         tauri::RunEvent::ExitRequested { api, .. } => {
-            if !shutdown.shutdown() { api.prevent_exit(); }
+            shutdown.0.closing.store(true, std::sync::atomic::Ordering::Release);
+            if !shutdown.shutdown() {
+                shutdown.0.closing.store(false, std::sync::atomic::Ordering::Release);
+                api.prevent_exit();
+            }
         }
         tauri::RunEvent::WindowEvent {
             label,

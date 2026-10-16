@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "quality_qualified": false,
-  "synthetic": {"generated_by": "xtask fixtures", "purpose": "actual native timing/OCR/GUI integration, not real-world quality"},
+  "synthetic": {"generated_by": "xtask fixtures; xtask multilingual", "purpose": "actual native timing/OCR/GUI integration, not real-world quality", "additional_scripts": ["fra", "rus", "ara", "hin", "kor"], "fonts": {"source": "google/fonts", "revision": "1d0e46c7933245c8180fe83e47917961c913bbdb", "license": "OFL-1.1", "inventory": "xtask/src/multilingual.rs", "distribution": "hosted fixture data only, excluded from application packages"}},
   "real_candidates": [
     {
       "id": "wikipedia-meetup-en",

@@ -25,9 +25,20 @@ enum Commands {
         #[arg(long, default_value = "json", value_parser=["json"])]
         format: String,
     },
+    /// Verify native APIs or repair this application without changing system software.
+    Dependencies {
+        #[arg(long)]
+        repair: bool,
+        #[arg(long, requires = "repair")]
+        consent: bool,
+    },
     Models {
         #[command(subcommand)]
         command: ModelCommand,
+    },
+    Languages {
+        #[command(subcommand)]
+        command: LanguageCommand,
     },
     Resume {
         project: PathBuf,
@@ -77,6 +88,14 @@ enum ModelCommand {
         id: String,
         path: PathBuf,
     },
+}
+#[derive(Subcommand)]
+enum LanguageCommand {
+    List,
+    Install { code: String },
+    Verify { code: String },
+    Import { code: String, path: PathBuf },
+    Export { code: String, path: PathBuf },
 }
 #[derive(clap::Args)]
 struct ExtractArgs {
@@ -175,12 +194,45 @@ fn run(cli: Cli) -> Result<()> {
             );
         }
         Commands::Probe { input } => {
-            println!("{}", serde_json::to_string_pretty(&media::probe(&input)?)?)
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&media::MediaRuntime::load(&paths)?.probe(&input)?)?
+            )
         }
         Commands::Doctor { format: _ } => println!(
             "{}",
-            serde_json::json!({"version":env!("CARGO_PKG_VERSION"),"os":std::env::consts::OS,"architecture":std::env::consts::ARCH,"data_root":paths.root,"runtimes":paths.runtimes,"models":models::catalog(&paths)?,"acceleration_qualification":"not established by enumeration"})
+            serde_json::json!({"version":env!("CARGO_PKG_VERSION"),"source_sha":nvsf_core::BUILD_SOURCE_SHA,"os":std::env::consts::OS,"architecture":std::env::consts::ARCH,"data_root":paths.root,"runtimes":paths.runtimes,"dependencies":nvsf_app::runtimes::diagnose(&paths),"models":models::catalog(&paths)?,"acceleration_qualification":"not established by enumeration"})
         ),
+        Commands::Dependencies { repair, consent } => {
+            let diagnostics = nvsf_app::runtimes::diagnose(&paths);
+            if !repair {
+                println!("{}", serde_json::to_string_pretty(&diagnostics)?);
+            } else if !consent {
+                return Err(nvsf_app::fail(
+                    "Dependency repair requires --repair --consent; no payload downloaded",
+                ));
+            } else if diagnostics.iter().all(|row| row.state == "verified") {
+                println!("Existing native APIs and versions verified; no payload downloaded");
+            } else {
+                log.event(
+                    "INFO",
+                    "RUNTIMES",
+                    "Explicit app-local dependency repair requested",
+                );
+                let (manifest, signature, base) = nvsf_app::runtimes::fetch()?;
+                nvsf_app::runtimes::repair(
+                    &paths,
+                    &manifest,
+                    &signature,
+                    &base,
+                    consent,
+                    &control.cancel,
+                )?;
+                println!(
+                    "Signed native dependencies installed; restart before extraction. System software unchanged."
+                );
+            }
+        }
         Commands::Models { command } => match command {
             ModelCommand::List => println!(
                 "{}",
@@ -203,6 +255,31 @@ fn run(cli: Cli) -> Result<()> {
             }
             ModelCommand::Import { id, path } => models::import_model(&paths, &id, &path)?,
             ModelCommand::Export { id, path } => models::export_model(&paths, &id, &path)?,
+        },
+        Commands::Languages { command } => match command {
+            LanguageCommand::List => println!(
+                "{}",
+                serde_json::to_string_pretty(&nvsf_app::languages::catalog(&paths))?
+            ),
+            LanguageCommand::Install { code } => {
+                log.event(
+                    "INFO",
+                    "LANGUAGES",
+                    "Explicit selected language provisioning requested",
+                );
+                nvsf_app::languages::install(&paths, &code, &control.cancel)?;
+                println!("Selected language pack downloaded and hash verified");
+            }
+            LanguageCommand::Verify { code } => {
+                nvsf_app::languages::verify(&paths, &code)?;
+                println!("Language pack hash verified; subtitle quality is separate");
+            }
+            LanguageCommand::Import { code, path } => {
+                nvsf_app::languages::import(&paths, &code, &path, &control.cancel)?
+            }
+            LanguageCommand::Export { code, path } => {
+                nvsf_app::languages::export(&paths, &code, &path)?
+            }
         },
         Commands::Resume { project } => {
             let p = storage::load_project(&project)?;
@@ -259,11 +336,18 @@ fn run(cli: Cli) -> Result<()> {
 }
 
 fn run_worker(request: &Path, control_dir: &Path) -> Result<()> {
+    nvsf_app::worker::guard_parent_lifetime()?;
     if request.metadata()?.len() > 1_048_576 {
         return Err(nvsf_app::fail("Worker request exceeds1MiB"));
     }
     let config: ExtractConfig = serde_json::from_slice(&std::fs::read(request)?)?;
     let control = Control::default();
+    control
+        .pause
+        .store(control_dir.join("pause").exists(), Ordering::Relaxed);
+    control
+        .cancel
+        .store(control_dir.join("cancel").exists(), Ordering::Relaxed);
     let flags = control.clone();
     let dir = control_dir.to_path_buf();
     let stopped = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));

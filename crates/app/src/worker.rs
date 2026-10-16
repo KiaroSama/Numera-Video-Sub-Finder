@@ -54,7 +54,7 @@ pub fn supervise(
         .env("TMPDIR", scratch.path())
         .env("OMP_NUM_THREADS", config.threads.to_string())
         .env("NVSF_RUNTIME_ROOT", &paths.runtimes)
-        .stdin(Stdio::null())
+        .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
     #[cfg(windows)]
@@ -68,6 +68,12 @@ pub fn supervise(
         command.process_group(0);
     }
     let mut owned = OwnedChild(command.spawn()?);
+    // Keep the writer outside Child: wait() closes a Child-owned stdin before waiting.
+    let _parent_lease = owned
+        .0
+        .stdin
+        .take()
+        .ok_or_else(|| fail("Worker parent-lifetime pipe unavailable"))?;
     let child = &mut owned.0;
     let pid = child.id();
     let stdout = child
@@ -181,6 +187,40 @@ pub fn supervise(
         return Err(fail(format!("Worker exited with {status}")));
     }
     output.ok_or_else(|| fail("Worker ended without a complete project"))
+}
+
+/// Arm before native work. EOF survives a forcibly killed supervisor, unlike Rust Drop.
+pub fn guard_parent_lifetime() -> Result<()> {
+    #[cfg(unix)]
+    {
+        let pid = std::process::id();
+        // SAFETY: getpgrp has no arguments and returns this process's group.
+        if pid <= 1 || unsafe { getpgrp() } != pid as i32 {
+            return Err(fail("Worker requires its own isolated process group"));
+        }
+        std::thread::Builder::new()
+            .name("worker-parent-lease".into())
+            .spawn(move || {
+                let mut byte = [0u8; 1];
+                loop {
+                    match std::io::stdin().read(&mut byte) {
+                        Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+                        _ => break,
+                    }
+                }
+                // SAFETY: this live process is the verified leader of its own worker group.
+                // The parent holds the only writer and never sends input; EOF means owner loss.
+                unsafe { kill(-(pid as i32), 9) };
+                std::process::exit(70);
+            })?;
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+unsafe extern "C" {
+    fn getpgrp() -> i32;
+    fn kill(pid: i32, signal: i32) -> i32;
 }
 
 struct OwnedChild(std::process::Child);

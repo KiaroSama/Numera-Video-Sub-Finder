@@ -1,9 +1,6 @@
 name: Supply-chain checks
 on:
-  push:
-    branches: [main]
-  pull_request:
-  workflow_dispatch:
+  workflow_call:
 permissions:
   contents: read
 concurrency:

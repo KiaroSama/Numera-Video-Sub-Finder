@@ -12,7 +12,7 @@ foreach($file in $files) {
         if($text -match '-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----' -or $text -match '(?:ghp_|github_pat_)[A-Za-z0-9_]{30,}') {throw 'Potential real secret in tracked content; publication stops'}
     }
 }
-$claimed=@('crates/core','crates/app','crates/cli','crates/ui','crates/desktop','xtask')
+$claimed=@('crates/core','crates/app','crates/media-native','crates/cli','crates/ui','crates/desktop','xtask')
 $workspace=[IO.File]::ReadAllText('Cargo.toml',$utf8)
 foreach($manifest in $files|Where-Object {$_ -match '/Cargo.toml$'}) {
     $package=Split-Path $manifest -Parent

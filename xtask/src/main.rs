@@ -1,10 +1,14 @@
 mod fixture;
 mod gate;
 mod gui;
+mod maintenance;
+mod multilingual;
 mod package;
 mod process;
 mod production;
 mod quality;
+mod runtime_pack;
+mod update_assets;
 use clap::{Parser, Subcommand};
 use std::{error::Error, path::PathBuf};
 
@@ -46,6 +50,38 @@ enum Cmd {
         data_root: PathBuf,
         #[arg(long)]
         output: PathBuf,
+    },
+    Maintenance {
+        #[arg(long)]
+        cli: PathBuf,
+        #[arg(long)]
+        runtimes: PathBuf,
+        #[arg(long)]
+        output: PathBuf,
+    },
+    Multilingual {
+        #[arg(long)]
+        cli: PathBuf,
+        #[arg(long)]
+        ffmpeg: PathBuf,
+        #[arg(long)]
+        data_root: PathBuf,
+        #[arg(long)]
+        output: PathBuf,
+    },
+    RuntimePack {
+        #[arg(long)]
+        target: String,
+        #[arg(long)]
+        runtimes: PathBuf,
+        #[arg(long)]
+        output: PathBuf,
+    },
+    UpdateAssets {
+        #[arg(long)]
+        target: String,
+        #[arg(long)]
+        packages: PathBuf,
     },
     Package {
         #[arg(long)]
@@ -135,6 +171,23 @@ fn run() -> Result<(), Box<dyn Error>> {
             data_root,
             output,
         } => production::smoke(&gui, &data_root, &output),
+        Cmd::Maintenance {
+            cli,
+            runtimes,
+            output,
+        } => maintenance::verify(&cli, &runtimes, &output),
+        Cmd::Multilingual {
+            cli,
+            ffmpeg,
+            data_root,
+            output,
+        } => multilingual::verify(&cli, &ffmpeg, &data_root, &output),
+        Cmd::RuntimePack {
+            target,
+            runtimes,
+            output,
+        } => runtime_pack::generate(&target, &runtimes, &output),
+        Cmd::UpdateAssets { target, packages } => update_assets::generate(&target, &packages),
         Cmd::Package {
             target,
             cli,

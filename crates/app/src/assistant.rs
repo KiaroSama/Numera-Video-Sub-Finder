@@ -77,7 +77,7 @@ pub fn propose(
     if cancel.load(Ordering::Acquire) {
         return Err(crate::AppError::Cancelled);
     }
-    let frame = media::preview(input, at_ms)?;
+    let frame = media::MediaRuntime::load(paths)?.preview(input, at_ms)?;
     let (x, y, w, h) = region.pixels(frame.width(), frame.height())?;
     if u64::from(w) * u64::from(h) > 1_003_520 {
         return Err(fail(

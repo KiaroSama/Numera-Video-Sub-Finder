@@ -29,6 +29,7 @@ pub fn Extract(ui: Ui) -> impl IntoView {
                 <label for="language">"Subtitle language"</label>
                 <select id="language" prop:value=move || ui.config.with(|c| c.language.clone()) on:change=move |e| ui.config.update(|c| c.language=event_target_value(&e))>
                     <option value="en">"English"</option><option value="fa">"Persian / فارسی"</option><option value="ja">"Japanese / 日本語"</option>
+                    {nvsf_core::languages::catalog().iter().map(|language|view!{<option value=language.code.clone()>{format!("{} ({})",language.name,language.code)}</option>}).collect_view()}
                 </select>
                 <label for="device">"Processing device"</label>
                 <select id="device" prop:value=move || ui.config.with(|c| c.device.clone()) on:change=move |e| ui.config.update(|c| c.device=event_target_value(&e))>

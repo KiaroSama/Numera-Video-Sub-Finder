@@ -57,12 +57,9 @@ pub fn run(
         .iter()
         .map(|b| format!("{b:02x}"))
         .collect::<String>();
-    let model_hash = models::specs()?
-        .iter()
-        .map(|m| m.sha256.as_str())
-        .collect::<Vec<_>>()
-        .join(":");
-    let media = media::probe(&input)?;
+    let model_hash = crate::languages::fingerprint(&paths, &config.language)?;
+    let runtime = media::MediaRuntime::load(&paths)?;
+    let media = runtime.probe(&input)?;
     let mut project = Project {
         schema: 1,
         source_hash: source_hash.clone(),
@@ -102,20 +99,27 @@ pub fn run(
         config.gpu_required || config.accelerator_required,
     )?;
     let provider = ocr.provider.clone();
-    let mut specialist =
-        if config.language == "ja" && models::verify(&paths, "ja-specialist").is_ok() {
-            Some(Ocr::new(
-                &paths,
-                "ja-specialist",
-                &config.device,
-                config.threads,
-                config.gpu_required || config.accelerator_required,
-            )?)
-        } else {
-            None
-        };
-    let mut fallback = Tesseract::new(&paths, &config.language).ok();
-    if fallback.is_none() {
+    let mut specialist = if nvsf_core::languages::find(&config.language)
+        .is_some_and(|l| l.code == "jpn")
+        && models::verify(&paths, "ja-specialist").is_ok()
+    {
+        Some(Ocr::new(
+            &paths,
+            "ja-specialist",
+            &config.device,
+            config.threads,
+            config.gpu_required || config.accelerator_required,
+        )?)
+    } else {
+        None
+    };
+    let has_paddle = nvsf_core::languages::paddle_model(&config.language).is_some();
+    let mut fallback = if has_paddle {
+        Tesseract::new(&paths, &config.language).ok()
+    } else {
+        None
+    };
+    if has_paddle && fallback.is_none() {
         project
             .warnings
             .push("Independent Tesseract verifier unavailable; primary ONNX remains active".into());
@@ -254,7 +258,7 @@ pub fn run(
                 last_ocr[i] = frame.time_ms;
             }
             if let Some(mut cue) = trackers[i].observe(frame.time_ms, end, candidates[i].clone())? {
-                if config.language == "fa" {
+                if nvsf_core::languages::is_persian(&config.language) {
                     cue.text = normalize_persian(&cue.text, config.normalize_persian);
                 }
                 next_id = next_id
@@ -291,7 +295,7 @@ pub fn run(
         });
         Ok(())
     };
-    let decoded = media::decode(&input, start, config.end_ms, |frame| {
+    let decoded = runtime.decode(&input, start, config.end_ms, |frame| {
         if let Some(previous) = pending.take() {
             let minimum_end = previous
                 .time_ms
@@ -331,7 +335,7 @@ pub fn run(
             break;
         }
         if let Some(mut cue) = tracker.finish() {
-            if config.language == "fa" {
+            if nvsf_core::languages::is_persian(&config.language) {
                 cue.text = normalize_persian(&cue.text, config.normalize_persian);
             }
             next_id = next_id

@@ -9,6 +9,10 @@ mod extract;
 #[cfg(target_arch = "wasm32")]
 mod ipc;
 #[cfg(target_arch = "wasm32")]
+mod languages;
+#[cfg(target_arch = "wasm32")]
+mod maintenance;
+#[cfg(target_arch = "wasm32")]
 mod models;
 #[cfg(target_arch = "wasm32")]
 mod review;

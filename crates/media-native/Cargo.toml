@@ -1,0 +1,21 @@
+[package]
+name = "nvsf-media-native"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lib]
+name = "nvsf_media_native"
+crate-type = ["cdylib"]
+
+[dependencies]
+nvsf-core.workspace = true
+image.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+ffmpeg-next = { version = "=9.0.0", default-features = false, features = ["codec", "format", "software-scaling"] }
+
+[lints]
+workspace = true

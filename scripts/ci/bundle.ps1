@@ -85,7 +85,7 @@ function Get-Inventory([string]$Directory, [string]$RelativeTo) {
         @{ file = [IO.Path]::GetRelativePath($RelativeTo, $file.FullName).Replace('\', '/'); bytes = $file.Length; sha256 = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant() }
     }
 }
-function Assert-InstalledPayload([string]$ResourceDirectory, [string]$BinDirectory, [switch]$LoaderPatched) {
+function Assert-InstalledPayload([string]$ResourceDirectory, [string]$BinDirectory, [string]$Format = '', [switch]$LoaderPatched) {
     foreach ($entry in $payloadInventory) {
         $path = Resolve-OwnedPath (Join-Path $ResourceDirectory $entry.file)
         if ($LoaderPatched -and $entry.file -match '^runtimes/.*\.so(\.|$)') { Assert-ElfArchitecture $path }
@@ -93,10 +93,37 @@ function Assert-InstalledPayload([string]$ResourceDirectory, [string]$BinDirecto
     }
     foreach ($pair in @(@{ name = "nvsf$ext"; source = $sidecar }, @{ name = "numera-video-sub-finder$ext"; source = $mainBinary })) {
         $path = Join-Path $BinDirectory $pair.name
-        if ($LoaderPatched) { Assert-ElfArchitecture $path }
+        if ($pair.name -eq "numera-video-sub-finder$ext" -and $Format) {
+            Assert-BundledMain $path $Format -LoaderPatched:$LoaderPatched
+        } elseif ($LoaderPatched) { Assert-ElfArchitecture $path }
         else { Assert-FileBytes $path (Get-FileHash -LiteralPath $pair.source).Hash.ToLowerInvariant() ([IO.FileInfo]::new($pair.source)).Length }
     }
     if ([IO.File]::Exists((Join-Path $BinDirectory 'portable.flag'))) { throw 'Installed bundles must not redirect writable data into installation resources.' }
+}
+function Assert-BundledMain([string]$Path, [string]$Format, [switch]$LoaderPatched) {
+    $markers = @{ nsis = 'NSS'; deb = 'DEB'; rpm = 'RPM'; appimage = 'APP' }
+    if (-not $markers.ContainsKey($Format)) { throw 'Unsupported bundle marker contract.' }
+    $originalMarker = '__TAURI_BUNDLE_TYPE_VAR_UNK'
+    $expectedMarker = '__TAURI_BUNDLE_TYPE_VAR_' + $markers[$Format]
+    foreach ($file in @($mainBinary, $Path)) {
+        if (([IO.FileInfo]::new($file)).Length -gt 268435456) { throw 'Bundle executable exceeds inspection byte budget.' }
+    }
+    $original = [IO.File]::ReadAllBytes($mainBinary)
+    $text = [Text.Encoding]::Latin1.GetString($original)
+    $index = $text.IndexOf($originalMarker, [StringComparison]::Ordinal)
+    if ($index -lt 0 -or $text.IndexOf($originalMarker, $index + 1, [StringComparison]::Ordinal) -ge 0) {
+        throw 'Original GUI must contain exactly one unpatched native bundle marker.'
+    }
+    $patch = [Text.Encoding]::ASCII.GetBytes($expectedMarker)
+    [Array]::Copy($patch, 0, $original, $index, $patch.Length)
+    if ($LoaderPatched) {
+        Assert-ElfArchitecture $Path
+        $actual = [Text.Encoding]::Latin1.GetString([IO.File]::ReadAllBytes($Path))
+        if ($actual.Contains($originalMarker) -or -not $actual.Contains($expectedMarker)) { throw 'Packaged AppImage GUI is missing its native updater marker.' }
+    } else {
+        $hash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($original)).ToLowerInvariant()
+        Assert-FileBytes $Path $hash $original.Length
+    }
 }
 function Assert-ElfArchitecture([string]$Path) {
     Assert-Header $Path '7F454C460201'
@@ -199,8 +226,9 @@ try {
                 if ($machine -ne $(if ($target.arch -eq 'arm64') { 0xAA64 } else { 0x8664 })) { throw 'Redistributable DLL architecture differs from target.' }
             } finally { $reader.Dispose() }
             $dest = Join-Path $payload $dll.Name
-            if ([IO.File]::Exists($dest)) { throw 'Redistributable DLL name collides with native payload.' }
-            Copy-BundleFile $dll.FullName $dest
+            if ([IO.File]::Exists($dest)) {
+                if ((Get-FileHash -LiteralPath $dest).Hash -ne (Get-FileHash -LiteralPath $dll.FullName).Hash) { throw 'Redistributable DLL bytes collide with native payload.' }
+            } else { Copy-BundleFile $dll.FullName $dest }
             $resources[$dest.Replace('\', '/')] = $dll.Name
         }
         $notice = Join-Path $payload 'licenses/microsoft/visual-cpp-runtime.txt'
@@ -248,7 +276,7 @@ try {
     [IO.File]::WriteAllText($configPath, ($bundleConfig | ConvertTo-Json -Depth 12), $utf8)
     $formats = @($target.package_formats)
     $nativeFormats = @($formats | Where-Object { $_ -notin @('zip', 'tar.gz') })
-    $bundleArguments = @('tauri', 'bundle', '--ci', '--no-sign', '--no-binary-patching', '--config', $configPath, '--bundles', ($nativeFormats -join ','), '-v')
+    $bundleArguments = @('tauri', 'bundle', '--ci', '--no-sign', '--config', $configPath, '--bundles', ($nativeFormats -join ','), '-v')
     if ($IsLinux) {
         Invoke-BundleCommand -Name native-formats -Executable taskset -Arguments (@('--cpu-list', $bundleCpuList, 'cargo') + $bundleArguments) -Wall 1500 -Idle 600
     } else { Invoke-BundleCommand -Name native-formats -Executable cargo -Arguments $bundleArguments -Wall 1500 -Idle 600 }
@@ -293,21 +321,21 @@ try {
                         $workers = @(Get-ChildItem -LiteralPath $inspect -Filter 'nvsf.exe' -File -Recurse)
                         if ($workers.Count -ne 1) { throw 'NSIS extraction does not contain exactly one native CLI.' }
                         $binDir = $workers[0].DirectoryName
-                        Assert-InstalledPayload $binDir $binDir
+                        Assert-InstalledPayload $binDir $binDir -Format nsis
                     }
                     'deb' {
                         Invoke-BundleCommand -Name deb-content -Executable dpkg-deb -Arguments @('-X', $dest, $inspect) -Wall 180 -Idle 90
-                        Assert-InstalledPayload (Join-Path $inspect "usr/lib/$($config.productName)") (Join-Path $inspect 'usr/bin')
+                        Assert-InstalledPayload (Join-Path $inspect "usr/lib/$($config.productName)") (Join-Path $inspect 'usr/bin') -Format $format
                     }
                     'rpm' {
                         Invoke-BundleCommand -Name rpm-content -Executable bsdtar -Arguments @('-xvf', $dest, '-C', $inspect, '--no-same-owner') -Wall 180 -Idle 90
-                        Assert-InstalledPayload (Join-Path $inspect "usr/lib/$($config.productName)") (Join-Path $inspect 'usr/bin')
+                        Assert-InstalledPayload (Join-Path $inspect "usr/lib/$($config.productName)") (Join-Path $inspect 'usr/bin') -Format $format
                     }
                     'appimage' {
                         Invoke-BundleCommand -Name appimage-mode -Executable chmod -Arguments @('755', $dest)
                         Invoke-BundleCommand -Name appimage-content -Executable $dest -Arguments @('--appimage-extract') -WorkingDirectory $inspect -Wall 180 -Idle 90
                         $appDir = Join-Path $inspect 'squashfs-root'
-                        Assert-InstalledPayload (Join-Path $appDir "usr/lib/$($config.productName)") (Join-Path $appDir 'usr/bin') -LoaderPatched
+                        Assert-InstalledPayload (Join-Path $appDir "usr/lib/$($config.productName)") (Join-Path $appDir 'usr/bin') -Format appimage -LoaderPatched
                     }
                 }
             }

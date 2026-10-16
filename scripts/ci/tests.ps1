@@ -9,6 +9,7 @@ $reports=Join-Path $root '.ci-work/packages/reports'
 [IO.Directory]::CreateDirectory($reports)|Out-Null
 $rows=@()
 foreach($entry in @(
+    @{Name='media-native';Args=@('test','--locked','-p','nvsf-media-native','--','--test-threads=2')},
     @{Name='core-app-xtask';Args=@('test','--locked','--no-fail-fast','-p','nvsf-core','-p','nvsf-app','-p','xtask','--','--test-threads=2')},
     @{Name='desktop';Args=@('test','--locked','-p','nvsf-desktop','--features','e2e','--','--test-threads=2')},
     @{Name='ui';Args=@('test','--locked','-p','nvsf-ui','--','--test-threads=2')}

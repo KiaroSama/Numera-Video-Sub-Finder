@@ -35,11 +35,15 @@ pub async fn pick_source(
         if !path.is_file() {
             return Err("Select a regular local video file".into());
         }
+        let _operation = lock(&host.0.operation)?;
+        host.ensure_idle()?;
         let fingerprint = nvsf_app::storage::hash_file(&path).map_err(|e| e.to_string())?;
         if expected_hash.is_some_and(|expected| fingerprint != expected) {
             return Err("Selected video does not match the project's source fingerprint".into());
         }
-        let media = nvsf_app::media::probe(&path).map_err(|e| e.to_string())?;
+        let media = nvsf_app::media::MediaRuntime::load(&host.0.paths)
+            .and_then(|runtime| runtime.probe(&path))
+            .map_err(|e| e.to_string())?;
         let token = host.token("source");
         let mut grants = lock(&host.0.sources)?;
         if grants.len() >= 1024 {
@@ -120,6 +124,12 @@ pub async fn preview_frame(
     time_ms: u64,
 ) -> Result<tauri::ipc::Response> {
     let host = host.inner().clone();
+    let operation = lock(&host.0.operation)?;
+    if host.0.model_busy.load(std::sync::atomic::Ordering::Acquire)
+        || host.0.closing.load(std::sync::atomic::Ordering::Acquire)
+    {
+        return Err("Wait for resource operations or shutdown before previewing".into());
+    }
     if host
         .0
         .source_busy
@@ -127,6 +137,7 @@ pub async fn preview_frame(
     {
         return Err("A source frame is already being decoded".into());
     }
+    drop(operation);
     blocking(move || {
         struct Reset<'a>(&'a std::sync::atomic::AtomicBool);
         impl Drop for Reset<'_> {
@@ -136,7 +147,9 @@ pub async fn preview_frame(
         }
         let _reset = Reset(&host.0.source_busy);
         let path = host.source(&token)?;
-        let rgb = nvsf_app::media::preview(&path, time_ms).map_err(|e| e.to_string())?;
+        let rgb = nvsf_app::media::MediaRuntime::load(&host.0.paths)
+            .and_then(|runtime| runtime.preview(&path, time_ms))
+            .map_err(|e| e.to_string())?;
         if u64::from(rgb.width()) * u64::from(rgb.height()) > 33_177_600 {
             return Err("Preview exceeds 8K pixel limit".into());
         }

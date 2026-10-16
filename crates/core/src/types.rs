@@ -110,8 +110,10 @@ impl ExtractConfig {
                 "distinct input/output paths required".into(),
             ));
         }
-        if !["en", "fa", "ja"].contains(&self.language.as_str()) {
-            return Err(Error::Invalid("choose en, fa or ja".into()));
+        if crate::languages::find(&self.language).is_none() {
+            return Err(Error::Invalid(
+                "choose a language from the official catalog".into(),
+            ));
         }
         if !["cpu", "auto", "cuda", "directml", "coreml"].contains(&self.device.as_str()) {
             return Err(Error::Invalid("unknown device".into()));

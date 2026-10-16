@@ -186,6 +186,7 @@ pub struct Doctor {
     pub data_root: String,
     pub models_root: String,
     pub runtimes_present: bool,
+    pub dependencies: Vec<nvsf_app::runtimes::Diagnostic>,
     pub log_available: bool,
     pub platform: String,
     pub models: Vec<nvsf_app::models::ModelStatus>,
@@ -195,11 +196,16 @@ pub struct Doctor {
 #[tauri::command]
 pub async fn doctor(host: tauri::State<'_, Host>) -> Result<Doctor> {
     let host = host.inner().clone();
-    blocking(move || Ok(Doctor {
+    blocking(move || {
+        let _operation = lock(&host.0.operation)?;
+        host.ensure_idle()?;
+        Ok(Doctor {
         data_root: path_text(&host.0.paths.root)?, models_root: path_text(&host.0.paths.models)?,
-        runtimes_present: host.0.paths.runtimes.is_dir(), log_available: host.0.log.path.is_some(),
+        runtimes_present: host.0.paths.runtimes.is_dir(),
+        dependencies: nvsf_app::runtimes::diagnose(&host.0.paths),
+        log_available: host.0.log.path.is_some(),
         platform: format!("{} / {}", std::env::consts::OS, std::env::consts::ARCH),
         models: nvsf_app::models::catalog(&host.0.paths).map_err(|e| e.to_string())?,
-        message: "Resource checks only. Provider execution and hardware qualification are reported by actual extraction, not inferred from directory presence.".into(),
-    })).await
+        message: "Native API/version checks do not qualify model operators, acceleration placement or subtitle accuracy. Repair needs approval and a matching signed release pack; restart after repair.".into(),
+    })}).await
 }

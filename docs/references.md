@@ -1,9 +1,17 @@
 # Primary references and provenance
 
-Reviewed 2026-10-13. These sources establish API/provenance decisions, not product test results.
+Reviewed 2026-10-13; maintenance/language/native-loader sources refreshed 2026-10-15, version precedence/download bounds/decoder-drain sources refreshed 2026-10-16. These sources establish API/provenance decisions, not product test results.
 
 - [Tauri 2 resource resolution](https://v2.tauri.app/develop/resources/) and [configuration](https://v2.tauri.app/reference/config/): native GUI/resource/sidecar packaging, scoped commands and generated glue.
-- [Leptos](https://book.leptos.dev/): Rust CSR frontend and reactive components.
+- [Leptos](https://book.leptos.dev/) and [controlled form properties](https://book.leptos.dev/view/05_forms.html): Rust CSR frontend and reactive controls; DOM checkbox changes alone do not prove asynchronous preference persistence.
+- [FFmpeg subtitle/ASS filters](https://ffmpeg.org/ffmpeg-filters.html#ass) and [frozen Noto fonts](https://github.com/google/fonts/tree/1d0e46c7933245c8180fe83e47917961c913bbdb/ofl): explicit shaped fonts for tiny synthetic script-integration fixtures. Original OFL1.1 notices accompany downloaded fonts; no real-subtitle accuracy claim follows from these fixtures.
+- [SemVer precedence](https://semver.org/#spec-item-10) and [semver 1.0.28 comparator](https://docs.rs/semver/1.0.28/semver/struct.Version.html#method.cmp_precedence): metadata-only differences do not make a newer release.
+- [Reqwest blocking timeouts](https://docs.rs/reqwest/0.13.5/reqwest/blocking/struct.ClientBuilder.html#method.timeout): per-operation I/O bounds supplement an explicit transfer deadline and cancellation checks.
+- [FFmpeg send/receive state machine](https://ffmpeg.org/doxygen/trunk/group__lavc__encdec.html) and [target-native error constants](https://docs.rs/ffmpeg-next/9.0.0/ffmpeg_next/util/error/index.html): need-more-input is platform EAGAIN, never a hardcoded Linux errno.
+- [Tauri updater](https://v2.tauri.app/plugin/updater/) and [updater 2.14.0 source](https://docs.rs/tauri-plugin-updater/2.14.0/tauri_plugin_updater/): signed-version verification, native format/install constraints and explicit consent. Bounded owned transfers and signed metadata supplement the plugin, not platform signing.
+- [tessdata_best frozen catalog](https://github.com/tesseract-ocr/tessdata_best/tree/e12c65a915945e4c28e237a9b52bc4a8f39a0cec) and [Tesseract model compatibility](https://tesseract-ocr.github.io/tessdoc/Data-Files-in-different-versions.html): 123 regular language/vertical variants, LSTM mode and immutable pack provenance.
+- [Rust cdylib](https://doc.rust-lang.org/reference/linkage.html), [libloading 0.9](https://docs.rs/libloading/0.9.0/libloading/) and [Linux loader](https://man7.org/linux/man-pages/man8/ld.so.8.html): explicit retained native-library ownership, borrowed synchronous ABI and relocated dependency closure.
+- [GitHub reusable workflows](https://docs.github.com/en/actions/how-tos/reuse-automations/reuse-workflows): a manual root with same-source reusable verification lanes.
 - [FFmpeg](https://ffmpeg.org/documentation.html), [ffmpeg-next 9](https://docs.rs/ffmpeg-next/9.0.0/ffmpeg_next/) and [pinned vcpkg source](https://github.com/microsoft/vcpkg/tree/e456309491fd875487bf02b8a0dca76c1b1b00cc): source PTS/decode ownership and target-native builds.
 - [ort](https://github.com/pykeio/ort) and [ONNX Runtime 1.31](https://github.com/microsoft/onnxruntime/releases/tag/v1.31.0): explicit environment/session/provider contracts. Exact ort RC is an intentional approved pin, not a stable release claim.
 - [Tesseract](https://github.com/tesseract-ocr/tesseract) and [tessdata](https://github.com/tesseract-ocr/tessdata): native verifier/language-pack provenance.

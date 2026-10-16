@@ -107,10 +107,18 @@ pub struct HistoryEntry {
     pub modified: Option<u64>,
 }
 #[derive(Clone, Debug, Deserialize)]
+pub struct Dependency {
+    pub component: String,
+    pub state: String,
+    pub message: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
 pub struct Doctor {
     pub data_root: String,
     pub models_root: String,
     pub runtimes_present: bool,
+    pub dependencies: Vec<Dependency>,
     pub log_available: bool,
     pub platform: String,
     pub models: Vec<Model>,

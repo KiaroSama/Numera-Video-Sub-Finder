@@ -3,13 +3,14 @@ use nvsf_core::{Recognition, Rect};
 use std::path::Path;
 
 pub fn suggest(paths: &Paths, input: &Path, language: &str) -> Result<Vec<Rect>> {
-    let info = media::probe(input)?;
+    let runtime = media::MediaRuntime::load(paths)?;
+    let info = runtime.probe(input)?;
     let duration = info.duration_ms.unwrap_or(10_000);
     let mut ocr = Ocr::new(paths, language, "auto", 2, false)?;
     let mut boxes = Vec::new();
     for fraction in [1u64, 3, 5, 7, 9] {
         let at = duration.saturating_mul(fraction) / 10;
-        let frame = match media::preview(input, at) {
+        let frame = match runtime.preview(input, at) {
             Ok(frame) => frame,
             Err(_) => continue,
         };
@@ -56,7 +57,7 @@ pub fn recognize_cue(
     region: Rect,
     language: &str,
 ) -> Result<Recognition> {
-    let frame = media::preview(input, at_ms)?;
+    let frame = media::MediaRuntime::load(paths)?.preview(input, at_ms)?;
     let (x, y, w, h) = region.pixels(frame.width(), frame.height())?;
     let crop = image::imageops::crop_imm(&frame, x, y, w, h).to_image();
     let mut ocr = Ocr::new(paths, language, "auto", 2, false)?;

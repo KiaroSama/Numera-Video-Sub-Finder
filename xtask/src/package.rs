@@ -16,17 +16,31 @@ pub fn assemble(
     output: &Path,
 ) -> Result<()> {
     let targets: serde_json::Value = serde_json::from_slice(&std::fs::read("ci/targets.json")?)?;
-    if !targets["targets"]
+    let native_target = targets["targets"]
         .as_array()
         .ok_or("Missing targets")?
         .iter()
-        .any(|r| r["id"] == target)
-    {
-        return Err("Unknown package target".into());
-    }
+        .find(|r| r["id"] == target)
+        .ok_or("Unknown package target")?;
     if !cli.is_file() || !gui.is_file() || !runtimes.is_dir() {
         return Err("Missing actual native package executable/runtime".into());
     }
+    let source = std::env::var("GITHUB_SHA")?;
+    let provenance = Path::new(".ci-work/native-notices/native-inventory.json");
+    if provenance.metadata()?.len() > 8_388_608 {
+        return Err("Native runtime inventory exceeds its byte bound".into());
+    }
+    let provenance: serde_json::Value = serde_json::from_slice(&std::fs::read(provenance)?)?;
+    validate_media_inventory(
+        &provenance,
+        target,
+        native_target["target"]
+            .as_str()
+            .ok_or("Missing native Rust target")?,
+        &source,
+        &sha(Path::new("Cargo.lock"))?,
+        runtimes,
+    )?;
     let root = output.join(format!("Numera-Video-Sub-Finder-0.1.0-{target}"));
     std::fs::create_dir_all(&root)?;
     let cli_name = if cfg!(windows) { "nvsf.exe" } else { "nvsf" };
@@ -62,7 +76,6 @@ pub fn assemble(
     let mut files = Vec::new();
     inventory(&root, &root, &mut files)?;
     files.sort_by(|a, b| a["file"].as_str().cmp(&b["file"].as_str()));
-    let source = std::env::var("GITHUB_SHA")?;
     let record = serde_json::json!({"schema":1,"target":target,"source_sha":source,"status":"development-unqualified","signing":"unsigned","files":files,"qualification":{"physical_gpu":"NOT_RUN","real_language_quality":"NOT_RUN"}});
     std::fs::write(
         root.join("manifest.json"),
@@ -128,6 +141,150 @@ pub fn standalone(target: &str, packages: &Path, fixtures: &Path) -> Result<()> 
         )?,
     )?;
     Ok(())
+}
+
+pub(crate) fn validate_media_inventory(
+    record: &serde_json::Value,
+    target: &str,
+    rust_target: &str,
+    source: &str,
+    lock_sha: &str,
+    runtimes: &Path,
+) -> Result<()> {
+    let name = if target.starts_with("windows-") {
+        "nvsf_media_native.dll"
+    } else if target.starts_with("macos-") {
+        "libnvsf_media_native.dylib"
+    } else {
+        "libnvsf_media_native.so"
+    };
+    let adapter = &record["media_adapter"];
+    if record["schema"] != 1
+        || record["target"] != target
+        || record["rust_target"] != rust_target
+        || record["source_sha"] != source
+        || record["cargo_lock_sha256"] != lock_sha
+        || adapter["file"] != name
+        || adapter["abi_version"] != 1
+        || adapter["rust_target"] != rust_target
+        || adapter["profile"] != "release"
+        || adapter["cargo_lock_sha256"] != lock_sha
+    {
+        return Err("Missing or mismatched same-source native media adapter provenance".into());
+    }
+    let files = record["runtime_files"]
+        .as_array()
+        .filter(|files| !files.is_empty() && files.len() <= 512)
+        .ok_or("Invalid native runtime inventory size")?;
+    let mut names = std::collections::HashSet::new();
+    for file in files {
+        let name = file["file"]
+            .as_str()
+            .ok_or("Missing native runtime filename")?;
+        if name.is_empty()
+            || name == "."
+            || name == ".."
+            || name.contains(['/', '\\', ':'])
+            || !names.insert(name)
+        {
+            return Err("Unsafe or duplicate native runtime inventory filename".into());
+        }
+        let path = runtimes.join(name);
+        let metadata = std::fs::symlink_metadata(&path)?;
+        if !metadata.is_file()
+            || metadata.len() == 0
+            || file["bytes"].as_u64() != Some(metadata.len())
+            || file["sha256"].as_str() != Some(sha(&path)?.as_str())
+        {
+            return Err("Native runtime bytes differ from the finalized loader inventory".into());
+        }
+    }
+    if !names.contains(name)
+        || files
+            .iter()
+            .find(|file| file["file"] == name)
+            .map(|file| &file["sha256"])
+            != Some(&adapter["sha256"])
+        || std::fs::read_dir(runtimes)?.count() != files.len()
+    {
+        return Err("Native media adapter/loader closure inventory is incomplete".into());
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod media_inventory_tests {
+    use super::*;
+
+    #[test]
+    fn final_adapter_and_loader_bytes_require_exact_source_target_and_lock() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path();
+        let name = "libnvsf_media_native.so";
+        std::fs::write(root.join(name), b"adapter").unwrap();
+        std::fs::write(root.join("libavcodec.so.63"), b"native dependency").unwrap();
+        let files: Vec<_> = [name, "libavcodec.so.63"]
+            .into_iter()
+            .map(|name| {
+                let path = root.join(name);
+                serde_json::json!({"file":name,"bytes":path.metadata().unwrap().len(),"sha256":sha(&path).unwrap()})
+            })
+            .collect();
+        let source = "a".repeat(40);
+        let lock = "b".repeat(64);
+        let record = serde_json::json!({
+            "schema":1,"target":"linux-x64","rust_target":"x86_64-unknown-linux-gnu",
+            "source_sha":source,"cargo_lock_sha256":lock,"runtime_files":files,
+            "media_adapter":{"file":name,"abi_version":1,"rust_target":"x86_64-unknown-linux-gnu",
+                "profile":"release","cargo_lock_sha256":lock,"sha256":sha(&root.join(name)).unwrap()}
+        });
+        let validate = |record: &serde_json::Value| {
+            validate_media_inventory(
+                record,
+                "linux-x64",
+                "x86_64-unknown-linux-gnu",
+                &source,
+                &lock,
+                root,
+            )
+        };
+        validate(&record).unwrap();
+        for field in ["source_sha", "target", "rust_target", "cargo_lock_sha256"] {
+            let mut wrong = record.clone();
+            wrong[field] = "wrong".into();
+            assert!(validate(&wrong).is_err(), "mismatched {field} accepted");
+        }
+        for field in [
+            "file",
+            "abi_version",
+            "profile",
+            "rust_target",
+            "cargo_lock_sha256",
+            "sha256",
+        ] {
+            let mut wrong = record.clone();
+            wrong["media_adapter"][field] = "wrong".into();
+            assert!(
+                validate(&wrong).is_err(),
+                "mismatched adapter {field} accepted"
+            );
+        }
+        std::fs::write(root.join(name), b"tampered adapter").unwrap();
+        assert!(validate(&record).is_err());
+        std::fs::write(root.join(name), b"adapter").unwrap();
+        std::fs::write(root.join("libavcodec.so.63"), b"tampered dependency").unwrap();
+        assert!(validate(&record).is_err());
+        std::fs::write(root.join("libavcodec.so.63"), b"native dependency").unwrap();
+        validate(&record).unwrap();
+        let mut unsafe_record = record.clone();
+        unsafe_record["runtime_files"][0]["file"] = "../escaped.so".into();
+        assert!(validate(&unsafe_record).is_err());
+        let mut missing = record.clone();
+        missing["media_adapter"] = serde_json::Value::Null;
+        assert!(validate(&missing).is_err());
+        std::fs::write(root.join("unlisted.dll"), b"unexpected").unwrap();
+        assert!(validate(&record).is_err());
+    }
 }
 
 fn relocate(binary: &Path, target: &str) -> Result<()> {

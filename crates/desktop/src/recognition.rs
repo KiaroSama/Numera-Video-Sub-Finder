@@ -7,8 +7,8 @@ pub async fn suggest_regions(
     token: String,
     language: String,
 ) -> Result<Vec<Rect>> {
-    if !["en", "fa", "ja"].contains(&language.as_str()) {
-        return Err("Choose en, fa or ja".into());
+    if nvsf_core::languages::find(&language).is_none() {
+        return Err("Choose a language from the official catalog".into());
     }
     let host = host.inner().clone();
     blocking(move || {
@@ -29,8 +29,8 @@ pub async fn recognize_cue(
     region: Rect,
     at_ms: u64,
 ) -> Result<Recognition> {
-    if !["en", "fa", "ja"].contains(&language.as_str()) {
-        return Err("Choose en, fa or ja".into());
+    if nvsf_core::languages::find(&language).is_none() {
+        return Err("Choose a language from the official catalog".into());
     }
     region.validate().map_err(|e| e.to_string())?;
     let host = host.inner().clone();

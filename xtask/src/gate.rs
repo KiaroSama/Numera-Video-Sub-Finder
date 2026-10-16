@@ -72,10 +72,17 @@ pub fn validate(reports: &Path, source: &str) -> Result<()> {
         }
         for (kind, minimum) in [
             ("standalone", 3),
-            ("gui", 5),
+            ("gui", 9),
             ("production", 4),
             ("suites", 1),
             ("bundles", 2),
+            ("maintenance", 5),
+            (
+                "multilingual",
+                if target.starts_with("windows-") { 6 } else { 7 },
+            ),
+            ("runtime-pack", 5),
+            ("update-assets", 2),
         ] {
             passed(
                 &read(&reports.join(format!("{target}-{kind}.json")))?,
@@ -179,6 +186,7 @@ mod tests {
         let source = "a".repeat(40);
         let good = json!({"schema":1,"source_sha":source,"target":"linux-x64","passed":true,"tests":5,"failed":0,"skipped":0});
         assert!(passed(&good, &source, "linux-x64", 5).is_ok());
+        assert!(passed(&good, &source, "linux-x64", 6).is_err());
         for (field, value) in [
             ("source_sha", json!("b".repeat(40))),
             ("target", json!("linux-arm64")),

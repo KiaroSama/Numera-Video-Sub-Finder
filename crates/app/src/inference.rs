@@ -8,10 +8,12 @@ use serde::Deserialize;
 pub struct Ocr {
     _environment: Environment,
     detector: Session,
-    recognizer: Session,
+    recognizer: Option<Session>,
+    tesseract: Option<crate::tesseract::Tesseract>,
     dictionary: Vec<String>,
     language: String,
     pub provider: String,
+    _runtime: libloading::Library,
 }
 
 #[derive(Deserialize)]
@@ -39,6 +41,7 @@ impl Ocr {
         } else {
             "libonnxruntime.so"
         })?;
+        let library = paths.library(crate::runtimes::ONNX_LIBRARY)?;
         static ENV: std::sync::OnceLock<Environment> = std::sync::OnceLock::new();
         static INIT: std::sync::Mutex<()> = std::sync::Mutex::new(());
         let guard = INIT
@@ -58,29 +61,54 @@ impl Ocr {
             env
         };
         drop(guard);
-        let id = if language == "fa" {
-            "fa"
-        } else if language == "ja-specialist" {
-            "ja-specialist"
+        let id = if language == "ja-specialist" {
+            Some("ja-specialist")
         } else {
-            "en-ja"
+            nvsf_core::languages::find(language)
+                .ok_or_else(|| fail("Choose a language from the official catalog"))?;
+            nvsf_core::languages::paddle_model(language)
         };
-        let det = models::verify(paths, "det")?;
-        let rec = models::verify(paths, id)?;
-        let (detector, provider) = providers::session(&env, &det, device, threads, required)?;
-        let (recognizer, actual) = providers::session(&env, &rec, &provider, threads, required)?;
-        if actual != provider {
-            return Err(fail("Detection and recognition provider mismatch"));
+        if id.is_none() && required {
+            return Err(crate::AppError::Provider(
+                "This language uses Tesseract CPU recognition; required acceleration cannot be met"
+                    .into(),
+            ));
         }
-        let meta: Meta = serde_yaml_ng::from_str(models::metadata(id)?)
-            .map_err(|e| fail(format!("Invalid model dictionary: {e}")))?;
-        let mut dictionary = vec![String::new()];
-        dictionary.extend(meta.post.character_dict);
-        dictionary.push(" ".into());
+        let det = models::verify(paths, "det")?;
+        let (detector, provider) = providers::session(&env, &det, device, threads, required)?;
+        let mut dictionary = Vec::new();
+        let (recognizer, tesseract) = if let Some(id) = id {
+            let rec = models::verify(paths, id)?;
+            let (recognizer, actual) =
+                providers::session(&env, &rec, &provider, threads, required)?;
+            if actual != provider {
+                return Err(fail("Detection and recognition provider mismatch"));
+            }
+            let meta: Meta = serde_yaml_ng::from_str(models::metadata(id)?)
+                .map_err(|e| fail(format!("Invalid model dictionary: {e}")))?;
+            dictionary.push(String::new());
+            dictionary.extend(meta.post.character_dict);
+            dictionary.push(" ".into());
+            (Some(recognizer), None)
+        } else {
+            (
+                None,
+                Some(crate::tesseract::Tesseract::new(paths, language)?),
+            )
+        };
+        let provider = if tesseract.is_some() {
+            format!(
+                "detector={provider};recognizer=tesseract-cpu (no admitted accelerator recognizer for this language)"
+            )
+        } else {
+            provider
+        };
         Ok(Self {
             _environment: env,
+            _runtime: library,
             detector,
             recognizer,
+            tesseract,
             dictionary,
             language: language.into(),
             provider,
@@ -124,6 +152,10 @@ impl Ocr {
         if crop.width() == 0 || crop.height() == 0 {
             return Err(fail("Empty recognition crop"));
         }
+        if let Some(tesseract) = &mut self.tesseract {
+            let vertical = nvsf_core::languages::find(&self.language).is_some_and(|l| l.vertical);
+            return tesseract.recognize(crop, vertical);
+        }
         let width =
             ((48.0 * crop.width() as f64 / crop.height() as f64).ceil() as u32).clamp(8, 3200);
         let padded = width.max(320);
@@ -137,6 +169,8 @@ impl Ocr {
         }
         let outputs = self
             .recognizer
+            .as_mut()
+            .ok_or_else(|| fail("Recognition backend is not initialized"))?
             .run(ort::inputs![
                 TensorRef::from_array_view(&input).map_err(|e| fail(e.to_string()))?
             ])
@@ -145,7 +179,7 @@ impl Ocr {
             .try_extract_array::<f32>()
             .map_err(|e| fail(e.to_string()))?;
         let (text, confidence) = decode_ctc(output, &self.dictionary)?;
-        let text = if self.language == "fa" {
+        let text = if nvsf_core::languages::paddle_model(&self.language) == Some("fa") {
             arabic_model_order(&text)
         } else {
             text
