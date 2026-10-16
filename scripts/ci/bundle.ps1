@@ -196,7 +196,7 @@ try {
     }
     $logo = Join-Path $payload 'assets/logo.png'
     Copy-BundleFile (Join-Path $root 'assets/logo.png') $logo
-    $resources[$logo.Replace('\', '/')] = 'assets/logo.png'
+    # The base configuration already maps the approved logo; resource maps merge by source key.
     foreach ($icon in $config.bundle.icon) {
         if (-not [IO.File]::Exists((Join-Path $desktop $icon))) { throw "Missing official generated desktop icon: $icon" }
     }

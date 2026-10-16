@@ -5,6 +5,8 @@ use nvsf_core::Recognition;
 use ort::{environment::Environment, session::Session, value::TensorRef};
 use serde::Deserialize;
 
+pub type InferenceObserver<'a> = dyn FnMut(&str, &[usize], &[f32]) -> Result<()> + 'a;
+
 pub struct Ocr {
     _environment: Environment,
     detector: Session,
@@ -116,6 +118,23 @@ impl Ocr {
     }
 
     pub fn detect(&mut self, image: &RgbImage) -> Result<Vec<(u32, u32, u32, u32)>> {
+        self.detect_inner(image, None)
+    }
+
+    /// Observes actual borrowed tensors synchronously; ordinary extraction records no pixels.
+    pub fn detect_observed(
+        &mut self,
+        image: &RgbImage,
+        observer: &mut InferenceObserver<'_>,
+    ) -> Result<Vec<(u32, u32, u32, u32)>> {
+        self.detect_inner(image, Some(observer))
+    }
+
+    fn detect_inner(
+        &mut self,
+        image: &RgbImage,
+        mut observer: Option<&mut InferenceObserver<'_>>,
+    ) -> Result<Vec<(u32, u32, u32, u32)>> {
         let longest = image.width().max(image.height()).max(1) as f32;
         let ratio = 960.0 / longest;
         let width = ((image.width() as f32 * ratio / 32.0).round().max(1.0) as u32) * 32;
@@ -131,6 +150,15 @@ impl Ocr {
                     (f32::from(p[2 - c]) / 255.0 - mean[c]) / std[c];
             }
         }
+        if let Some(observe) = observer.as_deref_mut() {
+            observe(
+                "detector-input",
+                input.shape(),
+                input
+                    .as_slice()
+                    .ok_or_else(|| fail("Noncontiguous detector input"))?,
+            )?;
+        }
         let outputs = self
             .detector
             .run(ort::inputs![
@@ -144,11 +172,36 @@ impl Ocr {
         if shape.len() != 4 || shape[0] != 1 || shape[1] != 1 {
             return Err(fail("Unexpected detector tensor shape"));
         }
+        if let Some(observe) = observer {
+            observe(
+                "detector-output",
+                shape,
+                output
+                    .as_slice()
+                    .ok_or_else(|| fail("Noncontiguous detector output"))?,
+            )?;
+        }
         let (width, height) = (shape[3], shape[2]);
         crate::vision::db_regions(output, width, height, image.width(), image.height())
     }
 
     pub fn recognize(&mut self, crop: &RgbImage) -> Result<Recognition> {
+        self.recognize_inner(crop, None)
+    }
+
+    pub fn recognize_observed(
+        &mut self,
+        crop: &RgbImage,
+        observer: &mut InferenceObserver<'_>,
+    ) -> Result<Recognition> {
+        self.recognize_inner(crop, Some(observer))
+    }
+
+    fn recognize_inner(
+        &mut self,
+        crop: &RgbImage,
+        mut observer: Option<&mut InferenceObserver<'_>>,
+    ) -> Result<Recognition> {
         if crop.width() == 0 || crop.height() == 0 {
             return Err(fail("Empty recognition crop"));
         }
@@ -167,6 +220,15 @@ impl Ocr {
                 input[[0, c, y as usize, x as usize]] = f32::from(p[2 - c]) / 127.5 - 1.0;
             }
         }
+        if let Some(observe) = observer.as_deref_mut() {
+            observe(
+                "recognizer-input",
+                input.shape(),
+                input
+                    .as_slice()
+                    .ok_or_else(|| fail("Noncontiguous recognizer input"))?,
+            )?;
+        }
         let outputs = self
             .recognizer
             .as_mut()
@@ -178,6 +240,15 @@ impl Ocr {
         let output = outputs[0]
             .try_extract_array::<f32>()
             .map_err(|e| fail(e.to_string()))?;
+        if let Some(observe) = observer {
+            observe(
+                "recognizer-output",
+                output.shape(),
+                output
+                    .as_slice()
+                    .ok_or_else(|| fail("Noncontiguous recognizer output"))?,
+            )?;
+        }
         let (text, confidence) = decode_ctc(output, &self.dictionary)?;
         let text = if nvsf_core::languages::paddle_model(&self.language) == Some("fa") {
             arabic_model_order(&text)

@@ -489,8 +489,8 @@ foreach (`$name in @('PATH','INCLUDE','LIB','LIBPATH','VCINSTALLDIR','VCToolsIns
     $llamaBuild = Join-Path $work 'llama-build'
     $configure = @('-S', $llamaSource, '-B', $llamaBuild, '-DCMAKE_BUILD_TYPE=Release', '-DBUILD_SHARED_LIBS=OFF', '-DLLAMA_BUILD_IS_DEV=OFF', '-DLLAMA_BUILD_TOOLS=ON', '-DLLAMA_BUILD_TESTS=OFF', '-DLLAMA_BUILD_EXAMPLES=OFF', '-DLLAMA_BUILD_SERVER=OFF', '-DLLAMA_BUILD_APP=OFF', '-DLLAMA_OPENSSL=OFF', '-DLLAMA_SUBPROCESS=OFF', '-DMTMD_VIDEO=OFF', '-DGGML_NATIVE=OFF', '-DGGML_METAL=OFF', '-DGGML_BLAS=OFF', '-DGGML_CUDA=OFF', '-DGGML_OPENMP=OFF', '-DGGML_CPU_KLEIDIAI=OFF')
     if ($IsWindows) {
-        $configure += @('-A', $(if ($target.arch -eq 'arm64') { 'ARM64' } else { 'x64' }))
-        if ($target.arch -eq 'arm64') { $configure += @('-T', 'ClangCL', '-DGGML_CPU_ARM_ARCH=armv8-a') }
+        $configure += @('-A', $(if ($target.arch -eq 'arm64') { 'ARM64' } else { 'x64' }), '-T', 'ClangCL')
+        if ($target.arch -eq 'arm64') { $configure += '-DGGML_CPU_ARM_ARCH=armv8-a' }
     }
     elseif ($IsMacOS) { $configure += @('-DCMAKE_OSX_DEPLOYMENT_TARGET=13.0', $(if ($target.arch -eq 'arm64') { '-DCMAKE_OSX_ARCHITECTURES=arm64' } else { '-DCMAKE_OSX_ARCHITECTURES=x86_64' })) }
     Invoke-NativeCommand -Name 'llama-configure' -Executable 'cmake' -Arguments $configure -Wall 300 -Idle 120

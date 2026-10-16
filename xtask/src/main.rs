@@ -3,6 +3,7 @@ mod gate;
 mod gui;
 mod maintenance;
 mod multilingual;
+mod ocr_evidence;
 mod package;
 mod process;
 mod production;
@@ -22,6 +23,16 @@ enum Cmd {
     Fixtures {
         #[arg(long)]
         ffmpeg: PathBuf,
+        #[arg(long)]
+        output: PathBuf,
+    },
+    OcrEvidence {
+        #[arg(long)]
+        ffmpeg: PathBuf,
+        #[arg(long)]
+        fixture_dir: PathBuf,
+        #[arg(long)]
+        data_root: PathBuf,
         #[arg(long)]
         output: PathBuf,
     },
@@ -155,6 +166,12 @@ fn run() -> Result<(), Box<dyn Error>> {
     )?;
     let result = match Args::parse().command {
         Cmd::Fixtures { ffmpeg, output } => fixture::generate(&ffmpeg, &output),
+        Cmd::OcrEvidence {
+            ffmpeg,
+            fixture_dir,
+            data_root,
+            output,
+        } => ocr_evidence::capture(&ffmpeg, &fixture_dir, &data_root, &output),
         Cmd::Smoke {
             cli,
             fixture_dir,

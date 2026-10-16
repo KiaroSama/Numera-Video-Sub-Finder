@@ -112,6 +112,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Trunk installation failed' }
           "$env:GITHUB_WORKSPACE/.ci-work/tools/bin" >> $env:GITHUB_PATH
           $env:PATH = "$env:GITHUB_WORKSPACE/.ci-work/tools/bin$([IO.Path]::PathSeparator)$env:PATH"
+      - name: Native Windows ARM frontend helpers
+        if: matrix.id == 'windows-arm64'
+        timeout-minutes: 30
+        run: ./scripts/ci/frontend-tools.ps1
       - name: Instrumented native GUI build
         run: |
           if ($IsMacOS -and '${{ matrix.arch }}' -eq 'x64') {
@@ -152,7 +156,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Native icon generation failed' }
           ./scripts/ci/frontend.ps1 -E2e
           if ($LASTEXITCODE -ne 0) { throw 'Instrumented Rust frontend build failed' }
-          ./scripts/ci/guard.ps1 -Name instrumented-desktop -WallSeconds 1800 -IdleSeconds 360 -Executable cargo -Arguments @('build','--locked','--release','-p','nvsf-desktop','--features','e2e')
+          ./scripts/ci/guard.ps1 -Name instrumented-desktop -WallSeconds 1800 -IdleSeconds 360 -Executable cargo -Arguments @('build','--locked','--release','--timings','-vv','-p','nvsf-desktop','--features','e2e')
           if ($LASTEXITCODE -ne 0) { throw 'Instrumented native GUI build failed' }
           $ext = if ($IsWindows) { '.exe' } else { '' }
           New-Item -ItemType Directory -Force -Path .ci-work/e2e | Out-Null
@@ -190,6 +194,8 @@ jobs:
           $ffmpeg = ".ci-work/native/installed/${{ matrix.triplet }}/tools/ffmpeg/ffmpeg$ext"
           ./scripts/ci/guard.ps1 -Name generate-fixtures -WallSeconds 120 -IdleSeconds 60 -Executable "$env:GITHUB_WORKSPACE/$xtask" -Arguments @('fixtures','--ffmpeg',"$env:GITHUB_WORKSPACE/$ffmpeg",'--output','.ci-work/fixtures')
           if ($LASTEXITCODE -ne 0) { throw 'Fixture generation failed' }
+          ./scripts/ci/guard.ps1 -Name ocr-stage-evidence -WallSeconds 120 -IdleSeconds 60 -Executable "$env:GITHUB_WORKSPACE/$xtask" -Arguments @('ocr-evidence','--ffmpeg',"$env:GITHUB_WORKSPACE/$ffmpeg",'--fixture-dir','.ci-work/fixtures','--data-root','.ci-work/data','--output','.ci-work/ocr-evidence')
+          if ($LASTEXITCODE -ne 0) { throw 'Generated fixture OCR evidence capture failed' }
           ./scripts/ci/guard.ps1 -Name cli-smoke -WallSeconds 210 -IdleSeconds 90 -Executable "$env:GITHUB_WORKSPACE/$xtask" -Arguments @('smoke','--cli',"target/release/nvsf$ext",'--fixture-dir','.ci-work/fixtures','--data-root','.ci-work/data')
           if ($LASTEXITCODE -ne 0) { throw 'Actual native extraction smoke failed' }
       - name: Actual representative language extraction and cue recognition
@@ -266,6 +272,7 @@ jobs:
           path: |
             .ci-work/packages/
             .ci-work/gui-evidence/
+            .ci-work/ocr-evidence/
           if-no-files-found: error
           retention-days: 7
       - name: Preserve failed diagnostics
@@ -278,6 +285,8 @@ jobs:
             .ci-work/data/logs/
             .ci-work/gui-evidence/
             .ci-work/fixtures/
+            .ci-work/ocr-evidence/
+            target/cargo-timings/
             .ci-work/multilingual/*-extract.log
             .ci-work/multilingual/*.srt
             .ci-work/native/vcpkg/buildtrees/ffmpeg/*.log
