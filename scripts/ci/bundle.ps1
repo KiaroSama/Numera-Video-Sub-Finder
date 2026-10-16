@@ -144,8 +144,9 @@ function Assert-Header([string]$Path, [string]$Hex, [int]$Offset = 0) {
     } finally { $stream.Dispose() }
 }
 $savedEnv = @{}
+$environment = [Environment]::GetEnvironmentVariables('Process')
 foreach ($name in @('CARGO_TARGET_DIR', 'CARGO_BUILD_JOBS', 'RAYON_NUM_THREADS', 'OMP_NUM_THREADS', 'TAURI_SIGNING_RPM_KEY', 'TAURI_SIGNING_RPM_KEY_PASSPHRASE')) {
-    $savedEnv[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
+    $savedEnv[$name] = $environment[$name]
 }
 try {
     Write-BundleLog INFO "Start target=$TargetId source_sha=$env:GITHUB_SHA status=development-unqualified signing=unsigned"
@@ -204,7 +205,7 @@ try {
     $env:CARGO_BUILD_JOBS = '2'
     $env:RAYON_NUM_THREADS = '2'
     $env:OMP_NUM_THREADS = '2'
-    foreach ($name in @('TAURI_SIGNING_RPM_KEY', 'TAURI_SIGNING_RPM_KEY_PASSPHRASE')) { [Environment]::SetEnvironmentVariable($name, $null, 'Process') }
+    foreach ($name in @('TAURI_SIGNING_RPM_KEY', 'TAURI_SIGNING_RPM_KEY_PASSPHRASE')) { Set-Item -LiteralPath "Env:$name" -Value $null }
     if ($IsWindows) {
         $vs = [Environment]::GetEnvironmentVariable('VCPKG_VISUAL_STUDIO_PATH', 'Process')
         if (-not $vs) { throw 'Native provisioning must export the discovered Visual Studio installation.' }
@@ -406,6 +407,6 @@ try {
     Write-BundleLog ERROR "Bundling failed: $($_.Exception.Message)"
     throw
 } finally {
-    foreach ($name in $savedEnv.Keys) { [Environment]::SetEnvironmentVariable($name, $savedEnv[$name], 'Process') }
+    foreach ($name in $savedEnv.Keys) { Set-Item -LiteralPath "Env:$name" -Value $savedEnv[$name] }
     $writer.Dispose()
 }

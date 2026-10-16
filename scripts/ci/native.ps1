@@ -350,7 +350,13 @@ foreach (`$name in @('PATH','INCLUDE','LIB','LIBPATH','VCINSTALLDIR','VCToolsIns
         Export-CiEnvironment "CXX_$triple" (Join-Path $llvm 'clang-cl.exe')
         Export-CiEnvironment "AR_$triple" (Join-Path $llvm 'llvm-lib.exe')
         Export-CiEnvironment "CARGO_TARGET_$($triple.ToUpperInvariant())_LINKER" (Join-Path $llvm 'lld-link.exe')
-        Write-NativeLog 'INFO' "Windows Rust toolchain selected LLVM target=$($target.target) native_tools=3; actual owned-tree checks remain mandatory."
+        # Native build-script executable probes link through clang-cl, independently of Cargo's linker.
+        foreach ($name in @("CFLAGS_$triple", "CXXFLAGS_$triple")) {
+            $flags = [Environment]::GetEnvironmentVariable($name, 'Process')
+            Export-CiEnvironment $name ("$flags --start-no-unused-arguments -fuse-ld=lld --end-no-unused-arguments".Trim())
+        }
+        Export-CiEnvironment 'CC_ENABLE_DEBUG_OUTPUT' '1'
+        Write-NativeLog 'INFO' "Windows Rust toolchain selected LLVM target=$($target.target) native_tools=3 driver_linker=lld; actual owned-tree checks remain mandatory."
         Export-CiEnvironment 'VCPKG_VISUAL_STUDIO_PATH' $vs
         Invoke-NativeCommand -Name 'vcpkg-bootstrap' -Executable (Join-Path $env:VCPKG_ROOT 'bootstrap-vcpkg.bat') -Arguments @('-disableMetrics') -Wall 600 -Idle 180
     } else {

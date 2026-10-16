@@ -169,6 +169,30 @@ pub fn capture(ffmpeg: &Path, fixture_dir: &Path, data_root: &Path, output: &Pat
     report["pixel_comparison"] = pixel_comparison(&native, &reference)?;
     persist(output, &report)?;
     let mut ocr = Ocr::new(&paths, "en", "cpu", 2, false)?;
+    #[cfg(windows)]
+    let mut verifier = {
+        let directory = tempfile::Builder::new()
+            .prefix("tessdata 日本 path with spaces ")
+            .tempdir_in(output)?;
+        let mut relocated = paths.clone();
+        relocated.models = directory.path().canonicalize()?.join("models");
+        std::fs::create_dir_all(relocated.models.join("tessdata"))?;
+        let selected = relocated.models.join("tessdata/eng.traineddata");
+        std::fs::copy(nvsf_app::models::verify_tessdata(&paths, "en")?, &selected)?;
+        let verifier = Tesseract::new(&relocated, "en")?;
+        std::fs::write(&selected, b"owned corrupt model fixture")?;
+        if Tesseract::new(&relocated, "en").is_ok()
+            || std::fs::read(&selected)? != b"owned corrupt model fixture"
+        {
+            return Err("Tesseract accepted or modified a corrupt relocated model".into());
+        }
+        nvsf_app::models::verify_tessdata(&paths, "en")?;
+        // The initialized native engine owns its model; temporary input bytes can disappear.
+        directory.close()?;
+        report["windows_model_io"] = json!({"unicode_spaced_root":true,"corrupt_pack_rejected":true,"original_pack_preserved":true});
+        verifier
+    };
+    #[cfg(not(windows))]
     let mut verifier = Tesseract::new(&paths, "en")?;
     report["provider"] = json!(ocr.provider);
     report["models"] = serde_json::to_value(

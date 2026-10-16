@@ -5,10 +5,26 @@ use nvsf_core::Recognition;
 use std::ffi::{CStr, CString, c_char, c_int, c_void};
 
 type Handle = *mut c_void;
+#[cfg(not(windows))]
+type Init = unsafe extern "C" fn(Handle, *const c_char, *const c_char, c_int) -> c_int;
+#[cfg(windows)]
+type Init = unsafe extern "C" fn(
+    Handle,
+    *const c_char,
+    c_int,
+    *const c_char,
+    c_int,
+    *mut *mut c_char,
+    c_int,
+    *mut *mut c_char,
+    *mut *mut c_char,
+    usize,
+    c_int,
+) -> c_int;
 struct Api {
     create: unsafe extern "C" fn() -> Handle,
     delete: unsafe extern "C" fn(Handle),
-    init: unsafe extern "C" fn(Handle, *const c_char, *const c_char, c_int) -> c_int,
+    init: Init,
     set_image: unsafe extern "C" fn(Handle, *const u8, c_int, c_int, c_int, c_int),
     set_mode: unsafe extern "C" fn(Handle, c_int),
     recognize: unsafe extern "C" fn(Handle, Handle) -> c_int,
@@ -37,7 +53,10 @@ impl Tesseract {
             Api {
                 create: symbol(&library, b"TessBaseAPICreate\0")?,
                 delete: symbol(&library, b"TessBaseAPIDelete\0")?,
+                #[cfg(not(windows))]
                 init: symbol(&library, b"TessBaseAPIInit2\0")?,
+                #[cfg(windows)]
+                init: symbol(&library, b"TessBaseAPIInit5\0")?,
                 set_image: symbol(&library, b"TessBaseAPISetImage\0")?,
                 set_mode: symbol(&library, b"TessBaseAPISetPageSegMode\0")?,
                 recognize: symbol(&library, b"TessBaseAPIRecognize\0")?,
@@ -49,18 +68,37 @@ impl Tesseract {
                 monitor_deadline: symbol(&library, b"TessMonitorSetDeadlineMSecs\0")?,
             }
         };
-        let lang = nvsf_core::languages::find(language)
-            .ok_or_else(|| fail("Unsupported Tesseract language"))?
-            .code
-            .as_str();
-        let data = paths.models.join("tessdata");
-        crate::models::verify_tessdata(paths, lang)?;
+        let language = nvsf_core::languages::find(language)
+            .ok_or_else(|| fail("Unsupported Tesseract language"))?;
+        let pack = crate::models::verify_tessdata(paths, &language.code)?;
+        #[cfg(windows)]
+        let data = {
+            use sha2::{Digest, Sha256};
+            use std::io::Read;
+            if language.bytes == 0 || language.bytes > 32 * 1024 * 1024 {
+                return Err(fail("Tesseract model exceeds its memory limit"));
+            }
+            let mut bytes = Vec::with_capacity(language.bytes as usize);
+            std::fs::File::open(pack)?
+                .take(language.bytes + 1)
+                .read_to_end(&mut bytes)?;
+            let hash: String = Sha256::digest(&bytes)
+                .iter()
+                .map(|b| format!("{b:02x}"))
+                .collect();
+            if bytes.len() as u64 != language.bytes || hash != language.sha256 {
+                return Err(fail("Tesseract model changed during initialization"));
+            }
+            bytes
+        };
+        #[cfg(not(windows))]
         let data = CString::new(
-            data.to_str()
+            pack.parent()
+                .and_then(|p| p.to_str())
                 .ok_or_else(|| fail("Tesseract data path must be UTF-8"))?,
         )
         .map_err(|_| fail("Invalid Tesseract path"))?;
-        let lang = CString::new(lang).map_err(|_| fail("Invalid language"))?;
+        let lang = CString::new(language.code.as_str()).map_err(|_| fail("Invalid language"))?;
         // SAFETY: allocate native owner; all string pointers remain alive through initialization.
         let handle = unsafe { (api.create)() };
         if handle.is_null() {
@@ -71,9 +109,32 @@ impl Tesseract {
             api,
             _library: library,
         };
-        // SAFETY: nonnull owned handle, initialized C strings.
         // Official tessdata_best resources contain only the LSTM engine (OEM_LSTM_ONLY=1).
-        if unsafe { (result.api.init)(handle, data.as_ptr(), lang.as_ptr(), 1) } != 0 {
+        #[cfg(not(windows))]
+        // SAFETY: nonnull owned handle, initialized C strings remain alive through Init2.
+        let status = unsafe { (result.api.init)(handle, data.as_ptr(), lang.as_ptr(), 1) };
+        #[cfg(windows)]
+        let status = {
+            let size = c_int::try_from(data.len())
+                .map_err(|_| fail("Tesseract model length exceeds its native limit"))?;
+            // SAFETY: verified bytes remain alive through Init5's synchronous copy; no native path I/O.
+            unsafe {
+                (result.api.init)(
+                    handle,
+                    data.as_ptr().cast(),
+                    size,
+                    lang.as_ptr(),
+                    1,
+                    std::ptr::null_mut(),
+                    0,
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                    0,
+                    0,
+                )
+            }
+        };
+        if status != 0 {
             return Err(fail("Tesseract initialization failed"));
         }
         Ok(result)

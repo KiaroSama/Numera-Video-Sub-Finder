@@ -54,9 +54,13 @@ jobs:
           "CARGO_HOME=$work/cargo" >> $env:GITHUB_ENV
           'RUST_TEST_THREADS=2' >> $env:GITHUB_ENV
           'PROPTEST_CASES=128' >> $env:GITHUB_ENV
-      - name: Hosted guard regression contracts
+      - name: Hosted CI script regression contracts
         timeout-minutes: 2
-        run: ./scripts/ci/guard-tests.ps1
+        run: |
+          ./scripts/ci/guard-tests.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Guard regression contracts failed' }
+          ./scripts/ci/guard.ps1 -Name frontend-contracts -WallSeconds 20 -IdleSeconds 10 -Executable pwsh -Arguments @('-NoLogo','-NoProfile','-NonInteractive','-File','scripts/ci/frontend-tests.ps1')
+          if ($LASTEXITCODE -ne 0) { throw 'Frontend environment regression contracts failed' }
       - name: Linux native prerequisites
         if: matrix.os == 'linux'
         run: |
@@ -95,7 +99,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Committed dependency lock mismatch' }
       - name: Core and native static analysis
         run: |
-          ./scripts/ci/guard.ps1 -Name rust-clippy -WallSeconds 1200 -IdleSeconds 180 -Executable cargo -Arguments @('clippy','--locked','-p','nvsf-core','-p','nvsf-app','-p','nvsf-media-native','-p','nvsf-cli','-p','xtask','--','-D','warnings')
+          ./scripts/ci/guard.ps1 -Name rust-clippy -WallSeconds 1200 -IdleSeconds 180 -Executable cargo -Arguments @('clippy','--locked','-vv','-p','nvsf-core','-p','nvsf-app','-p','nvsf-media-native','-p','nvsf-cli','-p','xtask','--','-D','warnings')
           if ($LASTEXITCODE -ne 0) { throw 'Rust static analysis failed' }
       - name: Same-target native media adapter and loader closure
         timeout-minutes: 35
