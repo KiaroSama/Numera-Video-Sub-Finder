@@ -75,8 +75,7 @@ pub struct Inner {
 pub struct Host(pub Arc<Inner>);
 
 impl Host {
-    pub fn new(paths: Paths) -> Self {
-        let log = Log::new(&paths, "nvsf-desktop");
+    pub fn new(paths: Paths, log: Log) -> Self {
         let queue = crate::queue::Store::load(&paths.root);
         Self(Arc::new(Inner {
             paths,

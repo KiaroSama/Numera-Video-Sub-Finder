@@ -1,6 +1,19 @@
 use crate::{AppError, Result, fail};
-use ort::{environment::Environment, session::Session};
+use ort::{
+    environment::Environment,
+    session::{
+        Session,
+        builder::{AutoDevicePolicy, SessionBuilder},
+    },
+};
 use std::path::Path;
+
+pub(crate) fn cpu(builder: SessionBuilder) -> Result<SessionBuilder> {
+    // rc.14's default MaxEfficiency can silently choose CoreML even for a CPU-labeled session.
+    builder
+        .with_auto_device(AutoDevicePolicy::PreferCPU)
+        .map_err(|e| AppError::Provider(e.to_string()))
+}
 
 pub fn session(
     env: &Environment,
@@ -50,7 +63,7 @@ fn build(
         .with_intra_threads(threads)
         .map_err(|e| fail(e.to_string()))?;
     match provider {
-        "cpu" => {}
+        "cpu" => builder = cpu(builder)?,
         #[cfg(feature = "cuda")]
         "cuda" => {
             builder = builder

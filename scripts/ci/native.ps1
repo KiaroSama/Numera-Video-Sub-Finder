@@ -132,14 +132,8 @@ function Repair-NativeClosure([string[]]$Seeds) {
                 $queue.Enqueue($packaged)
             }
         }
-        $termsRoot = Join-Path $vsRoot 'Licenses'
-        $terms = @(Get-ChildItem -LiteralPath $termsRoot -Recurse -File | Where-Object Extension -in @('.txt', '.rtf', '.html', '.htm', '.pdf'))
-        if (-not $terms.Count) { throw 'Visual Studio distribution license terms are absent.' }
-        foreach ($file in $terms) {
-            $destination = Join-Path $notices (Join-Path 'microsoft/visual-studio' ([IO.Path]::GetRelativePath($termsRoot, $file.FullName)))
-            [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($destination)) | Out-Null
-            Copy-Item -LiteralPath $file.FullName -Destination $destination -Force
-        }
+        . (Join-Path $PSScriptRoot 'notices.ps1')
+        $null = Copy-VisualStudioNotices (Join-Path $vsRoot 'Licenses') (Join-Path $notices 'microsoft/visual-studio')
         [IO.File]::WriteAllText((Join-Path $notices 'microsoft/visual-cpp-runtime.txt'), "Imported release CRT members staged from Visual Studio Redist/MSVC/$($versions[0].Name)/$($target.arch). Redistribution remains subject to Microsoft Software License Terms and licensed-user rights, not qualified by hosted execution.`nhttps://learn.microsoft.com/en-us/cpp/windows/redistributing-visual-cpp-files`n", $utf8)
     } elseif ($IsMacOS) {
         $queue = [Collections.Generic.Queue[string]]::new()

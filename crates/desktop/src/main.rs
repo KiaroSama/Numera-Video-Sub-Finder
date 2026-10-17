@@ -31,19 +31,45 @@ fn set_unsaved(host: tauri::State<'_, Host>, dirty: bool) -> state::Result<()> {
 }
 
 #[tauri::command]
-fn ui_ready(window: tauri::WebviewWindow, theme: String) -> state::Result<()> {
+fn ui_ready(
+    window: tauri::WebviewWindow,
+    host: tauri::State<'_, Host>,
+    theme: String,
+) -> state::Result<()> {
+    let host = host.inner();
+    host.0
+        .log
+        .event("INFO", "DESKTOP", "phase=ui-ready-received");
     let theme = match theme.as_str() {
         "dark" => Some(tauri::Theme::Dark),
         "light" => Some(tauri::Theme::Light),
         "system" => None,
         _ => return Err("Unknown theme; choose dark, light or system".into()),
     };
-    window.set_theme(theme).map_err(|e| e.to_string())?;
-    window.show().map_err(|e| e.to_string())?;
+    window.set_theme(theme).map_err(|e| {
+        host.0
+            .log
+            .event("ERROR", "DESKTOP", "phase=theme-apply-failed");
+        e.to_string()
+    })?;
+    window.show().map_err(|e| {
+        host.0
+            .log
+            .event("ERROR", "DESKTOP", "phase=window-show-failed");
+        e.to_string()
+    })?;
+    host.0
+        .log
+        .event("INFO", "DESKTOP", "phase=window-show-accepted");
     Ok(())
 }
 
 fn main() {
+    let started = std::time::Instant::now();
+    eprintln!(
+        "[INFO] [DESKTOP] phase=paths-start pid={}",
+        std::process::id()
+    );
     let paths = match nvsf_app::Paths::new(None) {
         Ok(paths) => paths,
         Err(e) => {
@@ -51,8 +77,28 @@ fn main() {
             std::process::exit(1);
         }
     };
+    let log = nvsf_app::logging::Log::new(&paths, "nvsf-desktop");
+    log.event(
+        "INFO",
+        "DESKTOP",
+        &format!(
+            "phase=paths-ready elapsed_ms={} pid={}",
+            started.elapsed().as_millis(),
+            std::process::id()
+        ),
+    );
+    let setup_log = log.clone();
+    let page_log = log.clone();
     let builder = tauri::Builder::default()
+        .on_page_load(move |_webview, payload| {
+            let phase = match payload.event() {
+                tauri::webview::PageLoadEvent::Started => "phase=page-load-started",
+                tauri::webview::PageLoadEvent::Finished => "phase=page-load-finished",
+            };
+            page_log.event("INFO", "DESKTOP", phase);
+        })
         .setup(move |app| {
+            setup_log.event("INFO", "DESKTOP", "phase=setup-entered");
             let mut paths = paths.clone();
             if std::env::var_os("NVSF_RUNTIME_ROOT").is_none()
                 && let Ok(resources) = app.path().resource_dir()
@@ -61,7 +107,8 @@ fn main() {
             }
             // Bare portable macOS binaries have no Resources directory. Paths retains
             // sibling/managed resolution; doctor still validates actual runtimes.
-            app.manage(Host::new(paths));
+            app.manage(Host::new(paths, setup_log.clone()));
+            setup_log.event("INFO", "DESKTOP", "phase=host-managed");
             updates::schedule(app.handle());
             Ok(())
         })
@@ -122,9 +169,14 @@ fn main() {
     let builder = builder.invoke_handler(commands![e2e::e2e_fixture, e2e::e2e_save_edits]);
     #[cfg(not(feature = "e2e"))]
     let builder = builder.invoke_handler(commands![]);
+    log.event("INFO", "DESKTOP", "phase=native-build-started");
     let app = builder
         .build(tauri::generate_context!())
-        .expect("Native desktop initialization failed");
+        .unwrap_or_else(|error| {
+            log.event("ERROR", "DESKTOP", "phase=native-build-failed");
+            panic!("Native desktop initialization failed: {error}");
+        });
+    log.event("INFO", "DESKTOP", "phase=native-build-returned");
     app.run(move |app, event| {
         // Tauri manages Host in setup during Ready, after Builder::build returns.
         let Some(shutdown) = app.try_state::<Host>().map(|state| state.inner().clone()) else {
@@ -143,6 +195,7 @@ fn main() {
             event: tauri::WindowEvent::CloseRequested { api, .. },
             ..
         } if label == "main" => {
+            shutdown.0.log.event("INFO", "DESKTOP", "phase=native-close-received");
             api.prevent_close();
             if shutdown.0.closing.swap(true, std::sync::atomic::Ordering::AcqRel) { return; }
             let host = shutdown.clone();
@@ -160,6 +213,7 @@ fn main() {
                     app.dialog().message("An extraction or model operation is still stopping. The application remains open to preserve checkpoints and resources. Wait for cancellation to finish, then close again.").title("Worker shutdown pending").blocking_show();
                     return;
                 }
+                host.0.log.event("INFO", "DESKTOP", "phase=shutdown-complete");
                 app.exit(0);
             });
         }

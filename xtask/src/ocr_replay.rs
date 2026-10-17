@@ -5,6 +5,21 @@ use std::{error::Error, path::Path, time::Instant};
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
+fn cpu_profile(bytes: &[u8]) -> Result<usize> {
+    let events: Vec<Value> = serde_json::from_slice(bytes)?;
+    let mut nodes = 0;
+    for event in events.iter().filter(|event| event["cat"] == "Node") {
+        if event["args"]["provider"] != "CPUExecutionProvider" {
+            return Err("CPU replay executed a missing or non-CPU node provider".into());
+        }
+        nodes += 1;
+    }
+    if nodes == 0 {
+        return Err("CPU replay profile contains no actual node execution".into());
+    }
+    Ok(nodes)
+}
+
 fn read_tensor(path: &Path, shape: &[usize]) -> Result<Vec<f32>> {
     let count = shape
         .iter()
@@ -118,7 +133,12 @@ pub fn capture(
             {
                 return Err("Replay profile escaped its owned root/byte budget".into());
             }
-            report["experiments"].as_array_mut().ok_or("Missing replay experiments")?.push(json!({"model":model,"input":input,"optimization":if disable{"disabled"}else{"runtime-default"},"output":result,"profile":profile.file_name().and_then(|s|s.to_str()),"runtime_build":runtime}));
+            let profile_bytes = std::fs::read(&profile)?;
+            if profile_bytes.len() > 8 * 1024 * 1024 {
+                return Err("Replay profile changed beyond its byte budget".into());
+            }
+            let cpu_nodes = cpu_profile(&profile_bytes)?;
+            report["experiments"].as_array_mut().ok_or("Missing replay experiments")?.push(json!({"model":model,"input":input,"optimization":if disable{"disabled"}else{"runtime-default"},"output":result,"profile":profile.file_name().and_then(|s|s.to_str()),"runtime_build":runtime,"provider":"CPUExecutionProvider","executed_nodes":cpu_nodes}));
             std::fs::write(
                 root.join("report.json"),
                 serde_json::to_vec_pretty(&report)?,
@@ -151,6 +171,22 @@ pub fn capture(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn cpu_profile_requires_actual_cpu_nodes_and_rejects_implicit_acceleration() {
+        assert_eq!(
+            cpu_profile(br#"[{"cat":"Node","args":{"provider":"CPUExecutionProvider"}}]"#).unwrap(),
+            1
+        );
+        for bytes in [
+            b"[]".as_slice(),
+            br#"[{"cat":"Node","args":{}}]"#,
+            br#"[{"cat":"Node","args":{"provider":"CPUExecutionProvider"}},{"cat":"Node","args":{"provider":"CoreMLExecutionProvider"}}]"#,
+            b"{}",
+        ] {
+            assert!(cpu_profile(bytes).is_err());
+        }
+    }
+
     #[test]
     fn replay_input_requires_exact_finite_little_endian_values() {
         let directory = tempfile::tempdir().unwrap();

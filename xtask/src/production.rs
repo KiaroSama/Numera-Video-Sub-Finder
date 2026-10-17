@@ -144,11 +144,21 @@ impl Budget {
             self.signature = signature;
             self.last_progress = Instant::now();
         }
-        if self.started.elapsed() >= WALL {
-            return Err("Production GUI exceeded 60s overall wall budget".into());
-        }
-        if self.last_progress.elapsed() >= IDLE {
-            return Err("Production GUI made no readiness/shutdown progress for 15s".into());
+        let reason = if self.started.elapsed() >= WALL {
+            Some("exceeded 60s overall wall budget")
+        } else if self.last_progress.elapsed() >= IDLE {
+            Some("made no readiness/shutdown progress for 15s")
+        } else {
+            None
+        };
+        if let Some(reason) = reason {
+            return Err(format!(
+                "Production GUI {reason}; last={} elapsed_ms={} idle_ms={}",
+                self.signature,
+                self.started.elapsed().as_millis(),
+                self.last_progress.elapsed().as_millis()
+            )
+            .into());
         }
         Ok(())
     }
@@ -227,17 +237,18 @@ pub fn smoke(gui: &Path, data: &Path, output: &Path) -> Result<()> {
     std::fs::create_dir_all(output)?;
     let evidence = tempfile::Builder::new()
         .prefix("production-lifecycle-")
-        .tempdir_in(output)?;
+        .tempdir_in(output)?
+        .keep();
     let state = tempfile::Builder::new()
         .prefix("production-data-")
         .tempdir_in(data)?;
-    let capture = evidence.path().join("capture.log");
+    let capture = evidence.as_path().join("capture.log");
     let logs = state.path().join("logs");
     no_listener()?;
     let mut command = Command::new(&gui);
     crate::fixture::clean_runtime_environment(&mut command);
     command
-        .current_dir(evidence.path())
+        .current_dir(evidence.as_path())
         .env("NVSF_DATA_ROOT", state.path())
         .env("TAURI_WEBDRIVER_PORT", "4445")
         .env_remove("NVSF_E2E_FIXTURE_ROOT")
@@ -255,7 +266,7 @@ pub fn smoke(gui: &Path, data: &Path, output: &Path) -> Result<()> {
             }
             no_listener()?;
             let (log, length) = diagnostic(&logs)?;
-            let window = native_window(pid, evidence.path(), &mut helper_index)?;
+            let window = native_window(pid, evidence.as_path(), &mut helper_index)?;
             budget.observe(format!("startup:{length}:{}", window.is_some()))?;
             if log.contains("[INFO] [APP] Startup version=")
                 && let Some(window) = window
@@ -268,7 +279,7 @@ pub fn smoke(gui: &Path, data: &Path, output: &Path) -> Result<()> {
         no_listener()?;
         // Ordinary ui_ready is the only production path that reveals the initially hidden window.
         budget.observe("visible-owned-window".into())?;
-        native_close(pid, &window, evidence.path(), &mut helper_index)?;
+        native_close(pid, &window, evidence.as_path(), &mut helper_index)?;
         budget.observe("native-close-requested".into())?;
         let exit = loop {
             no_listener()?;
@@ -293,14 +304,14 @@ pub fn smoke(gui: &Path, data: &Path, output: &Path) -> Result<()> {
             budget.observe("waiting-owned-descendant-exit".into())?;
             std::thread::park_timeout(Duration::from_millis(40));
         }
-        if native_window(pid, evidence.path(), &mut helper_index)?.is_some() {
+        if native_window(pid, evidence.as_path(), &mut helper_index)?.is_some() {
             return Err("Owned native window survived process shutdown".into());
         }
         no_listener()?;
         budget.observe("verification-complete".into())?;
         let (log, _) = diagnostic(&logs)?;
         std::fs::write(
-            evidence.path().join("production-native.log"),
+            evidence.as_path().join("production-native.log"),
             log.as_bytes(),
         )?;
         std::fs::write(
@@ -314,12 +325,21 @@ pub fn smoke(gui: &Path, data: &Path, output: &Path) -> Result<()> {
         )?;
         Ok(())
     })();
-    if result.is_err() {
+    let status_at_failure = process.status().map(|status| format!("{status:?}"));
+    let failure_context = json!({
+        "pid":pid,"target":std::env::var("NVSF_TARGET_ID").ok(),
+        "last_signature":budget.signature,"elapsed_ms":budget.started.elapsed().as_millis(),
+        "idle_ms":budget.last_progress.elapsed().as_millis(),"helper_count":helper_index,
+        "child_status":status_at_failure.map_err(|error| error.to_string()),
+        "evidence_directory":evidence.as_path().file_name().map(|name|name.to_string_lossy())
+    });
+    if let Err(error) = &result {
+        eprintln!("[ERROR] [CI] {error}; context={failure_context}");
         process.cleanup();
     }
     if let Ok((log, _)) = diagnostic(&logs) {
         let _ = std::fs::write(
-            evidence.path().join("production-native.log"),
+            evidence.as_path().join("production-native.log"),
             log.as_bytes(),
         );
     }
@@ -328,7 +348,17 @@ pub fn smoke(gui: &Path, data: &Path, output: &Path) -> Result<()> {
         std::thread::park_timeout(Duration::from_millis(20));
     }
     let clean = process.descendants_gone()?;
-    let evidence_path = evidence.keep();
+    let evidence_path = &evidence;
+    if result.is_err() || !clean {
+        std::fs::write(
+            output.join("production-gui-report.json"),
+            serde_json::to_vec_pretty(&json!({
+                "schema":1,"source_sha":sha,"passed":false,"profile":"production","tests":0,
+                "error":result.as_ref().err().map(|error|error.to_string()),
+                "context":failure_context,"cleanup_verified":clean,"duration_ms":budget.started.elapsed().as_millis()
+            }))?,
+        )?;
+    }
     if !clean {
         return Err(format!(
             "Production smoke cleanup incomplete; inspect {}",
@@ -337,14 +367,6 @@ pub fn smoke(gui: &Path, data: &Path, output: &Path) -> Result<()> {
         .into());
     }
     process.released = true;
-    if let Err(error) = &result {
-        std::fs::write(
-            output.join("production-gui-report.json"),
-            serde_json::to_vec_pretty(
-                &json!({"schema":1,"source_sha":sha,"passed":false,"profile":"production","tests":0,"error":error.to_string(),"cleanup_verified":clean,"duration_ms":budget.started.elapsed().as_millis()}),
-            )?,
-        )?;
-    }
     result
 }
 
@@ -642,8 +664,14 @@ mod tests {
     #[test]
     fn no_progress_budget_fails_instead_of_fabricating_ready() {
         let mut budget = Budget::new();
+        budget.signature = "startup:0:false".into();
         budget.last_progress = Instant::now() - IDLE;
-        assert!(budget.observe(String::new()).is_err());
+        let error = budget
+            .observe("startup:0:false".into())
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("startup:0:false"));
+        assert!(error.contains("idle_ms="));
         let mut budget = Budget::new();
         budget.started = Instant::now() - WALL;
         assert!(budget.observe("real-progress".into()).is_err());

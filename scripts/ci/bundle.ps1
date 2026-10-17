@@ -245,12 +245,10 @@ try {
         [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($notice)) | Out-Null
         [IO.File]::WriteAllText($notice, "Microsoft Visual C++ Runtime DLLs from installed Visual Studio Redist/MSVC/$($versions[0].Name)/$($target.arch).`nRedistribution is subject to the applicable Microsoft Software License Terms and licensed Visual Studio user rights; this development artifact is not release-qualified.`nhttps://learn.microsoft.com/en-us/cpp/windows/redistributing-visual-cpp-files`n", $utf8)
         $resources[$notice.Replace('\', '/')] = 'licenses/microsoft/visual-cpp-runtime.txt'
-        $licenseInputs = @(Get-ChildItem -LiteralPath (Join-Path $vs 'Licenses') -File -Recurse -ErrorAction SilentlyContinue | Where-Object { $_.Extension -in @('.txt', '.rtf', '.html', '.htm', '.pdf') })
-        if (-not $licenseInputs.Count) { throw 'Visual Studio distribution license terms are missing; refusing notice-incomplete artifact.' }
-        foreach ($terms in $licenseInputs) {
-            $rel = [IO.Path]::GetRelativePath((Join-Path $vs 'Licenses'), $terms.FullName).Replace('\', '/')
-            $dest = Join-Path $payload "licenses/microsoft/visual-studio/$rel"
-            Copy-BundleFile $terms.FullName $dest
+        . (Join-Path $PSScriptRoot 'notices.ps1')
+        $termsDestination = Join-Path $payload 'licenses/microsoft/visual-studio'
+        foreach ($rel in Copy-VisualStudioNotices (Join-Path $vs 'Licenses') $termsDestination) {
+            $dest = Join-Path $termsDestination $rel
             $resources[$dest.Replace('\', '/')] = "licenses/microsoft/visual-studio/$rel"
         }
     } elseif ($IsLinux) {

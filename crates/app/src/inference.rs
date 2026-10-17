@@ -139,12 +139,12 @@ impl Ocr {
         {
             return Err(fail("Invalid bounded replay tensor/model"));
         }
-        let mut builder = Session::builder(&self._environment)
-            .map_err(|e| fail(e.to_string()))?
-            .with_intra_threads(2)
-            .map_err(|e| fail(e.to_string()))?
-            .with_profiling(profile)
-            .map_err(|e| fail(e.to_string()))?;
+        let mut builder =
+            providers::cpu(Session::builder(&self._environment).map_err(|e| fail(e.to_string()))?)?
+                .with_intra_threads(2)
+                .map_err(|e| fail(e.to_string()))?
+                .with_profiling(profile)
+                .map_err(|e| fail(e.to_string()))?;
         if disable_optimizations {
             builder = builder
                 .with_optimization_level(ort::session::builder::GraphOptimizationLevel::Disable)

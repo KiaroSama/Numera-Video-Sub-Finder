@@ -61,6 +61,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Guard regression contracts failed' }
           ./scripts/ci/guard.ps1 -Name frontend-contracts -WallSeconds 20 -IdleSeconds 10 -Executable pwsh -Arguments @('-NoLogo','-NoProfile','-NonInteractive','-File','scripts/ci/frontend-tests.ps1')
           if ($LASTEXITCODE -ne 0) { throw 'Frontend environment regression contracts failed' }
+          ./scripts/ci/guard.ps1 -Name notice-contracts -WallSeconds 20 -IdleSeconds 10 -Executable pwsh -Arguments @('-NoLogo','-NoProfile','-NonInteractive','-File','scripts/ci/notice-tests.ps1')
+          if ($LASTEXITCODE -ne 0) { throw 'Native notice regression contracts failed' }
       - name: Linux native prerequisites
         if: matrix.os == 'linux'
         run: |
@@ -290,6 +292,7 @@ jobs:
             .ci-work/gui-evidence/
             .ci-work/fixtures/
             .ci-work/ocr-evidence/
+            .ci-work/production-evidence/
             target/cargo-timings/
             .ci-work/multilingual/*-extract.log
             .ci-work/multilingual/*.srt

@@ -108,6 +108,49 @@ impl Drop for Driver {
     }
 }
 
+fn handshake_remaining(deadline: Instant, now: Instant) -> Result<Duration> {
+    deadline
+        .checked_duration_since(now)
+        .filter(|remaining| !remaining.is_zero())
+        .ok_or_else(|| "Native Host/session exceeded combined45s admission deadline".into())
+}
+
+fn host_ready(log: &str, pid: u32) -> bool {
+    log.lines().any(|line| {
+        line.contains("[INFO] [DESKTOP] phase=paths-ready ")
+            && line.ends_with(&format!(" pid={pid}"))
+    }) && log.contains("[INFO] [DESKTOP] phase=host-managed\n")
+}
+
+fn host_managed(logs: &Path, pid: u32) -> Result<bool> {
+    if !logs.is_dir() {
+        return Ok(false);
+    }
+    for entry in std::fs::read_dir(logs)?.take(20) {
+        let path = entry?.path();
+        if !path
+            .file_name()
+            .is_some_and(|name| name.to_string_lossy().starts_with("nvsf-desktop_"))
+        {
+            continue;
+        }
+        let mut file = std::fs::File::open(path)?;
+        use std::io::Read;
+        if file.metadata()?.len() > 1024 * 1024 {
+            return Err("GUI startup log exceeds1MiB".into());
+        }
+        let mut log = String::new();
+        (&mut file).take(1024 * 1024 + 1).read_to_string(&mut log)?;
+        if log.len() > 1024 * 1024 {
+            return Err("GUI startup log grew beyond1MiB".into());
+        }
+        if host_ready(&log, pid) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 pub fn smoke(gui: &Path, fixtures: &Path, data: &Path, output: &Path) -> Result<()> {
     std::fs::create_dir_all(output)?;
     crate::gui_visual::icons(output)?;
@@ -127,6 +170,8 @@ pub fn smoke(gui: &Path, fixtures: &Path, data: &Path, output: &Path) -> Result<
         .build()?;
     let base = "http://127.0.0.1:4445".to_string();
     let ready = Instant::now() + Duration::from_secs(30);
+    // Preserve the original combined server30s + session HTTP15s admission ceiling.
+    let handshake = ready + Duration::from_secs(15);
     loop {
         if let Some(status) = process.status()? {
             return Err(format!(
@@ -135,24 +180,49 @@ pub fn smoke(gui: &Path, fixtures: &Path, data: &Path, output: &Path) -> Result<
             )
             .into());
         }
-        if client
+        let listening = client
             .get(format!("{base}/status"))
             .send()
-            .is_ok_and(|r| r.status().is_success())
-        {
-            break;
-        }
+            .is_ok_and(|r| r.status().is_success());
         if Instant::now() >= ready {
             return Err("Native driver failed readiness deadline".into());
         }
+        if listening {
+            break;
+        }
         std::thread::park_timeout(Duration::from_millis(50));
     }
-    let session: Value = client
+    loop {
+        if let Some(status) = process.status()? {
+            return Err(format!("GUI exited before native Host readiness: {status}").into());
+        }
+        let managed = host_managed(&data.join("logs"), process.pid())?;
+        handshake_remaining(handshake, Instant::now())?;
+        if managed {
+            break;
+        }
+        std::thread::park_timeout(Duration::from_millis(50));
+    }
+    let response = client
         .post(format!("{base}/session"))
+        .timeout(handshake_remaining(handshake, Instant::now())?.min(Duration::from_secs(15)))
         .json(&json!({"capabilities":{}}))
-        .send()?
-        .error_for_status()?
-        .json()?;
+        .send()?;
+    let status = response.status();
+    let mut body = Vec::new();
+    use std::io::Read;
+    response.take(65537).read_to_end(&mut body)?;
+    if body.len() > 65536 {
+        return Err("Native driver session response exceeds64KiB".into());
+    }
+    std::fs::write(output.join("driver-session.json"), &body)?;
+    handshake_remaining(handshake, Instant::now())?;
+    if !status.is_success() {
+        return Err(
+            format!("Native driver session failed: {status}; inspect driver-session.json").into(),
+        );
+    }
+    let session: Value = serde_json::from_slice(&body)?;
     let session = session["value"]["sessionId"]
         .as_str()
         .ok_or("Native driver returned no session")?
@@ -277,4 +347,28 @@ pub(super) fn decode_base64(text: &str) -> Result<Vec<u8>> {
         return Err("Actual screenshot is not PNG".into());
     }
     Ok(bytes)
+}
+
+#[cfg(test)]
+mod readiness_tests {
+    use super::*;
+
+    #[test]
+    fn server_or_another_process_log_is_not_native_host_readiness() {
+        let own = "[timestamp] [INFO] [DESKTOP] phase=paths-ready elapsed_ms=1 pid=42\n";
+        let managed = "[timestamp] [INFO] [DESKTOP] phase=host-managed\n";
+        assert!(!host_ready("", 42));
+        assert!(!host_ready(own, 42));
+        assert!(!host_ready(managed, 42));
+        assert!(!host_ready(&format!("{own}{managed}"), 4));
+        assert!(host_ready(&format!("{own}{managed}"), 42));
+        let start = Instant::now();
+        let deadline = start + Duration::from_secs(45);
+        assert_eq!(
+            handshake_remaining(deadline, start + Duration::from_secs(32)).unwrap(),
+            Duration::from_secs(13)
+        );
+        assert!(handshake_remaining(deadline, deadline).is_err());
+        assert!(handshake_remaining(deadline, deadline + Duration::from_secs(1)).is_err());
+    }
 }

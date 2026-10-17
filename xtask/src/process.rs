@@ -35,6 +35,10 @@ impl OwnedProcess {
         })
     }
 
+    pub fn pid(&self) -> u32 {
+        self.child.id()
+    }
+
     pub fn status(&mut self) -> Result<Option<ExitStatus>, Box<dyn Error>> {
         Ok(self.child.try_wait()?)
     }
