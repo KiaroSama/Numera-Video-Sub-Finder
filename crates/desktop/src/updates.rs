@@ -7,10 +7,10 @@ use serde::Serialize;
 use std::{
     io::Read,
     sync::{
-        Mutex,
+        Condvar, Mutex,
         atomic::{AtomicBool, Ordering},
     },
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use tauri::{
     Manager,
@@ -44,20 +44,50 @@ pub struct Maintenance {
     checking: AtomicBool,
     pub(crate) installing: AtomicBool,
     cancel: AtomicBool,
+    stopped: AtomicBool,
+    check_gate: Mutex<()>,
+    check_finished: Condvar,
+    stop_check: tokio::sync::Notify,
     timer: Mutex<Option<tauri::async_runtime::JoinHandle<()>>>,
 }
 
 impl Maintenance {
     pub fn stop(&self) -> bool {
+        let deadline = Instant::now() + Duration::from_secs(2);
         self.cancel.store(true, Ordering::Release);
-        if self.checking.load(Ordering::Acquire) {
-            return false;
+        {
+            let Ok(_gate) = self.check_gate.lock() else {
+                return false;
+            };
+            self.stopped.store(true, Ordering::Release);
+            self.stop_check.notify_one();
         }
-        if let Ok(mut timer) = self.timer.lock() {
-            if let Some(timer) = timer.take() {
+        {
+            let Ok(mut slot) = self.timer.try_lock() else {
+                return false;
+            };
+            if let Some(timer) = slot.as_mut() {
                 timer.abort();
+                // A request to abort is not proof that the request future was dropped.
+                let joined = tauri::async_runtime::block_on(async {
+                    tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), timer).await
+                });
+                if joined.is_err() {
+                    return false;
+                }
+                *slot = None;
             }
         }
+        let Ok(gate) = self.check_gate.lock() else {
+            return false;
+        };
+        let Ok((_gate, _)) = self.check_finished.wait_timeout_while(
+            gate,
+            deadline.saturating_duration_since(Instant::now()),
+            |_| self.checking.load(Ordering::Acquire),
+        ) else {
+            return false;
+        };
         !self.checking.load(Ordering::Acquire)
     }
 }
@@ -90,18 +120,39 @@ fn now() -> u64 {
         .as_secs()
 }
 
-pub fn check(host: &Host, manual: bool) -> Result<Status> {
+pub async fn check(host: &Host, manual: bool) -> Result<Status> {
+    let target = updates::target(format());
+    check_with(
+        host,
+        manual,
+        updates::check(env!("CARGO_PKG_VERSION"), &target),
+    )
+    .await
+}
+
+pub(crate) async fn check_with(
+    host: &Host,
+    manual: bool,
+    request: impl std::future::Future<Output = nvsf_app::Result<Option<Manifest>>>,
+) -> Result<Status> {
     let maintenance = &host.0.maintenance;
-    if maintenance.checking.swap(true, Ordering::AcqRel) {
+    let admitted = {
+        let _gate = lock(&maintenance.check_gate)?;
+        !maintenance.stopped.load(Ordering::Acquire)
+            && !maintenance.checking.swap(true, Ordering::AcqRel)
+    };
+    if !admitted {
         return update_status_inner(host);
     }
-    struct Reset<'a>(&'a AtomicBool);
+    struct Reset<'a>(&'a Maintenance);
     impl Drop for Reset<'_> {
         fn drop(&mut self) {
-            self.0.store(false, Ordering::Release);
+            let _gate = self.0.check_gate.lock().unwrap_or_else(|e| e.into_inner());
+            self.0.checking.store(false, Ordering::Release);
+            self.0.check_finished.notify_all();
         }
     }
-    let _reset = Reset(&maintenance.checking);
+    let _reset = Reset(maintenance);
     {
         let _operation = lock(&host.0.operation)?;
         if host.0.closing.load(Ordering::Acquire) {
@@ -124,12 +175,23 @@ pub fn check(host: &Host, manual: bool) -> Result<Status> {
             ..Default::default()
         };
     }
-    let target = updates::target(format());
-    let found = updates::check(env!("CARGO_PKG_VERSION"), &target);
+    let found = tokio::select! {
+        biased;
+        _ = maintenance.stop_check.notified() => None,
+        result = tokio::time::timeout(Duration::from_secs(45), request) => Some(result),
+    };
     let _operation = lock(&host.0.operation)?;
-    if host.0.closing.load(Ordering::Acquire) {
+    if host.0.closing.load(Ordering::Acquire) || maintenance.stopped.load(Ordering::Acquire) {
         return update_status_inner(host);
     }
+    let found = match found {
+        Some(Ok(result)) => result,
+        Some(Err(_)) => Err(nvsf_app::fail(
+            "Update metadata check exceeded 45-second deadline",
+        )),
+        None => return update_status_inner(host),
+    };
+    let target = updates::target(format());
     let mut offers = lock(&maintenance.offer)?;
     let mut status = lock(&maintenance.status)?;
     match found {
@@ -200,7 +262,7 @@ pub fn update_status(host: tauri::State<'_, Host>) -> Result<Status> {
 #[tauri::command]
 pub async fn check_updates(host: tauri::State<'_, Host>) -> Result<Status> {
     let host = host.inner().clone();
-    blocking(move || check(&host, true)).await
+    check(&host, true).await
 }
 #[tauri::command]
 pub fn set_update_checks(host: tauri::State<'_, Host>, enabled: bool) -> Result<Status> {
@@ -481,16 +543,25 @@ pub async fn save_update(
 }
 
 pub fn schedule(app: &tauri::AppHandle) {
-    let handle = app.clone();
-    let timer = tauri::async_runtime::spawn(async move {
+    schedule_host(app.state::<Host>().inner());
+}
+
+pub(crate) fn schedule_host(host: &Host) {
+    let maintenance = &host.0.maintenance;
+    let Ok(_gate) = maintenance.check_gate.lock() else {
+        return;
+    };
+    if maintenance.stopped.load(Ordering::Acquire) {
+        return;
+    }
+    let Ok(mut slot) = maintenance.timer.lock() else {
+        return;
+    };
+    let scheduled = host.clone();
+    *slot = Some(tauri::async_runtime::spawn(async move {
         loop {
-            let host = handle.state::<Host>().inner().clone();
-            let _ = blocking(move || check(&host, false).map(|_| ())).await;
+            let _ = check(&scheduled, false).await;
             tokio::time::sleep(Duration::from_secs(3600)).await;
         }
-    });
-    match app.state::<Host>().inner().0.maintenance.timer.lock() {
-        Ok(mut slot) => *slot = Some(timer),
-        Err(_) => timer.abort(),
-    }
+    }));
 }

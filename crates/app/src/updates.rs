@@ -205,25 +205,7 @@ pub fn client(timeout: Duration) -> Result<reqwest::blocking::Client> {
             "Numera-Video-Sub-Finder/",
             env!("CARGO_PKG_VERSION")
         ))
-        .redirect(reqwest::redirect::Policy::custom(|attempt| {
-            let url = attempt.url();
-            let host = url.host_str().unwrap_or_default();
-            if attempt.previous().len() >= 4
-                || url.scheme() != "https"
-                || !url.username().is_empty()
-                || url.password().is_some()
-                || !matches!(
-                    host,
-                    "github.com"
-                        | "release-assets.githubusercontent.com"
-                        | "objects.githubusercontent.com"
-                )
-            {
-                attempt.error("Release redirect refused")
-            } else {
-                attempt.follow()
-            }
-        }))
+        .redirect(redirect_policy())
         .build()
         .map_err(|e| fail(e.to_string()))
 }
@@ -249,10 +231,57 @@ pub(crate) fn metadata(response: reqwest::blocking::Response, limit: u64) -> Res
     Ok(bytes)
 }
 
-pub fn check(current: &str, target: &str) -> Result<Option<Manifest>> {
-    let response = client(Duration::from_secs(20))?
+fn redirect_policy() -> reqwest::redirect::Policy {
+    reqwest::redirect::Policy::custom(|attempt| {
+        let url = attempt.url();
+        if attempt.previous().len() >= 4
+            || url.scheme() != "https"
+            || !url.username().is_empty()
+            || url.password().is_some()
+            || !matches!(
+                url.host_str().unwrap_or_default(),
+                "github.com"
+                    | "release-assets.githubusercontent.com"
+                    | "objects.githubusercontent.com"
+            )
+        {
+            attempt.error("Release redirect refused")
+        } else {
+            attempt.follow()
+        }
+    })
+}
+
+async fn async_metadata(mut response: reqwest::Response, limit: usize) -> Result<Vec<u8>> {
+    if response.content_length().is_some_and(|n| n > limit as u64) {
+        return Err(fail("Release metadata exceeds byte budget"));
+    }
+    let mut bytes = Vec::new();
+    while let Some(chunk) = response.chunk().await.map_err(|e| fail(e.to_string()))? {
+        if chunk.len() > limit.saturating_sub(bytes.len()) {
+            return Err(fail("Release metadata exceeds byte budget"));
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    Ok(bytes)
+}
+
+pub async fn check(current: &str, target: &str) -> Result<Option<Manifest>> {
+    let client = reqwest::Client::builder()
+        .https_only(true)
+        .connect_timeout(Duration::from_secs(10))
+        .timeout(Duration::from_secs(20))
+        .user_agent(concat!(
+            "Numera-Video-Sub-Finder/",
+            env!("CARGO_PKG_VERSION")
+        ))
+        .redirect(redirect_policy())
+        .build()
+        .map_err(|e| fail(e.to_string()))?;
+    let response = client
         .get(FEED)
         .send()
+        .await
         .map_err(|e| fail(format!("Update check unavailable: {e}")))?;
     if response.status() == reqwest::StatusCode::NOT_FOUND {
         return Ok(None);
@@ -260,16 +289,17 @@ pub fn check(current: &str, target: &str) -> Result<Option<Manifest>> {
     let response = response
         .error_for_status()
         .map_err(|e| fail(format!("Update metadata unavailable: {e}")))?;
-    let bytes = metadata(response, 1024 * 1024)?;
-    let response = client(Duration::from_secs(20))?
+    let bytes = async_metadata(response, 1024 * 1024).await?;
+    let response = client
         .get(concat!(
             "https://github.com/KiaroSama/Numera-Video-Sub-Finder/releases/latest/download/",
             "latest.json.sig"
         ))
         .send()
+        .await
         .and_then(|r| r.error_for_status())
         .map_err(|e| fail(format!("Signed update metadata unavailable: {e}")))?;
-    let signature = metadata(response, 4096)?;
+    let signature = async_metadata(response, 4096).await?;
     verify_signature(&bytes, &signature)?;
     manifest(&bytes, current, target)
 }

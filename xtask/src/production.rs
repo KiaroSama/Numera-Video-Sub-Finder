@@ -10,6 +10,9 @@ use std::{
 };
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
+#[cfg(any(target_os = "linux", test))]
+#[path = "production_linux.rs"]
+mod linux;
 #[path = "production_listener.rs"]
 mod listener;
 
@@ -315,6 +318,13 @@ pub fn smoke(gui: &Path, data: &Path, output: &Path) -> Result<()> {
         eprintln!("[ERROR] [CI] {error}; context={failure_context}");
         #[cfg(target_os = "linux")]
         if alive_at_failure {
+            if let Err(error) = linux::capture(
+                pid,
+                gui.parent().ok_or("Production package parent missing")?,
+                evidence.as_path(),
+            ) {
+                eprintln!("[WARNING] [CI] Native wait/library evidence inconclusive: {error}");
+            }
             let diagnostic = helper(
                 "gdb",
                 &stack_arguments(pid),

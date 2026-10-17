@@ -339,6 +339,7 @@ pub fn smoke(gui: &Path, fixtures: &Path, data: &Path, output: &Path) -> Result<
             serde_json::to_vec_pretty(&json!({
                 "source_sha":std::env::var("GITHUB_SHA")?,"target":std::env::var("NVSF_TARGET_ID")?,
                 "owned_pid":process.pid(),"child_status":status.map_err(|error|error.to_string()),
+                "launched_unix_ms":launched.duration_since(std::time::SystemTime::UNIX_EPOCH)?.as_millis(),
                 "elapsed_ms":process.started.elapsed().as_millis(),"error":error.to_string(),"passed":false
             }))?,
         )?;

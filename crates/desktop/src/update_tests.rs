@@ -24,7 +24,7 @@ fn disabled_automatic_check_returns_local_status_without_release_request() {
         1
     );
     assert_eq!(std::fs::read_dir(&host.0.paths.logs).unwrap().count(), 1);
-    let status = updates::check(&host, false).unwrap();
+    let status = tauri::async_runtime::block_on(updates::check(&host, false)).unwrap();
     assert!(!status.enabled);
     assert_eq!(status.state, "idle");
     assert!(status.token.is_none());
@@ -34,6 +34,96 @@ fn disabled_automatic_check_returns_local_status_without_release_request() {
             .unwrap()
             .last_attempt
             .is_none()
+    );
+}
+
+#[test]
+fn native_close_cancels_pending_metadata_before_reporting_shutdown_complete() {
+    use std::{future::pending, sync::Arc, time::Duration};
+
+    struct ResponseLease(Arc<std::sync::atomic::AtomicBool>);
+    impl Drop for ResponseLease {
+        fn drop(&mut self) {
+            self.0.store(true, Ordering::Release);
+        }
+    }
+
+    let directory = tempfile::tempdir().unwrap();
+    let paths = nvsf_app::Paths::new(Some(directory.path())).unwrap();
+    let log = nvsf_app::logging::Log::new(&paths, "nvsf-desktop");
+    let host = Host::new(paths, log);
+    let (started, ready) = std::sync::mpsc::sync_channel(1);
+    let released = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let lease = ResponseLease(released.clone());
+    let checking_host = host.clone();
+    let mut check = tauri::async_runtime::spawn(async move {
+        updates::check_with(&checking_host, false, async move {
+            let _lease = lease;
+            started.send(()).unwrap();
+            pending().await
+        })
+        .await
+    });
+    let began = ready.recv_timeout(Duration::from_secs(2));
+    let concurrent = tauri::async_runtime::block_on(updates::check_with(&host, true, async {
+        panic!("an active metadata request must prevent a second network operation")
+    }));
+    let close_admitted = host.begin_close();
+    let stopped = host.shutdown();
+    let released_at_shutdown = released.load(Ordering::Acquire);
+    let result = tauri::async_runtime::block_on(async {
+        tokio::time::timeout(Duration::from_secs(2), &mut check).await
+    });
+    if result.is_err() {
+        check.abort();
+        tauri::async_runtime::block_on(async {
+            let _ = tokio::time::timeout(Duration::from_secs(2), check).await;
+        });
+    }
+    assert!(
+        began.is_ok(),
+        "metadata request must actually be pending before close"
+    );
+    assert!(close_admitted.unwrap());
+    assert!(
+        stopped,
+        "ordinary close must cancel and finish metadata discovery"
+    );
+    assert!(
+        released_at_shutdown,
+        "response must be dropped before shutdown reports success"
+    );
+    assert_eq!(concurrent.unwrap().state, "checking");
+    let status = result.unwrap().unwrap().unwrap();
+    assert!(status.token.is_none());
+    host.0.closing.store(false, Ordering::Release);
+    tauri::async_runtime::block_on(updates::check_with(&host, true, async {
+        panic!("shutdown must prevent a late manual request from reaching the network")
+    }))
+    .unwrap();
+}
+
+#[test]
+fn native_close_joins_the_owned_hourly_scheduler() {
+    let directory = tempfile::tempdir().unwrap();
+    let paths = nvsf_app::Paths::new(Some(directory.path())).unwrap();
+    nvsf_app::updates::save_preferences(
+        &paths,
+        &Preferences {
+            enabled: false,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let log = nvsf_app::logging::Log::new(&paths, "nvsf-desktop");
+    let host = Host::new(paths, log);
+    // Admit close before the scheduler can contend for the workspace operation gate.
+    assert!(host.begin_close().unwrap());
+    updates::schedule_host(&host);
+    assert!(host.shutdown());
+    assert!(
+        host.shutdown(),
+        "stopping an already joined scheduler is idempotent"
     );
 }
 
@@ -52,6 +142,8 @@ fn shared_resource_reservation_refuses_source_closing_and_concurrent_operations(
     host.0.maintenance.installing.store(true, Ordering::Release);
     assert!(host.ensure_idle().is_err());
     assert!(model_manager::begin(&host).is_err());
+    assert!(host.begin_close().is_err());
+    assert!(!host.0.closing.load(Ordering::Acquire));
     assert!(!host.shutdown());
     host.0
         .maintenance
@@ -67,4 +159,9 @@ fn shared_resource_reservation_refuses_source_closing_and_concurrent_operations(
     drop(operation);
     assert!(!host.0.model_busy.load(Ordering::Acquire));
     assert!(host.ensure_idle().is_ok());
+    assert!(host.shutdown());
+    tauri::async_runtime::block_on(updates::check_with(&host, true, async {
+        panic!("a check admitted after shutdown must not send a request")
+    }))
+    .unwrap();
 }

@@ -184,7 +184,11 @@ fn main() {
         };
         match event {
         tauri::RunEvent::ExitRequested { api, .. } => {
-            shutdown.0.closing.store(true, std::sync::atomic::Ordering::Release);
+            if let Err(error) = shutdown.begin_close() {
+                shutdown.0.log.event("WARNING", "DESKTOP", &error);
+                api.prevent_exit();
+                return;
+            }
             if !shutdown.shutdown() {
                 shutdown.0.closing.store(false, std::sync::atomic::Ordering::Release);
                 api.prevent_exit();
@@ -197,7 +201,11 @@ fn main() {
         } if label == "main" => {
             shutdown.0.log.event("INFO", "DESKTOP", "phase=native-close-received");
             api.prevent_close();
-            if shutdown.0.closing.swap(true, std::sync::atomic::Ordering::AcqRel) { return; }
+            match shutdown.begin_close() {
+                Ok(true) => {}
+                Ok(false) => return,
+                Err(error) => { shutdown.0.log.event("WARNING", "DESKTOP", &error); return; }
+            }
             let host = shutdown.clone();
             let app = app.clone();
             tauri::async_runtime::spawn_blocking(move || {

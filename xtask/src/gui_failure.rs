@@ -33,8 +33,17 @@ fn crash(bytes: &[u8], pid: u32) -> Result<Option<Value>> {
     {
         return Ok(None);
     }
+    let all_threads = report["threads"].as_array();
+    let faulting = report["faultingThread"]
+        .as_u64()
+        .and_then(|index| usize::try_from(index).ok())
+        .filter(|index| all_threads.is_some_and(|threads| *index < threads.len()));
+    let indices = faulting
+        .into_iter()
+        .chain((0..all_threads.map_or(0, Vec::len)).filter(|index| Some(*index) != faulting));
     let mut threads = Vec::new();
-    for thread in report["threads"].as_array().into_iter().flatten().take(16) {
+    for index in indices.take(16) {
+        let thread = &report["threads"][index];
         let mut frames = Vec::new();
         for frame in thread["frames"].as_array().into_iter().flatten().take(24) {
             let image = frame["imageIndex"].as_u64().and_then(|index| {
@@ -51,7 +60,8 @@ fn crash(bytes: &[u8], pid: u32) -> Result<Option<Value>> {
                 "image_arch":image.map(|image|text(&image["arch"],32))
             }));
         }
-        threads.push(json!({"triggered":thread["triggered"].as_bool(),"frames":frames}));
+        threads
+            .push(json!({"index":index,"triggered":thread["triggered"].as_bool(),"frames":frames}));
     }
     Ok(Some(json!({
         "owned_pid":pid,"exception_type":text(&report["exception"]["type"],64),
@@ -63,6 +73,50 @@ fn crash(bytes: &[u8], pid: u32) -> Result<Option<Value>> {
 }
 
 pub fn capture(output: &Path, pid: u32, started: SystemTime) -> Result<()> {
+    capture_to(output, pid, started, "native-fault.json")
+}
+
+pub fn finalize(output: &Path) -> Result<()> {
+    if !cfg!(target_os = "macos") || std::env::var("GITHUB_ACTIONS").as_deref() != Ok("true") {
+        return Err("Native fault finalization requires a hosted macOS runner".into());
+    }
+    let path = output.join("gui-failure.json");
+    let metadata = std::fs::symlink_metadata(&path)?;
+    if !metadata.is_file() || metadata.len() > 16384 {
+        return Err("Owned GUI failure record must be a bounded regular file".into());
+    }
+    let mut bytes = Vec::new();
+    std::fs::File::open(path)?
+        .take(16385)
+        .read_to_end(&mut bytes)?;
+    if bytes.len() > 16384 {
+        return Err("Owned GUI failure record grew beyond limits".into());
+    }
+    let failure: Value = serde_json::from_slice(&bytes)?;
+    if failure["source_sha"] != std::env::var("GITHUB_SHA")?
+        || failure["target"] != std::env::var("NVSF_TARGET_ID")?
+        || failure["passed"] != false
+    {
+        return Err("Owned GUI failure record has the wrong source or target".into());
+    }
+    let pid = failure["owned_pid"]
+        .as_u64()
+        .and_then(|n| u32::try_from(n).ok())
+        .filter(|pid| *pid != 0)
+        .ok_or("Owned GUI failure PID missing")?;
+    let launched = failure["launched_unix_ms"]
+        .as_u64()
+        .ok_or("Owned GUI launch time missing")?;
+    let started = SystemTime::UNIX_EPOCH
+        .checked_add(std::time::Duration::from_millis(launched))
+        .ok_or("Owned GUI launch time overflow")?;
+    if started.elapsed()?.as_secs() > 600 {
+        return Err("Owned GUI failure record is stale".into());
+    }
+    capture_to(output, pid, started, "native-fault-final.json")
+}
+
+fn capture_to(output: &Path, pid: u32, started: SystemTime, filename: &str) -> Result<()> {
     if !cfg!(target_os = "macos") {
         return Ok(());
     }
@@ -106,7 +160,7 @@ pub fn capture(output: &Path, pid: u32, started: SystemTime) -> Result<()> {
         return Err("Native crash metadata exceeded1s discovery budget".into());
     }
     std::fs::write(
-        output.join("native-fault.json"),
+        output.join(filename),
         serde_json::to_vec_pretty(&json!({
             "owned_pid":pid,"matching_reports":reports,
             "limitation":"One immediate bounded snapshot; missing or unsymbolicated report is inconclusive"
@@ -126,12 +180,20 @@ mod tests {
         assert_eq!(summary["threads"][0]["frames"][0]["image_name"], "WebKit");
         let serialized = summary.to_string();
         assert!(serialized.contains("takeSnapshot"));
-        let error = reqwest::Client::new().get("http://[").build().unwrap_err();
+        let error = reqwest::Client::new().get("https://[").build().unwrap_err();
         let detail = request_error(error, "/screenshot");
         assert!(detail.contains("/screenshot") && detail.contains("source"));
-        assert!(!detail.contains("http://["));
+        assert!(!detail.contains("https://["));
         assert!(!serialized.contains("PRIVATE_BODY") && !serialized.contains("/private"));
         assert!(crash(&encode(&report), 43).unwrap().is_none());
+        let fault = report["threads"][0].clone();
+        report["threads"] = json!(vec![json!({"frames":[]}); 21]);
+        report["threads"][20] = fault;
+        report["faultingThread"] = 20.into();
+        let summary = crash(&encode(&report), 42).unwrap().unwrap();
+        assert_eq!(summary["threads"].as_array().unwrap().len(), 16);
+        assert_eq!(summary["threads"][0]["index"], 20);
+        assert_eq!(summary["threads"][0]["frames"][0]["image_name"], "WebKit");
         report["procName"] = "other-app".into();
         assert!(crash(&encode(&report), 42).unwrap().is_none());
         assert!(crash(b"{\"bug_type\":\"309\"}\n{}", 42).unwrap().is_none());

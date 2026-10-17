@@ -159,6 +159,15 @@ impl Host {
         }
         Ok(())
     }
+    pub fn begin_close(&self) -> Result<bool> {
+        let _operation = self.0.operation.try_lock().map_err(|_| {
+            "A workspace operation is finishing; close again when it completes".to_string()
+        })?;
+        if self.0.maintenance.installing.load(Ordering::Acquire) {
+            return Err("Native update installation is active; close after it completes".into());
+        }
+        Ok(!self.0.closing.swap(true, Ordering::AcqRel))
+    }
     pub fn shutdown(&self) -> bool {
         if self.0.maintenance.installing.load(Ordering::Acquire) {
             self.0.log.event(

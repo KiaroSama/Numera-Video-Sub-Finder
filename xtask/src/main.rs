@@ -57,6 +57,10 @@ enum Cmd {
         #[arg(long)]
         output: PathBuf,
     },
+    GuiFault {
+        #[arg(long)]
+        output: PathBuf,
+    },
     Production {
         #[arg(long)]
         gui: PathBuf,
@@ -186,6 +190,7 @@ fn run() -> Result<(), Box<dyn Error>> {
             data_root,
             output,
         } => gui::smoke(&gui, &fixture_dir, &data_root, &output),
+        Cmd::GuiFault { output } => gui_failure::finalize(&output),
         Cmd::Production {
             gui,
             data_root,
