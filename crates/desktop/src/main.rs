@@ -54,7 +54,13 @@ fn main() {
     let builder = tauri::Builder::default()
         .setup(move |app| {
             let mut paths = paths.clone();
-            paths.use_bundled_runtimes(&app.path().resource_dir()?.join("runtimes"))?;
+            if std::env::var_os("NVSF_RUNTIME_ROOT").is_none()
+                && let Ok(resources) = app.path().resource_dir()
+            {
+                paths.use_bundled_runtimes(&resources.join("runtimes"))?;
+            }
+            // Bare portable macOS binaries have no Resources directory. Paths retains
+            // sibling/managed resolution; doctor still validates actual runtimes.
             app.manage(Host::new(paths));
             updates::schedule(app.handle());
             Ok(())

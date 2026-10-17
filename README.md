@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="assets/logo.png" alt="Official Numera Video Sub Finder logo" width="240">
+<img src="assets/logo.svg" alt="Official Numera Video Sub Finder logo" width="240">
 
 # Numera Video Sub Finder
 

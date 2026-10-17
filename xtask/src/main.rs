@@ -1,9 +1,11 @@
 mod fixture;
 mod gate;
 mod gui;
+mod gui_visual;
 mod maintenance;
 mod multilingual;
 mod ocr_evidence;
+mod ocr_replay;
 mod package;
 mod process;
 mod production;

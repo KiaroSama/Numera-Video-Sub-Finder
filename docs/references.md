@@ -1,6 +1,6 @@
 # Primary references and provenance
 
-Reviewed 2026-10-13; maintenance/language/native-loader sources refreshed 2026-10-15, version precedence/download bounds/decoder-drain sources refreshed 2026-10-16. These sources establish API/provenance decisions, not product test results.
+Reviewed 2026-10-13; maintenance/language/native-loader sources refreshed 2026-10-15, version precedence/download bounds/decoder-drain sources refreshed 2026-10-16. UI/icon/contrast and tensor-replay sources refreshed 2026-10-17. These sources establish API/provenance decisions, not product test results.
 
 - [Tauri 2 resource resolution](https://v2.tauri.app/develop/resources/) and [configuration](https://v2.tauri.app/reference/config/): native GUI/resource/sidecar packaging, scoped commands and generated glue.
 - [Leptos](https://book.leptos.dev/) and [controlled form properties](https://book.leptos.dev/view/05_forms.html): Rust CSR frontend and reactive controls; DOM checkbox changes alone do not prove asynchronous preference persistence.
@@ -27,3 +27,7 @@ Reviewed 2026-10-13; maintenance/language/native-loader sources refreshed 2026-1
 - [RustSec](https://github.com/rustsec/rustsec), [cargo-deny 0.20.2](https://github.com/EmbarkStudios/cargo-deny/tree/0.20.2), [CodeQL](https://docs.github.com/en/code-security/code-scanning/introduction-to-code-scanning/about-code-scanning-with-codeql): dependency/license/source checks, never exhaustive security assurance.
 
 Real fixture rights and candidate URLs are in [fixture manifest](../fixtures/manifest.json). Independently annotated visible text/source-frame timing is still required; automatic OCR output is not ground truth. Third-party code/native/model/media rights remain separate in [notices](../THIRD_PARTY_NOTICES.md).
+
+- [Tauri CLI2.12.3 icon source](https://github.com/tauri-apps/tauri/blob/tauri-cli-v2.12.3/crates/tauri-cli/src/icon.rs) and [icon documentation](https://v2.tauri.app/develop/icons/): square transparent SVG/PNG input, native container generation and alpha-aware resizing. The circular derivative preserves the approved artwork rather than introducing new branding.
+- [WCAG2.2 contrast](https://www.w3.org/WAI/WCAG22/Understanding/contrast-minimum.html) and [reflow](https://www.w3.org/WAI/WCAG22/Understanding/reflow.html): measured contrast and reachable narrow/zoomed workspace controls.
+- [ort rc.14 session options](https://github.com/pykeio/ort/blob/1ee1f842e8a381153ede7a506f01734e545854e0/src/session/builder/impl_options.rs) and [borrowed tensors](https://github.com/pykeio/ort/blob/1ee1f842e8a381153ede7a506f01734e545854e0/src/value/impl_tensor/create.rs): bounded identical-input replay, graph-optimization comparison and finalized provider profiles, not an assumed Apple runtime fix.

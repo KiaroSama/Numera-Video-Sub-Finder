@@ -46,7 +46,7 @@
       "icons/icon.ico"
     ],
     "resources": {
-      "../../assets/logo.png": "assets/logo.png"
+      "../../assets/logo.svg": "assets/logo.svg"
     },
     "useLocalToolsDir": true,
     "createUpdaterArtifacts": false,

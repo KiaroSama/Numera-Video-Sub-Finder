@@ -117,6 +117,71 @@ impl Ocr {
         })
     }
 
+    /// Replays a captured tensor without changing the ordinary sessions or OCR policy.
+    pub fn replay_observed(
+        &self,
+        paths: &Paths,
+        model: &str,
+        input: (&[usize], &[f32]),
+        disable_optimizations: bool,
+        profile: &std::path::Path,
+        observer: &mut InferenceObserver<'_>,
+    ) -> Result<(String, String)> {
+        let (shape, values) = input;
+        if !matches!(model, "det" | "en-ja")
+            || shape.len() != 4
+            || shape[0] != 1
+            || shape[1] != 3
+            || shape.contains(&0)
+            || shape.iter().try_fold(1usize, |n, &d| n.checked_mul(d)) != Some(values.len())
+            || values.len() > 8_000_000
+            || values.iter().any(|v| !v.is_finite())
+        {
+            return Err(fail("Invalid bounded replay tensor/model"));
+        }
+        let mut builder = Session::builder(&self._environment)
+            .map_err(|e| fail(e.to_string()))?
+            .with_intra_threads(2)
+            .map_err(|e| fail(e.to_string()))?
+            .with_profiling(profile)
+            .map_err(|e| fail(e.to_string()))?;
+        if disable_optimizations {
+            builder = builder
+                .with_optimization_level(ort::session::builder::GraphOptimizationLevel::Disable)
+                .map_err(|e| fail(e.to_string()))?;
+        }
+        let mut session = builder
+            .commit_from_file(models::verify(paths, model)?)
+            .map_err(|e| fail(e.to_string()))?;
+        {
+            let outputs = session
+                .run(ort::inputs![
+                    TensorRef::from_array_view((shape, values)).map_err(|e| fail(e.to_string()))?
+                ])
+                .map_err(|e| fail(e.to_string()))?;
+            let output = outputs[0]
+                .try_extract_tensor::<f32>()
+                .map_err(|e| fail(e.to_string()))?;
+            let dimensions = output
+                .0
+                .iter()
+                .map(|&v| usize::try_from(v))
+                .collect::<std::result::Result<Vec<_>, _>>()
+                .map_err(|_| fail("Invalid replay output dimensions"))?;
+            observer(
+                if model == "det" {
+                    "detector-output"
+                } else {
+                    "recognizer-output"
+                },
+                &dimensions,
+                output.1,
+            )?;
+        }
+        let profile = session.end_profiling().map_err(|e| fail(e.to_string()))?;
+        Ok((profile, ort::info().to_string()))
+    }
+
     pub fn detect(&mut self, image: &RgbImage) -> Result<Vec<(u32, u32, u32, u32)>> {
         self.detect_inner(image, None)
     }

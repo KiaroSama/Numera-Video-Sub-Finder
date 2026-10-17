@@ -8,16 +8,21 @@ use std::{
     time::{Duration, Instant},
 };
 
-type Result<T> = std::result::Result<T, Box<dyn Error>>;
+pub(super) type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
-struct Driver {
+pub(super) struct Driver {
     client: Client,
     base: String,
     session: String,
 }
 
 impl Driver {
-    fn request(&self, method: reqwest::Method, route: &str, body: Value) -> Result<Value> {
+    pub(super) fn request(
+        &self,
+        method: reqwest::Method,
+        route: &str,
+        body: Value,
+    ) -> Result<Value> {
         let response = self
             .client
             .request(
@@ -33,14 +38,14 @@ impl Driver {
         }
         Ok(result["value"].clone())
     }
-    fn script(&self, script: &str) -> Result<Value> {
+    pub(super) fn script(&self, script: &str) -> Result<Value> {
         self.request(
             reqwest::Method::POST,
             "/execute/sync",
             json!({"script":script,"args":[]}),
         )
     }
-    fn wait(&self, predicate: &str, seconds: u64) -> Result<()> {
+    pub(super) fn wait(&self, predicate: &str, seconds: u64) -> Result<()> {
         let deadline = Instant::now() + Duration::from_secs(seconds);
         loop {
             if self.script(predicate)?.as_bool() == Some(true) {
@@ -105,6 +110,7 @@ impl Drop for Driver {
 
 pub fn smoke(gui: &Path, fixtures: &Path, data: &Path, output: &Path) -> Result<()> {
     std::fs::create_dir_all(output)?;
+    crate::gui_visual::icons(output)?;
     let capture = output.join("gui-captured.log");
     let gui = gui.canonicalize()?;
     let fixtures = fixtures.canonicalize()?;
@@ -173,10 +179,16 @@ pub fn smoke(gui: &Path, fixtures: &Path, data: &Path, output: &Path) -> Result<
             "return document.documentElement.dataset.theme === '{theme}' && localStorage.getItem('nvsf-theme') === '{theme}';"
         );
         driver.wait(&expected, 5)?;
-        let styles = driver.script("const e=document.querySelector('.panel');const s=getComputedStyle(e);return {background:s.backgroundColor,color:s.color,font:s.fontSize,theme:document.documentElement.dataset.theme};")?;
-        std::fs::write(
-            output.join(format!("theme-{theme}.json")),
-            serde_json::to_vec_pretty(&styles)?,
+        crate::gui_visual::theme(&driver, output, theme)?;
+    }
+    crate::gui_visual::layout(&driver, output)?;
+    for (position, route) in [(2, "Queue"), (5, "History")] {
+        driver.click(&format!(
+            "nav[aria-label='Workspace navigation'] .nav-item:nth-of-type({position})"
+        ))?;
+        driver.wait(
+            &format!("return document.querySelector('h1')?.textContent === '{route}';"),
+            5,
         )?;
     }
     driver.click("nav[aria-label='Workspace navigation'] .nav-item:nth-of-type(4)")?;
@@ -249,13 +261,13 @@ pub fn smoke(gui: &Path, fixtures: &Path, data: &Path, output: &Path) -> Result<
     std::fs::write(
         output.join("gui-report.json"),
         serde_json::to_vec_pretty(
-            &json!({"schema":1,"source_sha":std::env::var("GITHUB_SHA")?,"target":std::env::var("NVSF_TARGET_ID")?,"passed":true,"tests":9,"failed":0,"skipped":0,"profile":"instrumented","proof":["native startup","fixed source admission and source frame","three persisted themes","model catalog IDs and controls","full language catalog and nonpriority extraction choices","automatic update disable persisted through Settings","native diagnostics and unapproved repair guard","actual worker extraction","Unicode edit and exported bytes"],"not_proved":["physical IME composition","production listener absence","real-language quality","positive signed repair/update lifecycle","platform installers"]}),
+            &json!({"schema":1,"source_sha":std::env::var("GITHUB_SHA")?,"target":std::env::var("NVSF_TARGET_ID")?,"passed":true,"tests":12,"failed":0,"skipped":0,"profile":"instrumented","proof":["native startup","fixed source admission and source frame","three persisted themes with measured contrast and circular logo","six workspace destinations","narrow and wide layout","programmatic control focus","model catalog IDs and controls","full language catalog and nonpriority extraction choices","automatic update disable persisted through Settings","native diagnostics and unapproved repair guard","actual worker extraction","Unicode edit and exported bytes"],"not_proved":["native Tab traversal","physical IME composition","production listener absence","real-language quality","positive signed repair/update lifecycle","platform installers"]}),
         )?,
     )?;
     Ok(())
 }
 
-fn decode_base64(text: &str) -> Result<Vec<u8>> {
+pub(super) fn decode_base64(text: &str) -> Result<Vec<u8>> {
     if text.len() > 32 * 1024 * 1024 || !text.len().is_multiple_of(4) {
         return Err("Invalid/oversized screenshot encoding".into());
     }

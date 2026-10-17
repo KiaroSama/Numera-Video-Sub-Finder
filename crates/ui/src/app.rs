@@ -164,20 +164,27 @@ fn App(initial_theme: String) -> impl IntoView {
         <div class="app-shell">
             <aside class="sidebar">
                 <a class="brand" href="#extract" on:click=move |_|ui.route.set("Extract".into()) aria-label="Numera Video Sub Finder home">
-                    <img src="logo.png" width="44" height="44" alt="Official Numera logo"/>
+                    <img src="logo.svg" width="48" height="48" alt=""/>
                     <span><strong>"NUMERA"</strong><small>"VIDEO SUB FINDER"</small></span>
                 </a>
-                <div class="sidebar-caption">"LOCAL SUBTITLE WORKSPACE"</div>
+                <div class="sidebar-caption">"WORKSPACE"</div>
                 <nav aria-label="Workspace navigation">{routes.into_iter().map(|(route,path)|view!{
                     <button class="nav-item" class:active=move ||ui.route.get()==route aria-current=move ||if ui.route.get()==route{Some("page")}else{None}
                         on:click=move |_|ui.route.set(route.into())>
                         <svg viewBox="0 0 24 24" aria-hidden="true"><path d=path/></svg><span>{route}</span>
                     </button>
                 }).collect_view()}</nav>
-                <div class="sidebar-footer"><strong>"Built for local work."</strong><p>"Your video stays on this device. No cloud transcription. No telemetry."</p><span class="version mono">{concat!("v",env!("CARGO_PKG_VERSION"))}</span></div>
+                <div class="sidebar-footer"><strong class="local-label"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 4 6v6c0 5 8 9 8 9s8-4 8-9V6z M9 12l2 2 4-4"/></svg>"Local by design"</strong><p>"Your video stays on this device. No cloud transcription. No telemetry."</p><span class="version mono">{concat!("v",env!("CARGO_PKG_VERSION"))}</span></div>
             </aside>
             <div class="workspace">
-                <header class="topbar"><div><span class="eyebrow">"NUMERA / WORKSPACE"</span><h1>{move ||ui.route.get()}</h1></div>
+                <header class="topbar"><div><span class="eyebrow">"NUMERA / WORKSPACE"</span><h1>{move ||ui.route.get()}</h1><p class="route-description">{move ||match ui.route.get().as_str(){
+                        "Extract"=>"From visible subtitles to editable text. Entirely on your device.",
+                        "Queue"=>"Follow extraction progress and manage recoverable jobs.",
+                        "Review"=>"Compare every correction with the original source.",
+                        "Models"=>"Manage verified recognition resources and language packs.",
+                        "History"=>"Return to saved projects and previous extraction work.",
+                        _=>"Workspace preferences, updates and native resources.",
+                    }}</p></div>
                     <div class="topbar-actions"><Show when=move ||ui.busy.get()><span role="status" class="muted">"Native operation in progress…"</span></Show>
                         <button title="Open a saved review project" disabled=move ||ui.busy.get()||ui.active() on:click={move |_|ui.request::<Option<nvsf_core::Project>>("pick_project",json!({}),move |p|if let Some(p)=p{ui.load(p);})}>"Open project"</button>
                         <label class="sr-only" for="header-theme">"Workspace theme"</label><select id="header-theme" class="theme-select" prop:value=move ||ui.theme.get() on:change=move |e|ui.set_theme(event_target_value(&e))>

@@ -156,7 +156,7 @@ jobs:
           if ($IsMacOS -and '${{ matrix.arch }}' -eq 'x64') { Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction Stop }
           "$env:GITHUB_WORKSPACE/.ci-work/tools/bin" >> $env:GITHUB_PATH
           $env:PATH = "$env:GITHUB_WORKSPACE/.ci-work/tools/bin$([IO.Path]::PathSeparator)$env:PATH"
-          cargo tauri icon assets/logo.png --output crates/desktop/icons
+          ./scripts/ci/guard.ps1 -Name native-icons -WallSeconds 60 -IdleSeconds 20 -Executable cargo -Arguments @('tauri','icon','assets/logo.svg','--output','crates/desktop/icons')
           if ($LASTEXITCODE -ne 0) { throw 'Native icon generation failed' }
           ./scripts/ci/frontend.ps1 -E2e
           if ($LASTEXITCODE -ne 0) { throw 'Instrumented Rust frontend build failed' }

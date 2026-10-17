@@ -13,7 +13,7 @@ use std::{
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
-fn tensor_summary(stage: &str, shape: &[usize], values: &[f32]) -> Result<Value> {
+pub(super) fn tensor_summary(stage: &str, shape: &[usize], values: &[f32]) -> Result<Value> {
     let count = shape
         .iter()
         .try_fold(1usize, |n, &d| n.checked_mul(d))
@@ -262,6 +262,7 @@ pub fn capture(ffmpeg: &Path, fixture_dir: &Path, data_root: &Path, output: &Pat
         report["samples"].as_array_mut().ok_or("Missing diagnostic samples")?.push(json!({"label":label,"roi":image_summary(&roi),"boxes":boxes,"recognized":recognized,"tensors":tensors}));
         persist(output, &report)?;
     }
+    crate::ocr_replay::capture(&mut ocr, &paths, output, started, tensor_bytes)?;
     report["status"] =
         json!("captured; ordinary Hello/recurrence/timing acceptance is separate and unchanged");
     report["elapsed_ms"] = json!(started.elapsed().as_millis());

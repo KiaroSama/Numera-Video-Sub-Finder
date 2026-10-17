@@ -64,6 +64,8 @@ pub fn assemble(
     for file in ["LICENSE", "THIRD_PARTY_NOTICES.md", "README.md"] {
         std::fs::copy(file, root.join(file))?;
     }
+    std::fs::create_dir_all(root.join("assets"))?;
+    std::fs::copy("assets/logo.svg", root.join("assets/logo.svg"))?;
     copy_tree(
         Path::new(".ci-work/native-notices"),
         &root.join("licenses/native"),
@@ -217,6 +219,25 @@ mod media_inventory_tests {
     use super::*;
 
     #[test]
+    fn rejected_package_member_reports_only_escaped_relative_path() {
+        let directory = tempfile::tempdir().unwrap();
+        let notices = directory.path().join("licenses/native");
+        std::fs::create_dir_all(&notices).unwrap();
+        let name = ".owned-notice-fixture.txt";
+        std::fs::write(notices.join(name), b"private fixture body").unwrap();
+        let error = inventory(directory.path(), directory.path(), &mut Vec::new())
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("licenses/native/.owned-notice-fixture.txt"));
+        assert!(!error.contains(&directory.path().display().to_string()));
+        assert!(!error.contains("private fixture body"));
+        assert_eq!(
+            std::fs::read(notices.join(name)).unwrap(),
+            b"private fixture body"
+        );
+    }
+
+    #[test]
     fn final_adapter_and_loader_bytes_require_exact_source_target_and_lock() {
         let directory = tempfile::tempdir().unwrap();
         let root = directory.path();
@@ -331,7 +352,11 @@ fn inventory(root: &Path, dir: &Path, out: &mut Vec<serde_json::Value>) -> Resul
                 .split('/')
                 .any(|p| p.starts_with('.') || p == "secrets.md" || p == "explain-AI.md")
             {
-                return Err("Excluded private artifact found in package".into());
+                return Err(format!(
+                    "Excluded package member rejected: {}",
+                    relative.escape_default()
+                )
+                .into());
             }
             out.push(serde_json::json!({"file":relative,"sha256":sha(&path)?,"bytes":path.metadata()?.len()}));
         }

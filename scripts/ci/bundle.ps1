@@ -75,8 +75,12 @@ function Copy-BundleFile([string]$Source, [string]$Destination) {
     [IO.File]::Copy($Source, $Destination, $false)
 }
 function Assert-FileBytes([string]$Path, [string]$Sha, [long]$Bytes) {
-    if (-not [IO.File]::Exists($Path) -or ([IO.FileInfo]::new($Path)).Length -ne $Bytes -or (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant() -ne $Sha) {
-        throw 'Bundle payload byte inventory does not match the verified package.'
+    $relative = [IO.Path]::GetRelativePath($root, $Path)
+    if (-not [IO.File]::Exists($Path)) { throw "Bundle payload member is missing: $relative" }
+    $actualBytes = ([IO.FileInfo]::new($Path)).Length
+    $actualSha = (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($actualBytes -ne $Bytes -or $actualSha -ne $Sha) {
+        throw "Bundle payload mismatch: member=$relative expected_bytes=$Bytes actual_bytes=$actualBytes expected_sha256=$Sha actual_sha256=$actualSha"
     }
 }
 function Get-Inventory([string]$Directory, [string]$RelativeTo) {
@@ -90,6 +94,11 @@ function Assert-InstalledPayload([string]$ResourceDirectory, [string]$BinDirecto
         $path = Resolve-OwnedPath (Join-Path $ResourceDirectory $entry.file)
         if ($LoaderPatched -and $entry.file -match '^runtimes/.*\.so(\.|$)') { Assert-ElfArchitecture $path }
         else { Assert-FileBytes $path $entry.sha256 $entry.bytes }
+        if ($IsLinux -and $entry.file -eq 'runtimes/llama-mtmd-cli') {
+            Assert-ElfArchitecture $path
+            $rpath = Invoke-BundleCommand -Name "helper-rpath-$Format" -Executable patchelf -Arguments @('--print-rpath', $path) -Wall 15 -Idle 5 -Capture
+            if ($rpath.Trim() -cne '$ORIGIN') { throw 'Packaged visual helper has an unexpected runtime search path.' }
+        }
     }
     foreach ($pair in @(@{ name = "nvsf$ext"; source = $sidecar }, @{ name = "numera-video-sub-finder$ext"; source = $mainBinary })) {
         $path = Join-Path $BinDirectory $pair.name
@@ -173,7 +182,7 @@ try {
     $ext = if ($IsWindows) { '.exe' } else { '' }
     $cliName = "nvsf$ext"
     $guiName = if ($IsWindows) { 'Numera Video Sub Finder.exe' } else { 'numera-video-sub-finder' }
-    foreach ($required in @($cliName, $guiName, 'LICENSE', 'THIRD_PARTY_NOTICES.md', 'README.md', 'portable.flag')) {
+    foreach ($required in @($cliName, $guiName, 'LICENSE', 'THIRD_PARTY_NOTICES.md', 'README.md', 'portable.flag', 'assets/logo.svg')) {
         if (-not $known.Contains($required)) { throw "Missing required portable package member: $required" }
     }
     if (-not @($manifest.files | Where-Object file -Like 'licenses/native/*').Count -or -not @($manifest.files | Where-Object file -Like 'data/models/*').Count) {
@@ -191,12 +200,12 @@ try {
             $dest = Join-Path $payload $rel
             Copy-BundleFile (Join-Path $portable $rel) $dest
             $resources[$dest.Replace('\', '/')] = $rel
-        } elseif ($rel -notin @($guiName, $cliName, 'portable.flag')) {
+        } elseif ($rel -notin @($guiName, $cliName, 'portable.flag', 'assets/logo.svg')) {
             throw "Unexpected portable file outside the bundle allowlist: $rel"
         }
     }
-    $logo = Join-Path $payload 'assets/logo.png'
-    Copy-BundleFile (Join-Path $root 'assets/logo.png') $logo
+    $logo = Join-Path $payload 'assets/logo.svg'
+    Copy-BundleFile (Join-Path $portable 'assets/logo.svg') $logo
     # The base configuration already maps the approved logo; resource maps merge by source key.
     foreach ($icon in $config.bundle.icon) {
         if (-not [IO.File]::Exists((Join-Path $desktop $icon))) { throw "Missing official generated desktop icon: $icon" }
@@ -245,6 +254,10 @@ try {
             $resources[$dest.Replace('\', '/')] = "licenses/microsoft/visual-studio/$rel"
         }
     } elseif ($IsLinux) {
+        # Normalize the copied helper before hashing; linuxdeploy also assigns this exact RPATH.
+        $helper = Join-Path $payload 'runtimes/llama-mtmd-cli'
+        Assert-ElfArchitecture $helper
+        Invoke-BundleCommand -Name helper-rpath-normalize -Executable patchelf -Arguments @('--set-rpath', '$ORIGIN', $helper) -Wall 15 -Idle 5
         foreach ($binary in @($mainBinary, $sidecar)) {
             Invoke-BundleCommand -Name "rpath-$([IO.Path]::GetFileName($binary))" -Executable patchelf -Arguments @('--set-rpath', ('$ORIGIN/../lib/' + $config.productName + '/runtimes'), $binary)
         }

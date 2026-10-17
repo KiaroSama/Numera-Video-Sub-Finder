@@ -1,6 +1,20 @@
 # Validation status
 
-Updated: 2026-10-16. **NOT a release acceptance report.** Hosted observations below refer to the exact named SHA; corrective source is not a passing result.
+Updated: 2026-10-17. **NOT a release acceptance report.** Hosted observations below refer to the exact named SHA; corrective source is not a passing result.
+
+## Latest exact-source observation
+
+[Final verification on `79598844c643f4636b236c3aaa8c39360366cc42`](https://github.com/KiaroSama/Numera-Video-Sub-Finder/actions/runs/38975851820) is **not green**. Both Linux targets passed native builds, Rust suites, synthetic OCR/multilingual and nine GUI behaviors, then failed AppImage payload inventory. Both Windows targets passed those build/OCR/GUI stages, then rejected an unnamed excluded package member; the exact member remains unknown. Apple Silicon passed builds/suites but failed known-Hello OCR. Intel macOS passed instrumented/production builds, Rust suites and synthetic OCR/multilingual checks, then failed actual GUI startup: a bare executable unnecessarily required a Tauri bundle resource directory despite its explicit runtime root. All six outcomes are terminal failures. The startup correction is authored, not runtime-verified.
+
+Windows x64's actual OCR report verifies canonical Unicode/spaced model loading, corrupt-copy rejection, original preservation and recognition after temporary-model removal. Four frontend environment contracts passed on the reached target rows. These results validate narrow paths only, not final packages or signing.
+
+Apple/Linux ARM use byte-identical RGB and detector input/model identities but materially different detector outputs (maximum absolute difference1.0;1424 threshold crossings). This localizes the first divergence to ONNX execution, not rendering or decoding; the exact optimization/kernel/provider remains unresolved. Default-versus-disabled optimization replay is authored, not executed. Neither primary/verifier policy nor Hello/recurrence assertions were weakened.
+
+CodeQL Rust/Actions, Miri and dependency lanes passed at this SHA. Mutation was incomplete:120 caught and4 unviable of129 candidates before the output-idle guard stopped it; no final score exists. Genuine per-result output is the pending correction, with all candidates/budgets unchanged. Audit informational warnings listed below remain.
+
+The requested modern workspace and circular centered branding are authored across UI/README/native resource/icon inputs. Original artwork is unchanged. New contrast/layout/focus/logo and screenshot checks await replacement hosted execution; the delivered SVG source is not proof of native packaged icons or the rendered redesign. Windows package diagnostics and Linux copied-helper normalization likewise await validation.
+
+## Earlier exact-source evidence (retained history)
 
 | Area | Current evidence | State |
 |---|---|---|

@@ -8,7 +8,7 @@ pub fn Extract(ui: Ui) -> impl IntoView {
     view! {
         <div class="extract-grid">
             <section class="panel source-panel">
-                <div class="panel-heading"><div><span class="eyebrow">"01 / SOURCE"</span><h2>"Your video, your device"</h2></div>
+                <div class="panel-heading"><div class="section-title"><span class="section-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m10 9 5 3-5 3z"/></svg></span><div><span class="eyebrow">"01 / SOURCE"</span><h2>"Source video"</h2></div></div>
                     <div class="button-row"><button on:click=move |_| ui.pick_source() disabled=move || ui.busy.get()>"Open video"</button>
                     <button disabled=move ||ui.busy.get()||ui.active()||ui.source.with(Option::is_none) on:click=move |_|{
                         if let Some(source)=ui.source.get_untracked(){ui.request::<Vec<Rect>>("suggest_regions",json!({"token":source.token,"language":ui.config.with_untracked(|c|c.language.clone())}),move |regions|{
@@ -25,7 +25,7 @@ pub fn Extract(ui: Ui) -> impl IntoView {
                 <Regions ui/>
             </section>
             <section class="panel settings-panel">
-                <span class="eyebrow">"02 / EXTRACTION"</span><h2>"Recognition setup"</h2>
+                <div class="section-title"><span class="section-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16 M4 17h16 M8 4v6 M16 14v6"/></svg></span><div><span class="eyebrow">"02 / EXTRACTION"</span><h2>"Recognition setup"</h2></div></div>
                 <label for="language">"Subtitle language"</label>
                 <select id="language" prop:value=move || ui.config.with(|c| c.language.clone()) on:change=move |e| ui.config.update(|c| c.language=event_target_value(&e))>
                     <option value="en">"English"</option><option value="fa">"Persian / فارسی"</option><option value="ja">"Japanese / 日本語"</option>
