@@ -223,23 +223,26 @@ try {
         if (-not $versions.Count) { throw 'Visual C++ redistributable version directory is missing.' }
         $crtDirs = @(Get-ChildItem -LiteralPath (Join-Path $versions[0].FullName $target.arch) -Directory -Filter 'Microsoft.VC*.CRT')
         if ($crtDirs.Count -ne 1) { throw 'Matching target Visual C++ CRT distribution directory is missing or ambiguous.' }
-        $dlls = @(Get-ChildItem -LiteralPath $crtDirs[0].FullName -File -Filter '*.dll')
-        if (-not $dlls.Count) { throw 'Visual C++ runtime DLL closure is empty.' }
-        foreach ($dll in $dlls) {
-            $stream = [IO.File]::OpenRead($dll.FullName)
-            $reader = [IO.BinaryReader]::new($stream)
-            try {
-                if ($reader.ReadUInt16() -ne 0x5A4D) { throw 'Invalid redistributable PE image.' }
-                $stream.Position = 0x3C; $pe = $reader.ReadInt32(); $stream.Position = $pe
-                if ($reader.ReadUInt32() -ne 0x4550) { throw 'Invalid redistributable PE signature.' }
-                $machine = $reader.ReadUInt16()
-                if ($machine -ne $(if ($target.arch -eq 'arm64') { 0xAA64 } else { 0x8664 })) { throw 'Redistributable DLL architecture differs from target.' }
-            } finally { $reader.Dispose() }
-            $dest = Join-Path $payload $dll.Name
-            if ([IO.File]::Exists($dest)) {
-                if ((Get-FileHash -LiteralPath $dest).Hash -ne (Get-FileHash -LiteralPath $dll.FullName).Hash) { throw 'Redistributable DLL bytes collide with native payload.' }
-            } else { Copy-BundleFile $dll.FullName $dest }
-            $resources[$dest.Replace('\', '/')] = $dll.Name
+        . (Join-Path $PSScriptRoot 'crt.ps1')
+        # Native DLLs already carry their validated closure; add only GUI/CLI startup CRT imports.
+        $pending = [Collections.Generic.Queue[string]]::new()
+        $pending.Enqueue($mainBinary); $pending.Enqueue($sidecar)
+        $seenCrt = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+        while ($pending.Count) {
+            $binary = $pending.Dequeue()
+            $imports = Invoke-BundleCommand -Name "crt-imports-$([IO.Path]::GetFileNameWithoutExtension($binary))" -Executable dumpbin -Arguments @('/NOLOGO', '/DEPENDENTS', $binary) -Wall 30 -Idle 10 -Capture
+            foreach ($name in Get-ReleaseCrtImports $imports) {
+                if (-not $seenCrt.Add($name)) { continue }
+                if ($seenCrt.Count -gt 32) { throw 'Imported release CRT closure exceeds32 members.' }
+                $dll = Join-Path $crtDirs[0].FullName $name
+                Assert-ReleaseCrtMachine $dll $target.arch
+                $dest = Join-Path $payload $name
+                if ([IO.File]::Exists($dest)) {
+                    if ((Get-FileHash -LiteralPath $dest).Hash -ne (Get-FileHash -LiteralPath $dll).Hash) { throw "Redistributable DLL bytes collide: member=$name." }
+                } else { Copy-BundleFile $dll $dest }
+                $resources[$dest.Replace('\', '/')] = $name
+                $pending.Enqueue($dest)
+            }
         }
         $notice = Join-Path $payload 'licenses/microsoft/visual-cpp-runtime.txt'
         [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($notice)) | Out-Null

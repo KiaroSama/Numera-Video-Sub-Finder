@@ -37,7 +37,31 @@ try {
     try { $null = Copy-VisualStudioNotices (Join-Path $work 'source') $destination }
     catch { if ($_.Exception.Message -cne 'Unexpected Visual Studio notice path.') { throw }; $rejected = $true }
     if (-not $rejected -or [IO.File]::Exists((Join-Path $destination '1033/.private-fixture.txt'))) { throw 'Unexpected hidden notice was copied.' }
-    [Console]::WriteLine('Native notice contracts passed: tests=4 failed=0 skipped=0; exact bytes, idempotence, collision and hidden-path refusal.')
+    . (Join-Path $PSScriptRoot 'crt.ps1')
+    $imports = @(Get-ReleaseCrtImports "    KERNEL32.dll`n    VCRUNTIME140.dll`n    msvcp140.dll`n    VCRUNTIME140.dll`n")
+    if (($imports -join '|') -cne 'vcruntime140.dll|msvcp140.dll') { throw 'Imported release CRT selection differs.' }
+    foreach ($listing in @('', '    vcruntime140d.dll', '    msvcp999.dll')) {
+        $rejected = $false
+        try { $null = Get-ReleaseCrtImports $listing } catch { $rejected = $true }
+        if (-not $rejected) { throw 'Invalid or debug CRT import accepted.' }
+    }
+    $pe = [byte[]]::new(134)
+    $pe[0] = 0x4D; $pe[1] = 0x5A; $pe[0x3C] = 128
+    $pe[128] = 0x50; $pe[129] = 0x45; $pe[132] = 0x64; $pe[133] = 0xAA
+    $crt = Join-Path $work 'fixture-crt.dll'
+    [IO.File]::WriteAllBytes($crt, $pe)
+    Assert-ReleaseCrtMachine $crt 'arm64'
+    $rejected = $false
+    try { Assert-ReleaseCrtMachine $crt 'x64' } catch {
+        if ($_.Exception.Message -cne 'Redistributable DLL architecture differs: member=fixture-crt.dll expected=0x8664 actual=0xAA64.') { throw }
+        $rejected = $true
+    }
+    if (-not $rejected) { throw 'Wrong CRT architecture accepted.' }
+    $pe[0x3C] = 255; [IO.File]::WriteAllBytes($crt, $pe)
+    $rejected = $false
+    try { Assert-ReleaseCrtMachine $crt 'arm64' } catch { $rejected = $true }
+    if (-not $rejected) { throw 'Invalid CRT PE offset accepted.' }
+    [Console]::WriteLine('Native notice/CRT contracts passed: tests=7 failed=0 skipped=0; exact bytes, collision, hidden paths, import selection and strict PE admission.')
     $global:LASTEXITCODE = 0
 } finally {
     if (Test-Path -LiteralPath $work) { Remove-Item -LiteralPath $work -Recurse -Force }

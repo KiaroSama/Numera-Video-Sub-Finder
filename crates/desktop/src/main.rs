@@ -170,12 +170,12 @@ fn main() {
     #[cfg(not(feature = "e2e"))]
     let builder = builder.invoke_handler(commands![]);
     log.event("INFO", "DESKTOP", "phase=native-build-started");
-    let app = builder
-        .build(tauri::generate_context!())
-        .unwrap_or_else(|error| {
-            log.event("ERROR", "DESKTOP", "phase=native-build-failed");
-            panic!("Native desktop initialization failed: {error}");
-        });
+    let context = tauri::generate_context!();
+    log.event("INFO", "DESKTOP", "phase=native-context-ready");
+    let app = builder.build(context).unwrap_or_else(|error| {
+        log.event("ERROR", "DESKTOP", "phase=native-build-failed");
+        panic!("Native desktop initialization failed: {error}");
+    });
     log.event("INFO", "DESKTOP", "phase=native-build-returned");
     app.run(move |app, event| {
         // Tauri manages Host in setup during Ready, after Builder::build returns.

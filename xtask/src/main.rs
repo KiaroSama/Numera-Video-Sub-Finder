@@ -1,6 +1,7 @@
 mod fixture;
 mod gate;
 mod gui;
+mod gui_failure;
 mod gui_visual;
 mod maintenance;
 mod multilingual;

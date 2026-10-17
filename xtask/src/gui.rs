@@ -30,8 +30,10 @@ impl Driver {
                 format!("{}/session/{}{}", self.base, self.session, route),
             )
             .json(&body)
-            .send()?
-            .error_for_status()?;
+            .send()
+            .map_err(|error| crate::gui_failure::request_error(error, route))?
+            .error_for_status()
+            .map_err(|error| crate::gui_failure::request_error(error, route))?;
         let result: Value = response.json()?;
         if result["value"]["error"].is_string() {
             return Err(format!("WebDriver error: {}", result["value"]).into());
@@ -163,6 +165,7 @@ pub fn smoke(gui: &Path, fixtures: &Path, data: &Path, output: &Path) -> Result<
         .env("NVSF_DATA_ROOT", &data)
         .env("NVSF_E2E_FIXTURE_ROOT", &fixtures)
         .env("TAURI_WEBDRIVER_PORT", "4445");
+    let launched = std::time::SystemTime::now();
     let mut process = OwnedProcess::spawn(&mut command, &capture)?;
     let client = Client::builder()
         .connect_timeout(Duration::from_secs(2))
@@ -232,97 +235,123 @@ pub fn smoke(gui: &Path, fixtures: &Path, data: &Path, output: &Path) -> Result<
         base,
         session,
     };
-    driver.request(
-        reqwest::Method::POST,
-        "/timeouts",
-        json!({"implicit":0,"pageLoad":15000,"script":10000}),
-    )?;
-    driver.wait(
-        "return !!document.querySelector('[data-testid=e2e-load-fixture]');",
-        30,
-    )?;
-    driver.click("[data-testid=e2e-load-fixture]")?;
-    driver.wait("return !!document.querySelector('.source-frame')?.naturalWidth && !document.querySelector('#extract-start')?.disabled;", 30)?;
-    for theme in ["dark", "light", "system"] {
-        driver.select("#header-theme", theme)?;
-        let expected = format!(
-            "return document.documentElement.dataset.theme === '{theme}' && localStorage.getItem('nvsf-theme') === '{theme}';"
-        );
-        driver.wait(&expected, 5)?;
-        crate::gui_visual::theme(&driver, output, theme)?;
-    }
-    crate::gui_visual::layout(&driver, output)?;
-    for (position, route) in [(2, "Queue"), (5, "History")] {
-        driver.click(&format!(
-            "nav[aria-label='Workspace navigation'] .nav-item:nth-of-type({position})"
-        ))?;
+    let result = (|| -> Result<()> {
+        driver.request(
+            reqwest::Method::POST,
+            "/timeouts",
+            json!({"implicit":0,"pageLoad":15000,"script":10000}),
+        )?;
         driver.wait(
-            &format!("return document.querySelector('h1')?.textContent === '{route}';"),
+            "return !!document.querySelector('[data-testid=e2e-load-fixture]');",
+            30,
+        )?;
+        driver.click("[data-testid=e2e-load-fixture]")?;
+        driver.wait("return !!document.querySelector('.source-frame')?.naturalWidth && !document.querySelector('#extract-start')?.disabled;", 30)?;
+        for theme in ["dark", "light", "system"] {
+            driver.select("#header-theme", theme)?;
+            let expected = format!(
+                "return document.documentElement.dataset.theme === '{theme}' && localStorage.getItem('nvsf-theme') === '{theme}';"
+            );
+            driver.wait(&expected, 5)?;
+            crate::gui_visual::theme(&driver, output, theme)?;
+        }
+        crate::gui_visual::layout(&driver, output)?;
+        for (position, route) in [(2, "Queue"), (5, "History")] {
+            driver.click(&format!(
+                "nav[aria-label='Workspace navigation'] .nav-item:nth-of-type({position})"
+            ))?;
+            driver.wait(
+                &format!("return document.querySelector('h1')?.textContent === '{route}';"),
+                5,
+            )?;
+        }
+        driver.click("nav[aria-label='Workspace navigation'] .nav-item:nth-of-type(4)")?;
+        driver.wait(
+            "return document.querySelector('h1')?.textContent === 'Models';",
             5,
         )?;
-    }
-    driver.click("nav[aria-label='Workspace navigation'] .nav-item:nth-of-type(4)")?;
-    driver.wait(
-        "return document.querySelector('h1')?.textContent === 'Models';",
-        5,
-    )?;
-    driver.click("[data-testid=models-verify]")?;
-    driver.wait("return document.querySelector('[data-testid=models-verify]')?.disabled===false && ['det','fa','en-ja','ja-specialist'].every(id=>{const row=document.querySelector(`[data-model-id='${id}']`);return row?.querySelector('h3')?.textContent===id && row.querySelector('[data-testid=model-install]') && row.querySelector('[data-testid=model-import]') && row.querySelector('[data-testid=model-export]');});", 30)?;
-    driver.select("#language-pack", "rus")?;
-    driver.click("[data-testid=languages-verify]")?;
-    driver.wait("return document.querySelector('[data-testid=languages-verify]')?.disabled===false && document.querySelector('#language-pack')?.options.length===123 && document.querySelector('[data-testid=language-pack-status]')?.textContent.includes('Tesseract CPU');", 10)?;
-    driver.click("nav[aria-label='Workspace navigation'] .nav-item:nth-of-type(6)")?;
-    driver.wait("return document.querySelector('h1')?.textContent==='Settings' && document.querySelector('[data-testid=automatic-update-checks]')?.checked===true && document.querySelector('[data-testid=native-diagnostics]')?.disabled===false;", 5)?;
-    driver.click("[data-testid=automatic-update-checks]")?;
-    driver.wait("return document.querySelector('[data-testid=automatic-update-checks]')?.checked===false && document.querySelector('[data-testid=native-diagnostics]')?.disabled===false;", 5)?;
-    let preferences: Value = serde_json::from_slice(&std::fs::read(data.join("updates.json"))?)?;
-    if preferences["enabled"] != false {
-        return Err(
-            "Automatic update disable did not persist through ordinary Settings control".into(),
+        driver.click("[data-testid=models-verify]")?;
+        driver.wait("return document.querySelector('[data-testid=models-verify]')?.disabled===false && ['det','fa','en-ja','ja-specialist'].every(id=>{const row=document.querySelector(`[data-model-id='${id}']`);return row?.querySelector('h3')?.textContent===id && row.querySelector('[data-testid=model-install]') && row.querySelector('[data-testid=model-import]') && row.querySelector('[data-testid=model-export]');});", 30)?;
+        driver.select("#language-pack", "rus")?;
+        driver.click("[data-testid=languages-verify]")?;
+        driver.wait("return document.querySelector('[data-testid=languages-verify]')?.disabled===false && document.querySelector('#language-pack')?.options.length===123 && document.querySelector('[data-testid=language-pack-status]')?.textContent.includes('Tesseract CPU');", 10)?;
+        driver.click("nav[aria-label='Workspace navigation'] .nav-item:nth-of-type(6)")?;
+        driver.wait("return document.querySelector('h1')?.textContent==='Settings' && document.querySelector('[data-testid=automatic-update-checks]')?.checked===true && document.querySelector('[data-testid=native-diagnostics]')?.disabled===false;", 5)?;
+        driver.click("[data-testid=automatic-update-checks]")?;
+        driver.wait("return document.querySelector('[data-testid=automatic-update-checks]')?.checked===false && document.querySelector('[data-testid=native-diagnostics]')?.disabled===false;", 5)?;
+        let preferences: Value =
+            serde_json::from_slice(&std::fs::read(data.join("updates.json"))?)?;
+        if preferences["enabled"] != false {
+            return Err(
+                "Automatic update disable did not persist through ordinary Settings control".into(),
+            );
+        }
+        driver.click("[data-testid=native-diagnostics]")?;
+        driver.wait("return document.querySelector('[data-testid=native-diagnostics]')?.disabled===false && document.querySelector('.diagnostics') && document.querySelector('[data-testid=runtime-repair]')?.disabled===true && Array.from(document.querySelectorAll('[role=status]')).some(e=>e.textContent.includes('FFmpeg native adapter')&&e.textContent.includes('verified'));", 10)?;
+        driver.click("nav[aria-label='Workspace navigation'] .nav-item:nth-of-type(1)")?;
+        driver.wait(
+            "return document.querySelector('h1')?.textContent === 'Extract';",
+            5,
+        )?;
+        let languages = driver.script("return ['fra','rus','hin','ara','kor'].every(code=>Array.from(document.querySelector('#language')?.options||[]).some(option=>option.value===code));")?;
+        if languages.as_bool() != Some(true) {
+            return Err(
+                "Ordinary extraction selector omitted nonpriority language families".into(),
+            );
+        }
+        driver.select("#language", "en")?;
+        driver.select("#device", "cpu")?;
+        driver.select("#quality", "accurate")?;
+        driver.click("#extract-start")?;
+        driver.wait("return document.querySelectorAll('.cue-row').length >= 2 && document.querySelector('h1')?.textContent === 'Review';", 120)?;
+        driver.click(".cue-row")?;
+        driver.wait("return !!document.querySelector('#cue-text');", 5)?;
+        let corrected = "سلام Numera ۱۶\n日本語";
+        driver.fill("#cue-text", corrected)?;
+        driver.click("#cue-apply")?;
+        driver.wait("return document.querySelector('.cue-row.selected .cue-text')?.textContent === 'سلام Numera ۱۶\\n日本語';", 5)?;
+        driver.click("[data-testid=e2e-save-edits]")?;
+        driver.wait("return Array.from(document.querySelectorAll('[role=status]')).some(e=>e.textContent.includes('Saved ui-en.srt'));", 15)?;
+        let exported = std::fs::read_to_string(fixtures.join("ui-en.srt"))?;
+        let cues = nvsf_core::parse_srt(&exported)?;
+        if !cues
+            .iter()
+            .any(|c| c.text == corrected && c.end_ms > c.start_ms)
+        {
+            return Err("Actual GUI correction absent from exported Unicode SRT".into());
+        }
+        let source = driver.request(reqwest::Method::GET, "/source", json!({}))?;
+        std::fs::write(
+            output.join("actual-page.html"),
+            source.as_str().ok_or("Missing actual DOM source")?,
+        )?;
+        let screenshot = driver.request(reqwest::Method::GET, "/screenshot", json!({}))?;
+        std::fs::write(
+            output.join("actual-gui.png"),
+            decode_base64(screenshot.as_str().ok_or("Missing actual screenshot")?)?,
+        )?;
+        Ok(())
+    })();
+    if let Err(error) = &result {
+        let status = process.status().map(|status| format!("{status:?}"));
+        std::fs::write(
+            output.join("gui-failure.json"),
+            serde_json::to_vec_pretty(&json!({
+                "source_sha":std::env::var("GITHUB_SHA")?,"target":std::env::var("NVSF_TARGET_ID")?,
+                "owned_pid":process.pid(),"child_status":status.map_err(|error|error.to_string()),
+                "elapsed_ms":process.started.elapsed().as_millis(),"error":error.to_string(),"passed":false
+            }))?,
+        )?;
+        if let Err(error) = crate::gui_failure::capture(output, process.pid(), launched) {
+            eprintln!("[WARNING] [CI] Owned native fault evidence inconclusive: {error}");
+        }
+        eprintln!(
+            "[ERROR] [CI] GUI failed before cleanup; owned child status={:?}",
+            process.status()
         );
+        process.stop();
+        return result;
     }
-    driver.click("[data-testid=native-diagnostics]")?;
-    driver.wait("return document.querySelector('[data-testid=native-diagnostics]')?.disabled===false && document.querySelector('.diagnostics') && document.querySelector('[data-testid=runtime-repair]')?.disabled===true && Array.from(document.querySelectorAll('[role=status]')).some(e=>e.textContent.includes('FFmpeg native adapter')&&e.textContent.includes('verified'));", 10)?;
-    driver.click("nav[aria-label='Workspace navigation'] .nav-item:nth-of-type(1)")?;
-    driver.wait(
-        "return document.querySelector('h1')?.textContent === 'Extract';",
-        5,
-    )?;
-    let languages = driver.script("return ['fra','rus','hin','ara','kor'].every(code=>Array.from(document.querySelector('#language')?.options||[]).some(option=>option.value===code));")?;
-    if languages.as_bool() != Some(true) {
-        return Err("Ordinary extraction selector omitted nonpriority language families".into());
-    }
-    driver.select("#language", "en")?;
-    driver.select("#device", "cpu")?;
-    driver.select("#quality", "accurate")?;
-    driver.click("#extract-start")?;
-    driver.wait("return document.querySelectorAll('.cue-row').length >= 2 && document.querySelector('h1')?.textContent === 'Review';", 120)?;
-    driver.click(".cue-row")?;
-    driver.wait("return !!document.querySelector('#cue-text');", 5)?;
-    let corrected = "سلام Numera ۱۶\n日本語";
-    driver.fill("#cue-text", corrected)?;
-    driver.click("#cue-apply")?;
-    driver.wait("return document.querySelector('.cue-row.selected .cue-text')?.textContent === 'سلام Numera ۱۶\\n日本語';", 5)?;
-    driver.click("[data-testid=e2e-save-edits]")?;
-    driver.wait("return Array.from(document.querySelectorAll('[role=status]')).some(e=>e.textContent.includes('Saved ui-en.srt'));", 15)?;
-    let exported = std::fs::read_to_string(fixtures.join("ui-en.srt"))?;
-    let cues = nvsf_core::parse_srt(&exported)?;
-    if !cues
-        .iter()
-        .any(|c| c.text == corrected && c.end_ms > c.start_ms)
-    {
-        return Err("Actual GUI correction absent from exported Unicode SRT".into());
-    }
-    let source = driver.request(reqwest::Method::GET, "/source", json!({}))?;
-    std::fs::write(
-        output.join("actual-page.html"),
-        source.as_str().ok_or("Missing actual DOM source")?,
-    )?;
-    let screenshot = driver.request(reqwest::Method::GET, "/screenshot", json!({}))?;
-    std::fs::write(
-        output.join("actual-gui.png"),
-        decode_base64(screenshot.as_str().ok_or("Missing actual screenshot")?)?,
-    )?;
     drop(driver);
     process.stop();
     if process.started.elapsed() > Duration::from_secs(240) {
