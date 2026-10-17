@@ -2,7 +2,13 @@
 
 Updated: 2026-10-17. **NOT a release acceptance report.** Hosted observations below refer to the exact named SHA; corrective source is not a passing result.
 
-## Latest exact-source observation
+## Current hosted verification
+
+[Final verification on `f023e9e38bdc348f5f0b7406abcf25eb367cc533`](https://github.com/KiaroSama/Numera-Video-Sub-Finder/actions/runs/39000073077) is **not green**. All six native targets failed static analysis on the same new diagnostic-parser `chunks_exact_to_as_chunks` lint before reaching the redesigned GUI, icon generation, OCR replay or packaging. Intel macOS completed last at05:30:44Z; the full run finished with failure at05:30:58Z. The safe fixed-array conversion is authored without suppressing the lint; its replacement hosted verification is pending.
+
+The portable mutation campaign completed with the same129 candidate identities and unchanged four critical core files:123 successful-build/test-exit101 kills,6 build-exit101 unviable,0 missed and0 timeouts. The prior independently reviewed critical subset therefore retains123/123 (100%); this is not whole-source coverage. The real per-result output correction completed under the unchanged guard in256.82seconds and cleanup was verified. Miri, dependency checks and both CodeQL lanes also passed on this exact source. Dependency audit informational warnings remain as listed below. None of these results qualifies the unexecuted native UI/OCR/package paths or platform signing.
+
+## Previous exact-source observation
 
 [Final verification on `79598844c643f4636b236c3aaa8c39360366cc42`](https://github.com/KiaroSama/Numera-Video-Sub-Finder/actions/runs/38975851820) is **not green**. Both Linux targets passed native builds, Rust suites, synthetic OCR/multilingual and nine GUI behaviors, then failed AppImage payload inventory. Both Windows targets passed those build/OCR/GUI stages, then rejected an unnamed excluded package member; the exact member remains unknown. Apple Silicon passed builds/suites but failed known-Hello OCR. Intel macOS passed instrumented/production builds, Rust suites and synthetic OCR/multilingual checks, then failed actual GUI startup: a bare executable unnecessarily required a Tauri bundle resource directory despite its explicit runtime root. All six outcomes are terminal failures. The startup correction is authored, not runtime-verified.
 

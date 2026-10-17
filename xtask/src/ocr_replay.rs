@@ -19,8 +19,10 @@ fn read_tensor(path: &Path, shape: &[usize]) -> Result<Vec<f32>> {
         return Err("Replay input changed during read".into());
     }
     let values = bytes
-        .chunks_exact(4)
-        .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|b| f32::from_le_bytes(*b))
         .collect::<Vec<_>>();
     if values.iter().any(|v| !v.is_finite()) {
         return Err("Nonfinite replay input".into());
