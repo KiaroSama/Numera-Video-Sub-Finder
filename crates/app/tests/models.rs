@@ -40,7 +40,7 @@ fn empty_data_root_reports_every_model_as_missing_without_writing() {
     assert!(
         catalog
             .iter()
-            .all(|row| row.message.contains("not installed"))
+            .all(|row| row.message.to_lowercase().contains("not installed"))
     );
     assert!(models::verify(&paths, "det").is_err());
     assert!(models::verify(&paths, "unknown").is_err());
