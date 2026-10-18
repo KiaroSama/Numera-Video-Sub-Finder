@@ -1,6 +1,9 @@
 #requires -Version 7.4
 [CmdletBinding()]
-param([ValidateSet('start','report')][string]$Phase)
+param(
+    [ValidateSet('start','report')][string]$Phase,
+    [ValidatePattern('^[a-zA-Z0-9_-]+$')][string]$Target
+)
 $ErrorActionPreference='Stop'
 Set-StrictMode -Version Latest
 if($env:GITHUB_ACTIONS -ne 'true'){throw 'Coverage only runs in GitHub Actions'}
@@ -24,11 +27,12 @@ if($Phase -eq 'start') {
     & cargo llvm-cov clean --workspace
     if($LASTEXITCODE -ne 0){throw 'Coverage clean failed'}
 } else {
+    if ([string]::IsNullOrWhiteSpace($Target)) { throw 'Coverage reporting requires the declared native target.' }
     $exports = @()
     foreach ($profile in @('debug','release')) {
         $path = Join-Path $root ".ci-work/coverage-$profile.lcov"
         $arguments = @('llvm-cov','report','-v','--lcov','--output-path',$path)
-        if ($profile -eq 'release') { $arguments += '--release' }
+        if ($profile -eq 'release') { $arguments += @('--release','--target',$Target) }
         & "$PSScriptRoot/guard.ps1" -Name "llvm-cov-$profile" -WallSeconds 180 -IdleSeconds 60 -Executable cargo -Arguments $arguments
         if($LASTEXITCODE -ne 0){throw "Coverage $profile export failed"}
         $exports += $path

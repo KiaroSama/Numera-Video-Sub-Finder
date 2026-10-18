@@ -271,7 +271,7 @@ jobs:
           Copy-Item '.ci-work/gui-evidence/gui-report.json' '.ci-work/packages/reports/${{ matrix.id }}-gui.json'
       - name: Native coverage floors
         if: matrix.id == 'linux-x64'
-        run: ./scripts/ci/coverage.ps1 -Phase report
+        run: ./scripts/ci/coverage.ps1 -Phase report -Target '${{ matrix.target }}'
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: desktop-${{ matrix.id }}-${{ github.sha }}
@@ -294,6 +294,7 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: diagnostics-${{ matrix.id }}-${{ github.sha }}
+          include-hidden-files: true
           path: |
             .ci-work/logs/
             .ci-work/data/logs/
