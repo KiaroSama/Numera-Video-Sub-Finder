@@ -116,6 +116,30 @@ pub fn mutation(input: &Path, output: &Path) -> Result<()> {
 mod tests {
     use super::*;
     #[test]
+    fn coverage_unions_profile_hits_without_duplicating_source_lines() {
+        let dir = tempfile::tempdir().unwrap();
+        let input = dir.path().join("profiles.lcov");
+        let output = dir.path().join("coverage.json");
+        let root = std::env::current_dir().unwrap().canonicalize().unwrap();
+        let source = root.join("crates/core/src/time.rs");
+        std::fs::write(
+            &input,
+            format!(
+                "SF:{}\nDA:10,1\nDA:11,0\nend_of_record\nSF:{}\nDA:10,0\nDA:11,3\nDA:12,1\nend_of_record\n",
+                source.display(), source.display()
+            ),
+        ).unwrap();
+        coverage(&input, &output).unwrap();
+        let report: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(output).unwrap()).unwrap();
+        assert_eq!(report["lines"], 3);
+        assert_eq!(report["covered"], 3);
+        assert_eq!(report["coverage"], 1.0);
+        assert_eq!(report["critical_coverage"], 1.0);
+        assert_eq!(report["passed"], true);
+    }
+
+    #[test]
     fn malformed_and_empty_quality_data_fails_closed() {
         let dir = tempfile::tempdir().unwrap();
         let input = dir.path().join("input");

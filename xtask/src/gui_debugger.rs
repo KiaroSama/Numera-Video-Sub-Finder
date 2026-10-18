@@ -31,6 +31,13 @@ fn attachment(text: &str, pid: u32) -> Value {
     let stopped = format!("Process {pid} stopped");
     json!({
         "stopped_marker":text.lines().any(|line|line.trim() == stopped),
+        "version_seen":text.lines().filter_map(|line| {
+            let line = line.trim();
+            line.strip_prefix("lldb version ").or_else(|| line.strip_prefix("lldb-"))?
+                .split_whitespace().next()
+        }).any(|version| version.len() <= 32 && version.split('.').all(|part| {
+            !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit())
+        })),
         "error_marker":text.lines().any(|line|line.trim_start().starts_with("error:")),
         "stop_frame_marker":text.lines().any(|line|line.trim().trim_start_matches("* ").starts_with("NVSF_STOP|"))
     })
@@ -115,6 +122,8 @@ mod native {
                 command.args(["--one-line-before-file", setting]);
             }
             command.args([
+                "--one-line-before-file",
+                "version",
                 "--one-line",
                 &format!("process attach --pid {pid}"),
                 "--one-line",
@@ -299,6 +308,23 @@ mod tests {
         let encoded = serde_json::to_string(&summary).unwrap();
         assert!(!encoded.contains("private") && !encoded.contains("AppKit"));
         assert_eq!(attachment("", 42)["error_marker"], false);
+        for text in [
+            "lldb version 22.1.8 (private repository)",
+            "lldb-1700.0.13.5.1\nSwift version private detail",
+        ] {
+            let summary = attachment(text, 42);
+            assert_eq!(summary["version_seen"], true);
+            assert!(!serde_json::to_string(&summary).unwrap().contains("private"));
+        }
+        for text in [
+            "",
+            "Swift version 6.0",
+            "lldb version /private/22.1.8",
+            "lldb-17..1",
+            "lldb-123456789012345678901234567890123",
+        ] {
+            assert_eq!(attachment(text, 42)["version_seen"], false);
+        }
     }
 
     #[test]

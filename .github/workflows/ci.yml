@@ -301,6 +301,8 @@ jobs:
             .ci-work/fixtures/
             .ci-work/ocr-evidence/
             .ci-work/production-evidence/
+            .ci-work/coverage*.lcov
+            .ci-work/packages/reports/coverage.json
             target/cargo-timings/
             .ci-work/multilingual/*-extract.log
             .ci-work/multilingual/*.srt
