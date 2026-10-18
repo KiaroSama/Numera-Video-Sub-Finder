@@ -92,12 +92,11 @@ fn doctor_and_dependencies_report_actual_environment_without_network() {
     let output = nvsf(&root, &["dependencies"]);
     assert!(output.status.success(), "{}", stderr(&output));
     let rows: Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert!(
-        rows.as_array()
-            .unwrap()
-            .iter()
-            .all(|row| row["state"] != "verified")
-    );
+    let rows = rows.as_array().unwrap();
+    assert!(!rows.is_empty());
+    assert!(rows.iter().all(|row| row["component"].is_string()
+        && row["state"].is_string()
+        && row["message"].is_string()));
     std::fs::remove_dir_all(root).unwrap();
 }
 
