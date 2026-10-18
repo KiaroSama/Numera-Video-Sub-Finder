@@ -111,3 +111,9 @@ The requested modern workspace and circular centered branding are authored acros
 | Fuzz/Loom/native sanitizers | Parser properties/threaded stress are supplementary, not substitutes | Required deeper evidence open |
 
 No successful CI, quality percentage, coverage number, screenshot, signing, GPU placement or release result is asserted without actual evidence. Required missing/failed evidence remains open rather than being waived to obtain a green badge. Build/test results must name their exact source SHA and actual target/jobs; hosted development checks and final release qualification are different gates.
+
+## Exact `f98a09b` native outcomes
+
+Run `39128206281` completed the portable tiers successfully (dependencies, Miri, mutation, both CodeQL analyses). Linux x64 passed production lifecycle and all twelve instrumented GUI behaviors but failed the retained coverage floors at59.9% overall and73.3% critical; Linux ARM64 and Windows x64 passed their native rows. macOS ARM64 failed before its first screenshot on the optional debugger attachment gate while the GUI itself was alive and visible. Windows ARM64 and macOS Intel were still running when this note was written; their outcomes are not inferred.
+
+The corrected diagnostic upload retained1204 members for macOS ARM64, including the attachment summary that previous runs lost. The coverage and debugger corrections described in `docs/testing.md` are authored and unverified until the next exact-source run.

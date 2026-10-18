@@ -64,3 +64,11 @@ All CI lanes are children of the manual Final verification root. No local applic
 ## Evidence integrity
 
 Synthetic media cannot certify real OCR quality. Automatic OCR/VLM labels cannot certify themselves as ground truth. A real screenshot is not proof of exact colors or IME composition; computed styles and dedicated composition/keyboard scenarios are required. Provider availability cannot prove GPU operator execution. `docs/validation.md` separates authored, not-run, failed and verified states.
+
+## Instrumented GUI exit and optional debugger evidence — exact `f98a09b`
+
+At exact `f98a09b`, the retained Linux x64 coverage report showed `4076/6803` lines (59.9% overall, 73.3% critical) while the same job's twelve instrumented GUI behaviors and production lifecycle passed. Several desktop modules that the GUI actually exercised reported zero covered lines. The instrumented GUI was terminated with a forced kill at the end of the witness; the LLVM profile runtime writes its raw profile from a process-exit handler, so a forced kill discards everything that process recorded. The failure is in verification teardown, not in the product paths.
+
+The GUI witness now closes its owned window through the existing WebDriver window command and waits, bounded at ten seconds, for the process to exit normally before any fallback termination. Product assertions, the 240-second overall budget, the fifteen-second HTTP limit and the 270-second outer guard are unchanged. Coverage floors and exclusions remain unchanged; a corrected measurement is pending hosted execution.
+
+Also at `f98a09b`, macOS ARM64 failed before its first screenshot because the optional LLDB attachment gate timed out after three seconds. The retained summary proves the debugger started and printed its version (`version_seen: true`, 84 captured bytes, no overflow), but no attach status or error appeared and the debugger was still running. The GUI itself reached `ui-ready` and showed its window. That debugger exists only to capture crash evidence, so an attachment failure is now recorded and the original screenshot path still runs; a failed attachment no longer converts a healthy GUI into a test failure. No timeout, entitlement, trust or platform-security setting changed.

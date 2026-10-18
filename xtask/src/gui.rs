@@ -17,6 +17,8 @@ pub(super) struct Driver {
     #[cfg(target_os = "macos")]
     debugger: std::cell::RefCell<Option<crate::gui_debugger::Debugger>>,
     #[cfg(target_os = "macos")]
+    debugger_attempted: std::cell::Cell<bool>,
+    #[cfg(target_os = "macos")]
     owned_pid: u32,
     #[cfg(target_os = "macos")]
     evidence: std::path::PathBuf,
@@ -30,22 +32,32 @@ impl Driver {
         body: Value,
     ) -> Result<Value> {
         #[cfg(target_os = "macos")]
-        if route == "/screenshot" && self.debugger.borrow().is_none() {
-            let debugger = crate::gui_debugger::Debugger::attach(self.owned_pid, &self.evidence)?;
-            *self.debugger.borrow_mut() = Some(debugger);
-            let resumed = self
-                .client
-                .post(format!(
-                    "{}/session/{}/execute/sync",
-                    self.base, self.session
-                ))
-                .timeout(Duration::from_secs(3))
-                .json(&json!({"script":"return true;","args":[]}))
-                .send()?
-                .error_for_status()?
-                .json::<Value>()?;
-            if resumed["value"] != true {
-                return Err("Native debugger attached but original WebView did not resume".into());
+        if route == "/screenshot" && !self.debugger_attempted.replace(true) {
+            match crate::gui_debugger::Debugger::attach(self.owned_pid, &self.evidence) {
+                Ok(debugger) => {
+                    *self.debugger.borrow_mut() = Some(debugger);
+                    let resumed = self
+                        .client
+                        .post(format!(
+                            "{}/session/{}/execute/sync",
+                            self.base, self.session
+                        ))
+                        .timeout(Duration::from_secs(3))
+                        .json(&json!({"script":"return true;","args":[]}))
+                        .send()?
+                        .error_for_status()?
+                        .json::<Value>()?;
+                    if resumed["value"] != true {
+                        return Err(
+                            "Native debugger attached but original WebView did not resume".into(),
+                        );
+                    }
+                }
+                // The debugger is optional evidence, never the behavior under test: record the
+                // bounded failure and still exercise the original screenshot path.
+                Err(error) => eprintln!(
+                    "[WARNING] [CI] Native crash debugger unavailable; original screenshot continues: {error}"
+                ),
             }
         }
         let response = self
@@ -262,6 +274,8 @@ pub fn smoke(gui: &Path, fixtures: &Path, data: &Path, output: &Path) -> Result<
         #[cfg(target_os = "macos")]
         debugger: std::cell::RefCell::new(None),
         #[cfg(target_os = "macos")]
+        debugger_attempted: std::cell::Cell::new(false),
+        #[cfg(target_os = "macos")]
         owned_pid: process.pid(),
         #[cfg(target_os = "macos")]
         evidence: output.to_owned(),
@@ -391,12 +405,12 @@ pub fn smoke(gui: &Path, fixtures: &Path, data: &Path, output: &Path) -> Result<
         return result;
     }
     // End the original GUI before waiting for the debugger's synchronous continue.
+    if let Err(error) = close_and_wait(&driver, &mut process) {
+        eprintln!("[WARNING] [CI] Graceful GUI close inconclusive: {error}");
+    }
     #[cfg(target_os = "macos")]
-    {
-        process.stop();
-        if let Some(debugger) = driver.debugger.borrow_mut().as_mut() {
-            debugger.finish()?;
-        }
+    if let Some(debugger) = driver.debugger.borrow_mut().as_mut() {
+        debugger.finish()?;
     }
     drop(driver);
     process.stop();
@@ -409,6 +423,22 @@ pub fn smoke(gui: &Path, fixtures: &Path, data: &Path, output: &Path) -> Result<
             &json!({"schema":1,"source_sha":std::env::var("GITHUB_SHA")?,"target":std::env::var("NVSF_TARGET_ID")?,"passed":true,"tests":12,"failed":0,"skipped":0,"profile":"instrumented","proof":["native startup","fixed source admission and source frame","three persisted themes with measured contrast and circular logo","six workspace destinations","narrow and wide layout","programmatic control focus","model catalog IDs and controls","full language catalog and nonpriority extraction choices","automatic update disable persisted through Settings","native diagnostics and unapproved repair guard","actual worker extraction","Unicode edit and exported bytes"],"not_proved":["native Tab traversal","physical IME composition","production listener absence","real-language quality","positive signed repair/update lifecycle","platform installers"]}),
         )?,
     )?;
+    Ok(())
+}
+
+/// Close the owned window through the driver so the instrumented process exits normally.
+/// A forced kill would lose the process-exit profile flush that coverage collection needs.
+fn close_and_wait(driver: &Driver, process: &mut OwnedProcess) -> Result<()> {
+    let _ = driver.request(reqwest::Method::DELETE, "/window", json!({}));
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while process.status()?.is_none() {
+        if Instant::now() >= deadline {
+            return Err(
+                "Native GUI did not exit within the bounded graceful-close deadline".into(),
+            );
+        }
+        std::thread::park_timeout(Duration::from_millis(20));
+    }
     Ok(())
 }
 
