@@ -1,8 +1,18 @@
 # Validation status
 
-Updated: 2026-10-17. **NOT a release acceptance report.** Hosted observations below refer to the exact named SHA; corrective source is not a passing result.
+Updated: 2026-10-18. **NOT a release acceptance report.** Hosted observations below refer to the exact named SHA; corrective source is not a passing result.
 
 ## Current hosted verification
+
+[Final verification on `43b342c9edcccf3ab079451c4713d442be9ea8ff`](https://github.com/KiaroSama/Numera-Video-Sub-Finder/actions/runs/39068960474) completed with **failure** at00:07:41Z on2026-10-18. Both Windows native jobs succeed, including builds, Rust suites, synthetic OCR/languages,12 GUI behaviors, native formats, internal update candidates and production lifecycle. Production guards complete in2.04seconds on x64 and2.67seconds on ARM64. Both new pending-metadata destruction and scheduler-join regressions pass; the observed metadata-close failure is resolved. The separate late unsaved-notification/exit race remains open.
+
+Both Linux targets again pass12 instrumented GUI behaviors and native formats, then fail production15-second idle readiness inside native `Builder::build`. GDB is present but attachment is refused. Bounded snapshots observe Yama mode1 and system origins for the allowlisted GTK/WebKit/font libraries; no user-space stack or causal portal/ABI finding exists. Corrective source uses the original GUI's parent for a failure-only GDB handoff and scoped adopted-child reaping, without security changes, a second launch, retries or larger budgets. This new diagnostic remains unexecuted.
+
+Both macOS targets again fail the first screenshot with incomplete HTTP response and process death: ARM64 SIGBUS at5543ms, Intel SIGSEGV at11338ms. Both immediate and final owned crash-report scans are empty. Corrective source attaches existing LLDB once before the original screenshot, checks actual main-thread WebView resume and retains only bounded crash-frame identity, not attach-time frames, raw output or private data. Tool authorization and the native root remain unknown; no capture-path repair or macOS GUI success is claimed.
+
+Miri, the unchanged reviewed mutation campaign, dependencies and both CodeQL lanes pass their named tiers. Rust CodeQL's actual SARIF contains0 results after the malformed-HTTPS fixture correction; no scanner suppression was added. Mutation retains123 actual kills/6 unviable/0 missed/0 timeout over the same129 candidates. Informational dependency warnings, native/WASM coverage, real corpus, platform signing and positive installer/update qualification remain open. No release is published.
+
+## Previous metadata-close verification
 
 [Final verification on `c30978622930adb4257967d8b72a4788959b2fae`](https://github.com/KiaroSama/Numera-Video-Sub-Finder/actions/runs/39043366505) completed with **failure** at18:15:34Z. All six native outcomes are terminal: Windows ARM64 succeeded; the other five failed. Windows ARM64 passed builds, Rust suites, synthetic OCR/language checks,12 GUI behaviors, portable/native formats, signed internal update candidates and the actual production GUI lifecycle. Its production guard completed in2.48seconds. This is not platform-signing, real-quality or installer-lifecycle qualification.
 

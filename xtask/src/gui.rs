@@ -14,6 +14,12 @@ pub(super) struct Driver {
     client: Client,
     base: String,
     session: String,
+    #[cfg(target_os = "macos")]
+    debugger: std::cell::RefCell<Option<crate::gui_debugger::Debugger>>,
+    #[cfg(target_os = "macos")]
+    owned_pid: u32,
+    #[cfg(target_os = "macos")]
+    evidence: std::path::PathBuf,
 }
 
 impl Driver {
@@ -23,6 +29,25 @@ impl Driver {
         route: &str,
         body: Value,
     ) -> Result<Value> {
+        #[cfg(target_os = "macos")]
+        if route == "/screenshot" && self.debugger.borrow().is_none() {
+            let debugger = crate::gui_debugger::Debugger::attach(self.owned_pid, &self.evidence)?;
+            *self.debugger.borrow_mut() = Some(debugger);
+            let resumed = self
+                .client
+                .post(format!(
+                    "{}/session/{}/execute/sync",
+                    self.base, self.session
+                ))
+                .timeout(Duration::from_secs(3))
+                .json(&json!({"script":"return true;","args":[]}))
+                .send()?
+                .error_for_status()?
+                .json::<Value>()?;
+            if resumed["value"] != true {
+                return Err("Native debugger attached but original WebView did not resume".into());
+            }
+        }
         let response = self
             .client
             .request(
@@ -234,6 +259,12 @@ pub fn smoke(gui: &Path, fixtures: &Path, data: &Path, output: &Path) -> Result<
         client,
         base,
         session,
+        #[cfg(target_os = "macos")]
+        debugger: std::cell::RefCell::new(None),
+        #[cfg(target_os = "macos")]
+        owned_pid: process.pid(),
+        #[cfg(target_os = "macos")]
+        evidence: output.to_owned(),
     };
     let result = (|| -> Result<()> {
         driver.request(
@@ -333,6 +364,12 @@ pub fn smoke(gui: &Path, fixtures: &Path, data: &Path, output: &Path) -> Result<
         Ok(())
     })();
     if let Err(error) = &result {
+        #[cfg(target_os = "macos")]
+        if let Some(debugger) = driver.debugger.borrow_mut().as_mut()
+            && let Err(error) = debugger.finish()
+        {
+            eprintln!("[WARNING] [CI] Native debugger evidence inconclusive: {error}");
+        }
         let status = process.status().map(|status| format!("{status:?}"));
         std::fs::write(
             output.join("gui-failure.json"),
@@ -352,6 +389,14 @@ pub fn smoke(gui: &Path, fixtures: &Path, data: &Path, output: &Path) -> Result<
         );
         process.stop();
         return result;
+    }
+    // End the original GUI before waiting for the debugger's synchronous continue.
+    #[cfg(target_os = "macos")]
+    {
+        process.stop();
+        if let Some(debugger) = driver.debugger.borrow_mut().as_mut() {
+            debugger.finish()?;
+        }
     }
     drop(driver);
     process.stop();

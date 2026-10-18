@@ -1,6 +1,8 @@
 mod fixture;
 mod gate;
 mod gui;
+#[cfg(any(target_os = "macos", test))]
+mod gui_debugger;
 mod gui_failure;
 mod gui_visual;
 mod maintenance;
@@ -10,6 +12,8 @@ mod ocr_replay;
 mod package;
 mod process;
 mod production;
+#[cfg(any(target_os = "linux", test))]
+mod production_supervisor;
 mod quality;
 mod runtime_pack;
 mod update_assets;
@@ -60,6 +64,13 @@ enum Cmd {
     GuiFault {
         #[arg(long)]
         output: PathBuf,
+    },
+    #[cfg(target_os = "linux")]
+    ProductionParent {
+        #[arg(long)]
+        gui: PathBuf,
+        #[arg(long)]
+        state: PathBuf,
     },
     Production {
         #[arg(long)]
@@ -191,6 +202,8 @@ fn run() -> Result<(), Box<dyn Error>> {
             output,
         } => gui::smoke(&gui, &fixture_dir, &data_root, &output),
         Cmd::GuiFault { output } => gui_failure::finalize(&output),
+        #[cfg(target_os = "linux")]
+        Cmd::ProductionParent { gui, state } => production_supervisor::run(&gui, &state),
         Cmd::Production {
             gui,
             data_root,

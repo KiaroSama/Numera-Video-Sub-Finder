@@ -68,13 +68,17 @@ impl Owned {
     fn status(&mut self) -> Result<Option<ExitStatus>> {
         Ok(self.child.try_wait()?)
     }
-    fn descendants_gone(&self) -> Result<bool> {
+    fn descendants_gone(&mut self) -> Result<bool> {
         #[cfg(windows)]
         {
             return self.job.empty();
         }
         #[cfg(unix)]
         {
+            #[cfg(target_os = "linux")]
+            if self.child.try_wait()?.is_some() {
+                crate::production_supervisor::reap_group(self.pid())?;
+            }
             return Ok(unix_group_empty(self.pid()));
         }
         #[allow(unreachable_code)]
@@ -109,6 +113,19 @@ impl Owned {
                 break;
             }
             std::thread::park_timeout(Duration::from_millis(20));
+        }
+        #[cfg(target_os = "linux")]
+        {
+            while Instant::now() < deadline {
+                match self.descendants_gone() {
+                    Ok(true) => break,
+                    Ok(false) => std::thread::park_timeout(Duration::from_millis(10)),
+                    Err(error) => {
+                        eprintln!("[ERROR] [CI] Owned adopted-child cleanup failed: {error}");
+                        break;
+                    }
+                }
+            }
         }
     }
 }
@@ -220,6 +237,7 @@ pub fn smoke(gui: &Path, data: &Path, output: &Path) -> Result<()> {
     let state = tempfile::Builder::new()
         .prefix("production-data-")
         .tempdir_in(data)?;
+    #[cfg(not(target_os = "linux"))]
     let capture = evidence.as_path().join("capture.log");
     let logs = state.path().join("logs");
     listener::absent()?;
@@ -231,13 +249,40 @@ pub fn smoke(gui: &Path, data: &Path, output: &Path) -> Result<()> {
         .env("TAURI_WEBDRIVER_PORT", "4445")
         .env_remove("NVSF_E2E_FIXTURE_ROOT")
         .env_remove("NVSF_RUNTIME_ROOT");
+    #[cfg(target_os = "linux")]
+    let mut command = crate::production_supervisor::command(&command, evidence.as_path())?;
+    #[cfg(target_os = "linux")]
+    let capture = evidence.as_path().join("parent-capture.log");
+    #[cfg(target_os = "linux")]
+    let _adoption = crate::production_supervisor::Adoption::begin()?;
     let mut process = Owned::spawn(&mut command, &capture)?;
-    let pid = process.pid();
     let mut budget = Budget::new();
     let mut helper_index = 0u64;
+    #[cfg(not(target_os = "linux"))]
+    let pid = process.pid();
+    #[cfg(target_os = "linux")]
+    let mut pid = 0;
     let result = (|| -> Result<()> {
-        let window = loop {
+        #[cfg(target_os = "linux")]
+        loop {
+            let identity = evidence.as_path().join("parent-pid.json");
+            if identity.exists() {
+                pid = crate::production_supervisor::identity(
+                    &crate::production_supervisor::read(&identity)?,
+                    process.pid(),
+                )?;
+                break;
+            }
             if let Some(status) = process.status()? {
+                return Err(
+                    format!("Production parent exited before GUI admission: {status}").into(),
+                );
+            }
+            budget.observe("awaiting-owned-gui-identity".into())?;
+            std::thread::park_timeout(Duration::from_millis(10));
+        }
+        let window = loop {
+            if let Some(status) = gui_status(&mut process, evidence.as_path())? {
                 return Err(
                     format!("Production GUI exited before native readiness: {status}").into(),
                 );
@@ -263,7 +308,7 @@ pub fn smoke(gui: &Path, data: &Path, output: &Path) -> Result<()> {
             listener::absent()?;
             let (log, length) = diagnostic(&logs)?;
             budget.observe(format!("shutdown:{length}"))?;
-            if let Some(status) = process.status()? {
+            if let Some(status) = gui_status(&mut process, evidence.as_path())? {
                 if !status.success() {
                     return Err(format!("Production GUI failed native close: {status}").into());
                 }
@@ -303,9 +348,9 @@ pub fn smoke(gui: &Path, data: &Path, output: &Path) -> Result<()> {
         )?;
         Ok(())
     })();
-    let status_at_failure = process.status();
+    let status_at_failure = gui_status(&mut process, evidence.as_path());
     #[cfg(target_os = "linux")]
-    let alive_at_failure = matches!(&status_at_failure, Ok(None));
+    let alive_at_failure = pid != 0 && matches!(&status_at_failure, Ok(None));
     let status_at_failure = status_at_failure.map(|status| format!("{status:?}"));
     let failure_context = json!({
         "pid":pid,"target":std::env::var("NVSF_TARGET_ID").ok(),
@@ -325,17 +370,12 @@ pub fn smoke(gui: &Path, data: &Path, output: &Path) -> Result<()> {
             ) {
                 eprintln!("[WARNING] [CI] Native wait/library evidence inconclusive: {error}");
             }
-            let diagnostic = helper(
-                "gdb",
-                &stack_arguments(pid),
-                evidence.as_path(),
-                &mut helper_index,
-            );
+            let diagnostic = capture_stack(&mut process, evidence.as_path());
             eprintln!(
                 "[INFO] [CI] Failure-latched native stack capture={}; readiness result remains failed",
                 match diagnostic {
-                    Ok((true, _)) => "completed; inspect native helper capture".to_owned(),
-                    Ok((false, _)) => "inconclusive; debugger returned failure".to_owned(),
+                    Ok(true) => "completed; inspect native stack capture".to_owned(),
+                    Ok(false) => "inconclusive; debugger returned failure".to_owned(),
                     Err(error) => format!("inconclusive: {error}"),
                 }
             );
@@ -375,8 +415,58 @@ pub fn smoke(gui: &Path, data: &Path, output: &Path) -> Result<()> {
     result
 }
 
+fn gui_status(process: &mut Owned, evidence: &Path) -> Result<Option<ExitStatus>> {
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::unix::process::ExitStatusExt;
+        let Some(parent_status) = process.status()? else {
+            return Ok(None);
+        };
+        let path = evidence.join("parent-exit.json");
+        if !path.exists() {
+            return Err(
+                format!("Production parent exited without GUI status: {parent_status}").into(),
+            );
+        }
+        let raw =
+            crate::production_supervisor::exit_status(&crate::production_supervisor::read(&path)?)?;
+        Ok(Some(ExitStatus::from_raw(raw)))
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = evidence;
+        process.status()
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn capture_stack(process: &mut Owned, evidence: &Path) -> Result<bool> {
+    nvsf_app::storage::write_atomic(
+        &evidence.join("capture-request.json"),
+        b"{\"capture\":true}",
+        false,
+    )?;
+    let deadline = Instant::now() + Duration::from_secs(3);
+    let capture = evidence.join("native-stack.log");
+    loop {
+        if capture.exists() && std::fs::metadata(&capture)?.len() > 65536 {
+            return Err("Native debugger response exceeded64KiB".into());
+        }
+        if let Some(status) = process.status()? {
+            if !capture.is_file() || std::fs::metadata(&capture)?.len() > 65536 {
+                return Err("Native debugger capture missing or oversized".into());
+            }
+            return Ok(status.success());
+        }
+        if Instant::now() >= deadline {
+            return Err("Failure-only parent debugger exceeded3s".into());
+        }
+        std::thread::park_timeout(Duration::from_millis(10));
+    }
+}
+
 #[cfg(any(target_os = "linux", test))]
-fn stack_arguments(pid: u32) -> Vec<String> {
+pub(crate) fn stack_arguments(pid: u32) -> Vec<String> {
     [
         "-nx",
         "-batch",
@@ -393,7 +483,7 @@ fn stack_arguments(pid: u32) -> Vec<String> {
         "-ex",
         "thread apply all backtrace 24",
         "-ex",
-        "detach",
+        "kill",
         "-p",
     ]
     .into_iter()
@@ -551,7 +641,8 @@ mod tests {
             args.iter()
                 .any(|arg| arg == "thread apply all backtrace 24")
         );
-        assert!(args.iter().any(|arg| arg == "detach"));
+        assert!(args.iter().any(|arg| arg == "kill"));
+        assert!(!args.iter().any(|arg| arg == "detach"));
         assert!(
             !args
                 .iter()
