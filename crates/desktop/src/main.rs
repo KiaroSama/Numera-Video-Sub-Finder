@@ -7,6 +7,8 @@ mod jobs;
 mod language_manager;
 mod model_manager;
 mod queue;
+#[cfg(test)]
+mod queue_tests;
 mod recognition;
 mod resume;
 #[cfg(test)]
