@@ -27,6 +27,15 @@ fn frames(text: &str) -> Vec<Value> {
         .collect()
 }
 
+fn attachment(text: &str, pid: u32) -> Value {
+    let stopped = format!("Process {pid} stopped");
+    json!({
+        "stopped_marker":text.lines().any(|line|line.trim() == stopped),
+        "error_marker":text.lines().any(|line|line.trim_start().starts_with("error:")),
+        "stop_frame_marker":text.lines().any(|line|line.trim().trim_start_matches("* ").starts_with("NVSF_STOP|"))
+    })
+}
+
 #[cfg(target_os = "macos")]
 mod native {
     use super::*;
@@ -109,6 +118,8 @@ mod native {
                 "--one-line",
                 &format!("process attach --pid {pid}"),
                 "--one-line",
+                "process status",
+                "--one-line",
                 "process continue",
             ]);
             for action in [
@@ -137,30 +148,51 @@ mod native {
                 destination: destination.into(),
                 finished: false,
             };
-            nonblocking(&debugger.stdout)?;
-            nonblocking(&debugger.stderr)?;
-            let deadline = Instant::now() + Duration::from_secs(3);
-            loop {
-                debugger.pump()?;
-                if debugger.overflow {
-                    return Err("Native debugger exceeded64KiB before attachment".into());
+            let mut failure = "pipe_error";
+            let admitted: Result<()> = (|| {
+                nonblocking(&debugger.stdout)?;
+                nonblocking(&debugger.stderr)?;
+                let deadline = Instant::now() + Duration::from_secs(3);
+                loop {
+                    debugger.pump()?;
+                    if debugger.overflow {
+                        failure = "output_limit";
+                        return Err("Native debugger exceeded64KiB before attachment".into());
+                    }
+                    if attachment(&String::from_utf8_lossy(&debugger.text), pid)["stopped_marker"]
+                        == true
+                    {
+                        return Ok(());
+                    }
+                    if debugger.child.try_wait()?.is_some() {
+                        failure = "debugger_exited";
+                        return Err("Native debugger attachment unavailable; no entitlement or trust settings were changed".into());
+                    }
+                    if Instant::now() >= deadline {
+                        failure = "deadline";
+                        return Err(
+                            "Native debugger did not acknowledge owned-PID attachment within3s"
+                                .into(),
+                        );
+                    }
+                    std::thread::park_timeout(Duration::from_millis(10));
                 }
-                if String::from_utf8_lossy(&debugger.text)
-                    .lines()
-                    .any(|line| line.trim() == format!("Process {pid} stopped"))
-                {
-                    return Ok(debugger);
-                }
-                if debugger.child.try_wait()?.is_some() {
-                    return Err("Native debugger attachment unavailable; no entitlement or trust settings were changed".into());
-                }
-                if Instant::now() >= deadline {
-                    return Err(
-                        "Native debugger did not acknowledge owned-PID attachment within3s".into(),
-                    );
-                }
-                std::thread::park_timeout(Duration::from_millis(10));
+            })();
+            if let Err(error) = admitted {
+                let summary = json!({
+                    "owned_pid":pid,"phase":"attachment","reason":failure,
+                    "debugger_status":debugger.child.try_wait().map(|status|status.map(|status|status.to_string())).ok(),
+                    "captured_bytes":debugger.text.len(),"output_overflow":debugger.overflow,
+                    "markers":attachment(&String::from_utf8_lossy(&debugger.text),pid),
+                    "limitation":"No raw output retained; absent status does not establish permission denial or screenshot failure"
+                });
+                std::fs::write(
+                    destination.join("native-debugger-attachment.json"),
+                    serde_json::to_vec_pretty(&summary)?,
+                )?;
+                return Err(error);
             }
+            Ok(debugger)
         }
 
         fn pump(&mut self) -> Result<()> {
@@ -251,6 +283,24 @@ pub use native::Debugger;
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn attachment_evidence_requires_the_owned_status_and_never_retains_raw_output() {
+        let summary = attachment(
+            "Process 43 stopped\nerror: private authentication detail\n/private/input\nNVSF_STOP|0|AppKit|attach_time|+4\n",
+            42,
+        );
+        assert_eq!(summary["stopped_marker"], false);
+        assert_eq!(summary["error_marker"], true);
+        assert_eq!(summary["stop_frame_marker"], true);
+        assert_eq!(
+            attachment(" Process 42 stopped \n", 42)["stopped_marker"],
+            true
+        );
+        let encoded = serde_json::to_string(&summary).unwrap();
+        assert!(!encoded.contains("private") && !encoded.contains("AppKit"));
+        assert_eq!(attachment("", 42)["error_marker"], false);
+    }
+
     #[test]
     fn debugger_summary_keeps_only_bounded_module_and_function_identity() {
         let raw = "Process 42 stopped\n/private/person/input\nNVSF_STOP|0|AppKit|attach_time|+4\nNVSF_FRAME|0|WebKit|-[WKWebView takeSnapshotWithConfiguration:completionHandler:]| + 24\n* NVSF_FRAME|1|AppKit|NSImage::TIFFRepresentation|+0x12\nNVSF_FRAME|2|/private/path|secret|+1\nNVSF_FRAME|24|AppKit|overflow|+3\nregisters PRIVATE_BODY\n";

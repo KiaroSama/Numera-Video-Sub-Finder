@@ -67,7 +67,7 @@ jobs:
         if: matrix.os == 'linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential pkg-config clang libclang-dev nasm cmake ninja-build autoconf autoconf-archive automake libtool libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf libfuse2 libarchive-tools gdb xvfb xdotool wmctrl openbox fonts-dejavu-core fonts-noto-core fonts-noto-cjk
+          sudo apt-get install -y build-essential pkg-config clang libclang-dev nasm cmake ninja-build autoconf autoconf-archive automake libtool libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf libfuse2 libarchive-tools gdb dbus-daemon xvfb xdotool wmctrl openbox fonts-dejavu-core fonts-noto-core fonts-noto-cjk
           if ($LASTEXITCODE -ne 0) { throw 'Linux prerequisites failed' }
       - name: macOS native prerequisites
         if: matrix.os == 'macos'
@@ -218,7 +218,7 @@ jobs:
           $ext = if ($IsWindows) { '.exe' } else { '' }
           $args = @('gui','--gui',".ci-work/e2e/numera-video-sub-finder$ext",'--fixture-dir','.ci-work/fixtures','--data-root','.ci-work/data','--output','.ci-work/gui-evidence')
           if ($IsLinux) {
-            ./scripts/ci/guard.ps1 -Name native-gui -WallSeconds 270 -IdleSeconds 150 -Executable xvfb-run -Arguments (@('-a',"$env:GITHUB_WORKSPACE/target/release/xtask$ext") + $args)
+            ./scripts/ci/guard.ps1 -Name native-gui -WallSeconds 270 -IdleSeconds 150 -Executable xvfb-run -Arguments (@('-a','dbus-run-session','--',"$env:GITHUB_WORKSPACE/target/release/xtask$ext") + $args)
           } else {
             ./scripts/ci/guard.ps1 -Name native-gui -WallSeconds 270 -IdleSeconds 150 -Executable "$env:GITHUB_WORKSPACE/target/release/xtask$ext" -Arguments $args
           }
@@ -263,7 +263,7 @@ jobs:
           $gui = "$env:GITHUB_WORKSPACE/.ci-work/relocated/Numera 日本 portable ${{ matrix.id }}/$name"
           $args = @('production','--gui',$gui,'--data-root','.ci-work/production-data','--output','.ci-work/production-evidence')
           if ($IsLinux) {
-            ./scripts/ci/guard.ps1 -Name production-gui -WallSeconds 90 -IdleSeconds 30 -Executable xvfb-run -Arguments @('-a','pwsh','-NoProfile','-File','scripts/ci/virtual-desktop.ps1','-Executable',"$env:GITHUB_WORKSPACE/target/release/xtask$ext",'-ArgumentsJson',($args | ConvertTo-Json -Compress))
+            ./scripts/ci/guard.ps1 -Name production-gui -WallSeconds 90 -IdleSeconds 30 -Executable xvfb-run -Arguments @('-a','dbus-run-session','--','pwsh','-NoProfile','-File','scripts/ci/virtual-desktop.ps1','-Executable',"$env:GITHUB_WORKSPACE/target/release/xtask$ext",'-ArgumentsJson',($args | ConvertTo-Json -Compress))
           } else {
             ./scripts/ci/guard.ps1 -Name production-gui -WallSeconds 90 -IdleSeconds 30 -Executable "$env:GITHUB_WORKSPACE/target/release/xtask$ext" -Arguments $args
           }
