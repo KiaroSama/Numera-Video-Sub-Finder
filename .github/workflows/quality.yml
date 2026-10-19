@@ -21,7 +21,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249
         with:
-          toolchain: 1.99.0
+          toolchain: 1.99.1
       - name: Project-owned mutation state
         run: |
           foreach ($dir in 'temp','logs','captures','cargo','tools','mutation') { New-Item -ItemType Directory -Force -Path ".ci-work/$dir" | Out-Null }

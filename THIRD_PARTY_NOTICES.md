@@ -4,7 +4,7 @@ Application-owned code is GPL-3.0-or-later; see LICENSE. Native dependencies, mo
 
 | Dependency/artifact | Pinned source | Declared license / obligations |
 |---|---|---|
-| Rust / Rust standard library | rust-toolchain.toml 1.99.0 | MIT / Apache-2.0; preserve notices |
+| Rust / Rust standard library | rust-toolchain.toml 1.99.1 | MIT / Apache-2.0; preserve notices |
 | Tauri 2 / Leptos 0.8 | Cargo.lock and crate manifests | MIT / Apache-2.0 families; preserve exact package licenses |
 | FFmpeg 9.0.2 | vcpkg baseline e456309491fd875487bf02b8a0dca76c1b1b00cc, vcpkg.json features | Applicable LGPL/GPL terms depend on exact features; nonfree disabled; preserve configuration and corresponding source |
 | Tesseract 5.5.3 / Leptonica | Same vcpkg baseline | Apache-2.0 / BSD-style; preserve native notices |
