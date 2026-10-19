@@ -68,6 +68,7 @@ pub struct Inner {
     pub source_busy: std::sync::atomic::AtomicBool,
     pub unsaved: std::sync::atomic::AtomicBool,
     pub closing: std::sync::atomic::AtomicBool,
+    close_pending: std::sync::atomic::AtomicBool,
     pub maintenance: crate::updates::Maintenance,
 }
 
@@ -101,6 +102,7 @@ impl Host {
             source_busy: std::sync::atomic::AtomicBool::new(false),
             unsaved: std::sync::atomic::AtomicBool::new(false),
             closing: std::sync::atomic::AtomicBool::new(false),
+            close_pending: std::sync::atomic::AtomicBool::new(false),
             maintenance: crate::updates::Maintenance::default(),
         }))
     }
@@ -158,6 +160,43 @@ impl Host {
             return Err("Model installation is active".into());
         }
         Ok(())
+    }
+    pub async fn wait_to_close(&self, budget: std::time::Duration) -> Result<bool> {
+        if self.0.close_pending.swap(true, Ordering::AcqRel) {
+            return Ok(false);
+        }
+        struct Pending<'a>(&'a std::sync::atomic::AtomicBool);
+        impl Drop for Pending<'_> {
+            fn drop(&mut self) {
+                self.0.store(false, Ordering::Release);
+            }
+        }
+        let _pending = Pending(&self.0.close_pending);
+        let deadline = tokio::time::Instant::now() + budget;
+        loop {
+            // Never wait for a workspace mutex on the native event-loop thread.
+            match self.0.operation.try_lock() {
+                Ok(_operation) => {
+                    if self.0.maintenance.installing.load(Ordering::Acquire) {
+                        return Err(
+                            "Native update installation is active; close after it completes".into(),
+                        );
+                    }
+                    return Ok(!self.0.closing.swap(true, Ordering::AcqRel));
+                }
+                Err(std::sync::TryLockError::Poisoned(_)) => {
+                    return Err("Workspace state unavailable; restart the application".into());
+                }
+                Err(std::sync::TryLockError::WouldBlock) => {}
+            }
+            if tokio::time::Instant::now() >= deadline {
+                return Err("Workspace operation did not finish before the close deadline; application remains open".into());
+            }
+            tokio::time::sleep_until(
+                deadline.min(tokio::time::Instant::now() + std::time::Duration::from_millis(10)),
+            )
+            .await;
+        }
     }
     pub fn begin_close(&self) -> Result<bool> {
         let _operation = self.0.operation.try_lock().map_err(|_| {

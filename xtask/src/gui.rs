@@ -34,22 +34,29 @@ impl Driver {
         #[cfg(target_os = "macos")]
         if route == "/screenshot" && !self.debugger_attempted.replace(true) {
             match crate::gui_debugger::Debugger::attach(self.owned_pid, &self.evidence) {
-                Ok(debugger) => {
+                Ok((debugger, acknowledged)) => {
                     *self.debugger.borrow_mut() = Some(debugger);
-                    let resumed = self
-                        .client
-                        .post(format!(
-                            "{}/session/{}/execute/sync",
-                            self.base, self.session
-                        ))
-                        .timeout(Duration::from_secs(3))
-                        .json(&json!({"script":"return true;","args":[]}))
-                        .send()?
-                        .error_for_status()?
-                        .json::<Value>()?;
-                    if resumed["value"] != true {
-                        return Err(
-                            "Native debugger attached but original WebView did not resume".into(),
+                    if acknowledged {
+                        let resumed = self
+                            .client
+                            .post(format!(
+                                "{}/session/{}/execute/sync",
+                                self.base, self.session
+                            ))
+                            .timeout(Duration::from_secs(3))
+                            .json(&json!({"script":"return true;","args":[]}))
+                            .send()?
+                            .error_for_status()?
+                            .json::<Value>()?;
+                        if resumed["value"] != true {
+                            return Err(
+                                "Native debugger attached but original WebView did not resume"
+                                    .into(),
+                            );
+                        }
+                    } else {
+                        eprintln!(
+                            "[WARNING] [CI] Native debugger attachment unacknowledged; original screenshot continues with the same owned observer"
                         );
                     }
                 }

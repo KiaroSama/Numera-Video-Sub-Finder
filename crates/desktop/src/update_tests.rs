@@ -217,6 +217,70 @@ fn busy_and_closing_workspaces_do_not_poll_metadata() {
 }
 
 #[test]
+fn pending_close_survives_operation_contention_without_duplicate_admission() {
+    use std::{
+        future::Future,
+        task::{Context, Poll, Waker},
+        time::Duration,
+    };
+    let directory = tempfile::tempdir().unwrap();
+    let paths = nvsf_app::Paths::new(Some(directory.path())).unwrap();
+    let log = nvsf_app::logging::Log::new(&paths, "nvsf-desktop");
+    let host = Host::new(paths, log);
+    tauri::async_runtime::block_on(async {
+        let mut pending = Box::pin(host.wait_to_close(Duration::from_secs(2)));
+        {
+            let _operation = host.0.operation.lock().unwrap();
+            let mut context = Context::from_waker(Waker::noop());
+            assert!(matches!(pending.as_mut().poll(&mut context), Poll::Pending));
+            let mut duplicate = Box::pin(host.wait_to_close(Duration::ZERO));
+            assert!(matches!(
+                duplicate.as_mut().poll(&mut context),
+                Poll::Ready(Ok(false))
+            ));
+            assert!(!host.0.closing.load(Ordering::Acquire));
+        }
+        assert!(
+            tokio::time::timeout(Duration::from_secs(2), pending)
+                .await
+                .unwrap()
+                .unwrap()
+        );
+        assert!(host.0.closing.load(Ordering::Acquire));
+        assert!(!host.wait_to_close(Duration::ZERO).await.unwrap());
+        host.0.closing.store(false, Ordering::Release);
+        {
+            let _operation = host.0.operation.lock().unwrap();
+            let mut expired = Box::pin(host.wait_to_close(Duration::ZERO));
+            let mut context = Context::from_waker(Waker::noop());
+            assert!(matches!(
+                expired.as_mut().poll(&mut context),
+                Poll::Ready(Err(_))
+            ));
+        }
+        host.0.maintenance.installing.store(true, Ordering::Release);
+        assert!(host.wait_to_close(Duration::from_secs(2)).await.is_err());
+        host.0
+            .maintenance
+            .installing
+            .store(false, Ordering::Release);
+        assert!(!host.0.closing.load(Ordering::Acquire));
+        {
+            let _operation = host.0.operation.lock().unwrap();
+            let mut cancelled = Box::pin(host.wait_to_close(Duration::from_secs(2)));
+            let mut context = Context::from_waker(Waker::noop());
+            assert!(matches!(
+                cancelled.as_mut().poll(&mut context),
+                Poll::Pending
+            ));
+            drop(cancelled);
+        }
+        assert!(host.wait_to_close(Duration::from_secs(2)).await.unwrap());
+    });
+    assert!(host.shutdown());
+}
+
+#[test]
 fn shared_resource_reservation_refuses_source_closing_and_concurrent_operations() {
     let directory = tempfile::tempdir().unwrap();
     let paths = nvsf_app::Paths::new(Some(directory.path())).unwrap();

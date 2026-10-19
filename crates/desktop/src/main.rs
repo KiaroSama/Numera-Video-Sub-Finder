@@ -205,14 +205,16 @@ fn main() {
         } if label == "main" => {
             shutdown.0.log.event("INFO", "DESKTOP", "phase=native-close-received");
             api.prevent_close();
-            match shutdown.begin_close() {
-                Ok(true) => {}
-                Ok(false) => return,
-                Err(error) => { shutdown.0.log.event("WARNING", "DESKTOP", &error); return; }
-            }
             let host = shutdown.clone();
             let app = app.clone();
-            tauri::async_runtime::spawn_blocking(move || {
+            tauri::async_runtime::spawn(async move {
+                match host.wait_to_close(std::time::Duration::from_secs(2)).await {
+                    Ok(true) => {}
+                    Ok(false) => return,
+                    Err(error) => { host.0.log.event("WARNING", "DESKTOP", &error); return; }
+                }
+                let completion = host.clone();
+                let result = tauri::async_runtime::spawn_blocking(move || {
                 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
                 if host.0.unsaved.load(std::sync::atomic::Ordering::Acquire)
                     && !app.dialog().message("Your review has unsaved changes. Return to save them, or discard and close?")
@@ -227,6 +229,11 @@ fn main() {
                 }
                 host.0.log.event("INFO", "DESKTOP", "phase=shutdown-complete");
                 app.exit(0);
+                }).await;
+                if result.is_err() {
+                    completion.0.closing.store(false, std::sync::atomic::Ordering::Release);
+                    completion.0.log.event("ERROR", "DESKTOP", "Native close task stopped unexpectedly; application remains open");
+                }
             });
         }
         tauri::RunEvent::Exit => {

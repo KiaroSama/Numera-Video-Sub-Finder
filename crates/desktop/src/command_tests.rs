@@ -160,6 +160,21 @@ fn queue_removal_persists_and_refuses_running_or_unknown_records() {
         tauri::async_runtime::block_on(queue::queue_remove(host.clone(), "unknown".into()))
             .is_err()
     );
+    let queue_path = host.inner().0.paths.root.join("desktop-queue.json");
+    let original = std::fs::read(&queue_path).unwrap();
+    let backup = directory.path().join("preserved-queue.json");
+    std::fs::rename(&queue_path, &backup).unwrap();
+    std::fs::create_dir(&queue_path).unwrap();
+    assert!(
+        tauri::async_runtime::block_on(queue::queue_remove(host.clone(), "saved".into())).is_err()
+    );
+    let retained = tauri::async_runtime::block_on(queue::queue_list(host.clone())).unwrap();
+    assert_eq!(retained.len(), 1);
+    assert_eq!(retained[0].id, "saved");
+    assert_eq!(retained[0].state, "cancelled");
+    assert_eq!(std::fs::read(&backup).unwrap(), original);
+    std::fs::remove_dir(&queue_path).unwrap();
+    std::fs::rename(&backup, &queue_path).unwrap();
     assert!(
         tauri::async_runtime::block_on(queue::queue_remove(host.clone(), "saved".into()))
             .unwrap()
@@ -170,6 +185,228 @@ fn queue_removal_persists_and_refuses_running_or_unknown_records() {
     )
     .unwrap();
     assert_eq!(persisted["records"], serde_json::json!([]));
+}
+
+#[test]
+fn restored_queue_start_checks_grants_checkpoint_and_identity_before_launch() {
+    let (directory, app) = workspace();
+    let host = app.state::<Host>();
+    let source = directory.path().join("saved source.mp4");
+    let output = directory.path().join("saved output.srt");
+    std::fs::write(&source, b"saved source bytes").unwrap();
+    let fingerprint = nvsf_app::storage::hash_file(&source).unwrap();
+    let config = ExtractConfig {
+        input: source.to_str().unwrap().into(),
+        output: output.to_str().unwrap().into(),
+        ..Default::default()
+    };
+    let record = queue::Record {
+        id: "restored".into(),
+        source: source.clone(),
+        output: output.clone(),
+        source_hash: fingerprint.clone(),
+        config: config.clone(),
+        checkpoint: None,
+        state: "interrupted".into(),
+        error: None,
+    };
+    let start_error = || {
+        let result =
+            tauri::async_runtime::block_on(queue::queue_start(host.clone(), "restored".into()));
+        assert!(
+            lock(&host.inner().0.job).unwrap().is_none(),
+            "rejected admission must not launch a worker"
+        );
+        result.err().unwrap()
+    };
+    assert_eq!(start_error(), "Queue record not found");
+    {
+        let mut store = lock(&host.inner().0.queue).unwrap();
+        store.file.records.push(record);
+        store.save(&host.inner().0.paths.root).unwrap();
+    }
+    assert_eq!(
+        start_error(),
+        "Regrant the source and output with native pickers before starting this restored job"
+    );
+    lock(&host.inner().0.sources)
+        .unwrap()
+        .insert("source".into(), source.clone());
+    lock(&host.inner().0.destinations)
+        .unwrap()
+        .insert("output".into(), output.clone());
+    lock(&host.inner().0.queue).unwrap().grants.insert(
+        "restored".into(),
+        queue::Grant {
+            source: crate::state::Source {
+                token: "source".into(),
+                name: "saved source.mp4".into(),
+                fingerprint,
+                media: project().media,
+            },
+            output: crate::state::Destination {
+                token: "output".into(),
+                name: "saved output.srt".into(),
+            },
+        },
+    );
+    host.inner().0.unsaved.store(true, Ordering::Release);
+    assert_eq!(
+        start_error(),
+        "Save current corrections before starting/resuming a queue entry"
+    );
+    host.inner().0.unsaved.store(false, Ordering::Release);
+    {
+        let mut store = lock(&host.inner().0.queue).unwrap();
+        store.file.records[0].state = "completed".into();
+    }
+    assert_eq!(
+        start_error(),
+        "Saved job is complete; open its project in History/Review instead"
+    );
+    let checkpoint = output.with_extension("nvsf.json");
+    {
+        let mut store = lock(&host.inner().0.queue).unwrap();
+        store.file.records[0].state = "interrupted".into();
+        store.file.records[0].checkpoint = Some(checkpoint.clone());
+    }
+    assert_eq!(
+        start_error(),
+        "Saved checkpoint is missing; restore it before resuming. Queue/source/output remain unchanged"
+    );
+    lock(&host.inner().0.queue).unwrap().file.records[0].checkpoint = None;
+    std::fs::write(&source, b"changed source").unwrap();
+    assert_eq!(
+        start_error(),
+        "Queued source content changed; existing state preserved"
+    );
+    std::fs::write(&source, b"saved source bytes").unwrap();
+    lock(&host.inner().0.queue).unwrap().file.records[0]
+        .config
+        .data_root = Some("different root".into());
+    assert_eq!(
+        start_error(),
+        "Application data root changed; restore the original root before resuming this queue record"
+    );
+    lock(&host.inner().0.queue).unwrap().file.records[0].config = config.clone();
+    let mut saved = project();
+    saved.config = config;
+    saved.source_hash = "d".repeat(64);
+    nvsf_app::storage::save_project(&saved, &checkpoint).unwrap();
+    let checkpoint_before = std::fs::read(&checkpoint).unwrap();
+    assert_eq!(
+        start_error(),
+        "Checkpoint no longer matches queued identity/configuration"
+    );
+    assert_eq!(std::fs::read(checkpoint).unwrap(), checkpoint_before);
+    assert_eq!(std::fs::read(source).unwrap(), b"saved source bytes");
+    assert!(!output.exists());
+    assert!(lock(&host.inner().0.job).unwrap().is_none());
+    let persisted: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(host.inner().0.paths.root.join("desktop-queue.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(persisted["records"][0]["state"], "interrupted");
+    assert_eq!(
+        persisted["records"][0]["source_hash"],
+        nvsf_app::storage::hash_file(&directory.path().join("saved source.mp4")).unwrap()
+    );
+}
+
+#[test]
+fn review_commands_reject_invalid_identity_without_loading_native_resources() {
+    let (directory, app) = workspace();
+    let host = app.state::<Host>();
+    let source = directory.path().join("source.mp4");
+    std::fs::write(&source, b"original source").unwrap();
+    lock(&host.inner().0.sources)
+        .unwrap()
+        .insert("granted".into(), source.clone());
+    let recognize = |cue_id, at_ms| {
+        tauri::async_runtime::block_on(recognition::recognize_cue(
+            host.clone(),
+            "granted".into(),
+            cue_id,
+            "en".into(),
+            Rect::default(),
+            at_ms,
+        ))
+        .err()
+        .unwrap()
+    };
+    assert_eq!(recognize(1, 0), "No review project is open");
+    let saved = project();
+    let before = serde_json::to_vec(&saved).unwrap();
+    *lock(&host.inner().0.project).unwrap() = Some(saved);
+    assert_eq!(recognize(0, 0), "Invalid cue or preview timestamp");
+    assert_eq!(
+        recognize(1, 360_000_000_000),
+        "Invalid cue or preview timestamp"
+    );
+    assert_eq!(
+        recognize(1, 10_000),
+        "Cue preview time is outside the source duration"
+    );
+    assert_eq!(
+        recognize(1, 0),
+        "Linked source does not match the review project's fingerprint"
+    );
+    tauri::async_runtime::block_on(async {
+        assert_eq!(
+            visual_retry::propose_visual_retry(
+                host.clone(),
+                "granted".into(),
+                0,
+                0,
+                Rect::default(),
+                true
+            )
+            .await
+            .err()
+            .unwrap(),
+            "Invalid cue/source preview timestamp"
+        );
+        assert_eq!(
+            visual_retry::propose_visual_retry(
+                host.clone(),
+                "granted".into(),
+                1,
+                10_000,
+                Rect::default(),
+                true
+            )
+            .await
+            .err()
+            .unwrap(),
+            "Invalid cue/source preview timestamp"
+        );
+        assert_eq!(
+            visual_retry::propose_visual_retry(
+                host.clone(),
+                "granted".into(),
+                1,
+                0,
+                Rect::default(),
+                true
+            )
+            .await
+            .err()
+            .unwrap(),
+            "Linked video does not match the project's source fingerprint"
+        );
+    });
+    assert!(!host.inner().0.model_busy.load(Ordering::Acquire));
+    assert_eq!(
+        serde_json::to_vec(&files::current_project(host.clone()).unwrap().unwrap()).unwrap(),
+        before
+    );
+    assert_eq!(std::fs::read(source).unwrap(), b"original source");
+    assert_eq!(
+        std::fs::read_dir(&host.inner().0.paths.cache)
+            .unwrap()
+            .count(),
+        0
+    );
 }
 
 #[test]

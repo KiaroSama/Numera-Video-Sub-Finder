@@ -102,7 +102,7 @@ mod native {
     }
 
     impl Debugger {
-        pub fn attach(pid: u32, destination: &Path) -> Result<Self> {
+        pub fn attach(pid: u32, destination: &Path) -> Result<(Self, bool)> {
             if std::env::var("GITHUB_ACTIONS").as_deref() != Ok("true") {
                 return Err("Native crash debugger is hosted macOS only".into());
             }
@@ -199,9 +199,14 @@ mod native {
                     destination.join("native-debugger-attachment.json"),
                     serde_json::to_vec_pretty(&summary)?,
                 )?;
+                if failure == "deadline" {
+                    // Keep this one observer owned through the original screenshot. Its
+                    // queued status/continue commands still run if attachment completes late.
+                    return Ok((debugger, false));
+                }
                 return Err(error);
             }
-            Ok(debugger)
+            Ok((debugger, true))
         }
 
         fn pump(&mut self) -> Result<()> {
@@ -230,6 +235,7 @@ mod native {
                 self.destination.join("native-debugger.json"),
                 serde_json::to_vec_pretty(&json!({
                     "owned_pid":self.pid,"debugger_exited":exited,"output_overflow":self.overflow,
+                    "markers":attachment(&String::from_utf8_lossy(&self.text),self.pid),
                     "frames":frames(&String::from_utf8_lossy(&self.text)),
                     "limitation":"One attach to original process before original screenshot; no raw output retained; absent frames remain inconclusive"
                 }))?,

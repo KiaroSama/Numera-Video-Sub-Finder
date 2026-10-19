@@ -33,44 +33,61 @@ pub(crate) fn regrant(
     host: &Host,
     record: &Record,
 ) -> Result<Option<Grant>> {
-    let Some(file) = app
-        .dialog()
-        .file()
-        .set_title("Regrant original queued source (fingerprint must match)")
-        .blocking_pick_file()
-    else {
+    regrant_with(
+        host,
+        record,
+        || {
+            app.dialog()
+                .file()
+                .set_title("Regrant original queued source (fingerprint must match)")
+                .blocking_pick_file()
+                .map(|file| file.into_path().map_err(|e| e.to_string()))
+                .transpose()
+        },
+        || {
+            app.dialog()
+                .file()
+                .set_title("Regrant the same queued SRT destination")
+                .set_file_name(display_name(&record.output))
+                .add_filter("SubRip", &["srt"])
+                .blocking_save_file()
+                .map(|file| file.into_path().map_err(|e| e.to_string()))
+                .transpose()
+        },
+        |source| {
+            nvsf_app::media::MediaRuntime::load(&host.0.paths)
+                .and_then(|runtime| runtime.probe(source))
+                .map_err(|e| e.to_string())
+        },
+    )
+}
+
+pub(crate) fn regrant_with(
+    host: &Host,
+    record: &Record,
+    pick_source: impl FnOnce() -> Result<Option<PathBuf>>,
+    pick_output: impl FnOnce() -> Result<Option<PathBuf>>,
+    probe: impl FnOnce(&Path) -> Result<nvsf_core::MediaInfo>,
+) -> Result<Option<Grant>> {
+    let Some(source) = pick_source()? else {
         return Ok(None);
     };
-    let source = file
-        .into_path()
-        .map_err(|e| e.to_string())?
-        .canonicalize()
-        .map_err(|e| e.to_string())?;
+    let source = source.canonicalize().map_err(|e| e.to_string())?;
     if !same_path(&source, &record.source)?
         || nvsf_app::storage::hash_file(&source).map_err(|e| e.to_string())? != record.source_hash
     {
         return Err("Selected source does not match its saved path/fingerprint. Existing queue/checkpoint is preserved; restore the original source location.".into());
     }
-    let Some(file) = app
-        .dialog()
-        .file()
-        .set_title("Regrant the same queued SRT destination")
-        .set_file_name(display_name(&record.output))
-        .add_filter("SubRip", &["srt"])
-        .blocking_save_file()
-    else {
+    let Some(output) = pick_output()? else {
         return Ok(None);
     };
-    let output = file.into_path().map_err(|e| e.to_string())?;
     if !same_path(&output, &record.output)? {
         return Err(
             "Choose the original output location; changing it invalidates checkpoint compatibility"
                 .into(),
         );
     }
-    let media = nvsf_app::media::MediaRuntime::load(&host.0.paths)
-        .and_then(|runtime| runtime.probe(&source))
-        .map_err(|e| e.to_string())?;
+    let media = probe(&source)?;
     let source_token = host.token("source");
     let output_token = host.token("output");
     let mut sources = lock(&host.0.sources)?;
@@ -134,20 +151,50 @@ pub async fn pick_checkpoint(
         if !app.dialog().message(message).title("Resume preservation check").buttons(MessageDialogButtons::OkCancelCustom("Regrant source/output".into(),"Cancel".into())).blocking_show(){return Ok(None);}
         let record=Record {id:host.token("queue"),source:PathBuf::from(&project.config.input),output:PathBuf::from(&project.config.output),source_hash:project.source_hash,config:project.config,checkpoint:Some(expected),state:"interrupted".into(),error:None};
         let Some(grant)=regrant(&app,&host,&record)?else{return Ok(None);};
-        let _operation=lock(&host.0.operation)?;host.ensure_idle()?;
-        let mut store=lock(&host.0.queue)?;store.check()?;
-        if let Some(index)=store.file.records.iter().position(|r|r.output==record.output) {
-            let previous=store.file.records[index].clone();
-            if previous.source_hash!=record.source_hash || serde_json::to_vec(&previous.config).map_err(|e|e.to_string())?!=serde_json::to_vec(&record.config).map_err(|e|e.to_string())? {
-                return Err("Existing queue record conflicts with this checkpoint; original record preserved".into());
-            }
-            let id=previous.id.clone();let mut resumed=record;resumed.id=id.clone();store.file.records[index]=resumed;
-            if let Err(e)=store.save(&host.0.paths.root){store.file.records[index]=previous;return Err(e);}
-            store.grants.insert(id,grant);return Ok(Some(store.entries()?));
-        }
-        if store.file.records.len()>=MAX_ENTRIES{return Err("Queue limit reached; remove a finished record".into());}
-        store.file.records.push(record.clone());
-        if let Err(e)=store.save(&host.0.paths.root){store.file.records.pop();return Err(e);}
-        store.grants.insert(record.id,grant);Ok(Some(store.entries()?))
+        restore_record(&host, record, grant).map(Some)
     }).await
+}
+
+pub(crate) fn restore_record(host: &Host, record: Record, grant: Grant) -> Result<Vec<QueueEntry>> {
+    let _operation = lock(&host.0.operation)?;
+    host.ensure_idle()?;
+    let mut store = lock(&host.0.queue)?;
+    store.check()?;
+    if let Some(index) = store
+        .file
+        .records
+        .iter()
+        .position(|r| r.output == record.output)
+    {
+        let previous = store.file.records[index].clone();
+        if previous.source_hash != record.source_hash
+            || serde_json::to_vec(&previous.config).map_err(|e| e.to_string())?
+                != serde_json::to_vec(&record.config).map_err(|e| e.to_string())?
+        {
+            return Err(
+                "Existing queue record conflicts with this checkpoint; original record preserved"
+                    .into(),
+            );
+        }
+        let id = previous.id.clone();
+        let mut resumed = record;
+        resumed.id = id.clone();
+        store.file.records[index] = resumed;
+        if let Err(error) = store.save(&host.0.paths.root) {
+            store.file.records[index] = previous;
+            return Err(error);
+        }
+        store.grants.insert(id, grant);
+        return store.entries();
+    }
+    if store.file.records.len() >= MAX_ENTRIES {
+        return Err("Queue limit reached; remove a finished record".into());
+    }
+    store.file.records.push(record.clone());
+    if let Err(error) = store.save(&host.0.paths.root) {
+        store.file.records.pop();
+        return Err(error);
+    }
+    store.grants.insert(record.id, grant);
+    store.entries()
 }

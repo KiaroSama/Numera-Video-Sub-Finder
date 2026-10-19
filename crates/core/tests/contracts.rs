@@ -101,6 +101,20 @@ fn project_rejects_duplicate_cue_identities() {
         warnings: vec![],
     };
     assert!(project.validate().is_ok());
+    project.active_appearances = vec![cue.clone()];
+    assert!(project.validate().is_ok());
+    for failure in ["track", "duplicate", "future", "completed", "interval"] {
+        let mut invalid = project.clone();
+        match failure {
+            "track" => invalid.active_appearances[0].track = 1,
+            "duplicate" => invalid.active_appearances.push(cue.clone()),
+            "future" => invalid.processed_ms = 99,
+            "completed" => invalid.completed = true,
+            _ => invalid.active_appearances[0].end_ms = 0,
+        }
+        assert!(invalid.validate().is_err(), "{failure}");
+    }
+    project.active_appearances.clear();
     project.cues.push(cue);
     assert!(project.validate().is_err());
 }
