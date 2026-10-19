@@ -136,23 +136,88 @@ pub async fn pick_checkpoint(
     host: tauri::State<'_, Host>,
 ) -> Result<Option<Vec<QueueEntry>>> {
     let host = host.inner().clone();
-    blocking(move ||{
+    blocking(move || {
         host.ensure_idle()?;
-        if host.0.unsaved.load(std::sync::atomic::Ordering::Acquire) { return Err("Save current review corrections before opening a checkpoint".into()); }
-        let Some(file)=app.dialog().file().set_title("Resume existing extraction checkpoint").add_filter("Numera checkpoint", &["json"]).blocking_pick_file()else{return Ok(None);};
-        let path=file.into_path().map_err(|e|e.to_string())?;
-        let project=nvsf_app::storage::load_project(&path).map_err(|e|e.to_string())?;
-        let expected=Path::new(&project.config.output).with_extension("nvsf.json");
-        if !same_path(&path,&expected)? {return Err("Checkpoint is not at its original output-associated location; original data preserved".into());}
-        check_checkpoint(&project,&expected)?;
-        let root=path_text(&host.0.paths.root)?;
-        if project.config.data_root.as_deref().is_some_and(|saved|saved!=root.as_str()){return Err("Checkpoint uses a different data root. Restore that root before resuming; models and existing state are preserved.".into());}
-        let message=format!("Resume at {} ms with {} completed cues and {} active appearances. Corrections stored in this checkpoint will be kept. Corrections in other review files are not imported; save them separately before replacing the current workspace. Source, models, regions, overwrite policy and output configuration must remain compatible. Unsaved review drafts must be saved first. Continue to regrant the original source/output?",project.processed_ms,project.cues.len(),project.active_appearances.len());
-        if !app.dialog().message(message).title("Resume preservation check").buttons(MessageDialogButtons::OkCancelCustom("Regrant source/output".into(),"Cancel".into())).blocking_show(){return Ok(None);}
-        let record=Record {id:host.token("queue"),source:PathBuf::from(&project.config.input),output:PathBuf::from(&project.config.output),source_hash:project.source_hash,config:project.config,checkpoint:Some(expected),state:"interrupted".into(),error:None};
-        let Some(grant)=regrant(&app,&host,&record)?else{return Ok(None);};
-        restore_record(&host, record, grant).map(Some)
-    }).await
+        if host.0.unsaved.load(std::sync::atomic::Ordering::Acquire) {
+            return Err("Save current review corrections before opening a checkpoint".into());
+        }
+        let Some(file) = app
+            .dialog()
+            .file()
+            .set_title("Resume existing extraction checkpoint")
+            .add_filter("Numera checkpoint", &["json"])
+            .blocking_pick_file()
+        else {
+            return Ok(None);
+        };
+        let path = file.into_path().map_err(|e| e.to_string())?;
+        open_checkpoint_with(
+            &host,
+            &path,
+            |message| {
+                Ok(app
+                    .dialog()
+                    .message(message)
+                    .title("Resume preservation check")
+                    .buttons(MessageDialogButtons::OkCancelCustom(
+                        "Regrant source/output".into(),
+                        "Cancel".into(),
+                    ))
+                    .blocking_show())
+            },
+            |record| regrant(&app, &host, record),
+        )
+    })
+    .await
+}
+
+pub(crate) fn open_checkpoint_with(
+    host: &Host,
+    path: &Path,
+    confirm: impl FnOnce(String) -> Result<bool>,
+    regrant: impl FnOnce(&Record) -> Result<Option<Grant>>,
+) -> Result<Option<Vec<QueueEntry>>> {
+    let project = nvsf_app::storage::load_project(path).map_err(|e| e.to_string())?;
+    let expected = Path::new(&project.config.output).with_extension("nvsf.json");
+    if !same_path(path, &expected)? {
+        return Err(
+            "Checkpoint is not at its original output-associated location; original data preserved"
+                .into(),
+        );
+    }
+    check_checkpoint(&project, &expected)?;
+    let root = path_text(&host.0.paths.root)?;
+    if project
+        .config
+        .data_root
+        .as_deref()
+        .is_some_and(|saved| saved != root.as_str())
+    {
+        return Err("Checkpoint uses a different data root. Restore that root before resuming; models and existing state are preserved.".into());
+    }
+    let message = format!(
+        "Resume at {} ms with {} completed cues and {} active appearances. Corrections stored in this checkpoint will be kept. Corrections in other review files are not imported; save them separately before replacing the current workspace. Source, models, regions, overwrite policy and output configuration must remain compatible. Unsaved review drafts must be saved first. Continue to regrant the original source/output?",
+        project.processed_ms,
+        project.cues.len(),
+        project.active_appearances.len()
+    );
+    if !confirm(message)? {
+        return Ok(None);
+    }
+    let record = Record {
+        id: host.token("queue"),
+        source: PathBuf::from(&project.config.input),
+        output: PathBuf::from(&project.config.output),
+        source_hash: project.source_hash,
+        config: project.config,
+        checkpoint: Some(expected),
+        state: "interrupted".into(),
+        error: None,
+    };
+    let Some(grant) = regrant(&record)? else {
+        return Ok(None);
+    };
+    restore_record(host, record, grant).map(Some)
 }
 
 pub(crate) fn restore_record(host: &Host, record: Record, grant: Grant) -> Result<Vec<QueueEntry>> {

@@ -205,6 +205,7 @@ pub fn smoke(gui: &Path, fixtures: &Path, data: &Path, output: &Path) -> Result<
     let fixtures = fixtures.canonicalize()?;
     let data = data.canonicalize()?;
     let mut command = Command::new(gui);
+    crate::fixture::clean_runtime_environment(&mut command);
     command
         .env("NVSF_DATA_ROOT", &data)
         .env("NVSF_E2E_FIXTURE_ROOT", &fixtures)

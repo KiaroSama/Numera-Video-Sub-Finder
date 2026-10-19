@@ -219,6 +219,20 @@ pub fn register(
     output_token: &str,
     config: ExtractConfig,
 ) -> Result<(String, ExtractConfig)> {
+    register_with(host, source_token, output_token, config, |source| {
+        nvsf_app::media::MediaRuntime::load(&host.0.paths)
+            .and_then(|runtime| runtime.probe(source))
+            .map_err(|e| e.to_string())
+    })
+}
+
+pub(crate) fn register_with(
+    host: &Host,
+    source_token: &str,
+    output_token: &str,
+    config: ExtractConfig,
+    probe: impl FnOnce(&Path) -> Result<nvsf_core::MediaInfo>,
+) -> Result<(String, ExtractConfig)> {
     let config = config_for(host, source_token, output_token, config)?;
     let source = host.source(source_token)?;
     let output = host.destination(output_token)?;
@@ -226,9 +240,7 @@ pub fn register(
         return Err("Queue output must not replace source media".into());
     }
     let source_hash = nvsf_app::storage::hash_file(&source).map_err(|e| e.to_string())?;
-    let media = nvsf_app::media::MediaRuntime::load(&host.0.paths)
-        .and_then(|runtime| runtime.probe(&source))
-        .map_err(|e| e.to_string())?;
+    let media = probe(&source)?;
     let id = host.token("queue");
     let record = Record {
         id: id.clone(),

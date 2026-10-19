@@ -31,6 +31,135 @@ fn host(root: &Path) -> Host {
 }
 
 #[test]
+fn queue_registration_preserves_grants_and_rolls_back_failed_persistence() {
+    use crate::queue::register_with;
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path();
+    let host = host(root);
+    let source = root.join("granted source.mp4");
+    let output = root.join("granted output.srt");
+    std::fs::write(&source, b"original video identity").unwrap();
+    let source = source.canonicalize().unwrap();
+    lock(&host.0.sources)
+        .unwrap()
+        .insert("source".into(), source.clone());
+    lock(&host.0.destinations)
+        .unwrap()
+        .insert("output".into(), output.clone());
+    let media = nvsf_core::MediaInfo {
+        width: 640,
+        height: 360,
+        duration_ms: Some(6000),
+        codec: "h264".into(),
+        time_base_num: 1,
+        time_base_den: 1000,
+        subtitle_streams: 0,
+        rotation: 0,
+    };
+    let config = ExtractConfig::default();
+    assert!(
+        register_with(&host, "missing", "output", config.clone(), |_| panic!(
+            "ungranted source"
+        ))
+        .is_err()
+    );
+    assert!(
+        register_with(&host, "source", "missing", config.clone(), |_| panic!(
+            "ungranted output"
+        ))
+        .is_err()
+    );
+    let alias = root.join("alias");
+    std::fs::create_dir(&alias).unwrap();
+    lock(&host.0.destinations)
+        .unwrap()
+        .insert("same".into(), alias.join("../granted source.mp4"));
+    assert_eq!(
+        register_with(&host, "source", "same", config.clone(), |_| panic!(
+            "source overwrite"
+        ))
+        .unwrap_err(),
+        "Queue output must not replace source media"
+    );
+    assert_eq!(
+        register_with(&host, "source", "output", config.clone(), |_| Err(
+            "controlled probe failure".into()
+        ))
+        .unwrap_err(),
+        "controlled probe failure"
+    );
+    assert!(lock(&host.0.queue).unwrap().file.records.is_empty());
+    let (id, admitted) = register_with(&host, "source", "output", config.clone(), |path| {
+        assert_eq!(path, source);
+        Ok(media.clone())
+    })
+    .unwrap();
+    assert_eq!(Path::new(&admitted.input), source);
+    assert_eq!(Path::new(&admitted.output), output);
+    assert_eq!(admitted.data_root.as_deref(), host.0.paths.root.to_str());
+    let original = std::fs::read(root.join("desktop-queue.json")).unwrap();
+    {
+        let store = lock(&host.0.queue).unwrap();
+        assert_eq!(store.file.records.len(), 1);
+        assert_eq!(store.file.records[0].id, id);
+        assert_eq!(
+            store.file.records[0].source_hash,
+            nvsf_app::storage::hash_file(&source).unwrap()
+        );
+        assert_eq!(store.grants[&id].source.token, "source");
+        assert_eq!(store.grants[&id].output.token, "output");
+        assert!(!store.entries().unwrap()[0].needs_regrant);
+    }
+    assert_eq!(
+        register_with(&host, "source", "output", config.clone(), |_| Ok(
+            media.clone()
+        ))
+        .unwrap_err(),
+        "This destination already has a saved queue record. Resume that record or remove it before starting new work"
+    );
+    assert_eq!(
+        std::fs::read(root.join("desktop-queue.json")).unwrap(),
+        original
+    );
+    let second = root.join("second.srt");
+    lock(&host.0.destinations)
+        .unwrap()
+        .insert("second".into(), second.clone());
+    let persisted = root.join("desktop-queue.json");
+    let backup = root.join("preserved-queue.json");
+    std::fs::rename(&persisted, &backup).unwrap();
+    std::fs::create_dir(&persisted).unwrap();
+    assert!(
+        register_with(&host, "source", "second", config.clone(), |_| Ok(
+            media.clone()
+        ))
+        .is_err()
+    );
+    assert_eq!(lock(&host.0.queue).unwrap().file.records.len(), 1);
+    assert_eq!(lock(&host.0.queue).unwrap().grants.len(), 1);
+    assert_eq!(std::fs::read(&backup).unwrap(), original);
+    std::fs::remove_dir(&persisted).unwrap();
+    std::fs::rename(&backup, &persisted).unwrap();
+    {
+        let mut store = lock(&host.0.queue).unwrap();
+        store
+            .file
+            .records
+            .extend((1..MAX_ENTRIES).map(|i| record(root, &format!("bulk-{i}"))));
+        store.file.validate().unwrap();
+    }
+    assert_eq!(
+        register_with(&host, "source", "second", config, |_| Ok(media)).unwrap_err(),
+        "Queue is limited to 100 records; remove finished entries first"
+    );
+    assert_eq!(lock(&host.0.queue).unwrap().file.records.len(), MAX_ENTRIES);
+    assert_eq!(lock(&host.0.queue).unwrap().grants.len(), 1);
+    assert_eq!(std::fs::read(persisted).unwrap(), original);
+    assert_eq!(std::fs::read(source).unwrap(), b"original video identity");
+    assert!(!output.exists() && !second.exists());
+}
+
+#[test]
 fn queue_round_trip_preserves_states_and_reports_regrant() {
     let directory = tempfile::tempdir().unwrap();
     let root = directory.path();

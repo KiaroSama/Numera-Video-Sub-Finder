@@ -410,6 +410,69 @@ fn review_commands_reject_invalid_identity_without_loading_native_resources() {
 }
 
 #[test]
+fn review_save_and_export_preserve_files_without_overwrite_confirmation() {
+    let (directory, _app) = workspace();
+    let mut corrected = project();
+    corrected.cues[0].text = "Corrected فارسی 日本".into();
+    corrected.cues[0].edited = true;
+    let original = serde_json::to_vec(&corrected).unwrap();
+    let saved = directory.path().join("saved review.json");
+    std::fs::write(&saved, b"existing review").unwrap();
+    assert!(
+        files::save_project_to(&corrected, &saved, || Ok(false))
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(std::fs::read(&saved).unwrap(), b"existing review");
+    assert_eq!(
+        files::save_project_to(&corrected, &saved, || Err("confirmation failed".into()))
+            .unwrap_err(),
+        "confirmation failed"
+    );
+    assert_eq!(std::fs::read(&saved).unwrap(), b"existing review");
+    assert_eq!(
+        files::save_project_to(&corrected, &saved, || Ok(true))
+            .unwrap()
+            .as_deref(),
+        Some("saved review.json")
+    );
+    assert_eq!(
+        nvsf_app::storage::load_project(&saved).unwrap().cues,
+        corrected.cues
+    );
+    let missing = directory.path().join("missing/review.json");
+    assert!(files::save_project_to(&corrected, &missing, || Ok(true)).is_err());
+    assert!(!missing.exists());
+    let exported = directory.path().join("corrected.srt");
+    std::fs::write(&exported, b"existing subtitles").unwrap();
+    assert!(
+        files::export_project_to(&corrected, &exported, "srt", true, true, || Ok(false))
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(std::fs::read(&exported).unwrap(), b"existing subtitles");
+    assert!(
+        files::export_project_to(&corrected, &exported, "invalid", false, false, || Ok(true))
+            .is_err()
+    );
+    assert_eq!(std::fs::read(&exported).unwrap(), b"existing subtitles");
+    assert_eq!(
+        files::export_project_to(&corrected, &exported, "srt", true, true, || Ok(true))
+            .unwrap()
+            .as_deref(),
+        Some("corrected.srt")
+    );
+    assert_eq!(
+        std::fs::read(&exported).unwrap(),
+        "\u{feff}1\r\n00:00:00,000 --> 00:00:01,000\r\nCorrected فارسی 日本\r\n\r\n".as_bytes()
+    );
+    assert!(
+        files::export_project_to(&corrected, &missing, "srt", false, false, || Ok(true)).is_err()
+    );
+    assert_eq!(serde_json::to_vec(&corrected).unwrap(), original);
+}
+
+#[test]
 fn denied_resource_commands_do_not_start_network_or_native_inference() {
     let (_directory, app) = workspace();
     let host = app.state::<Host>();

@@ -236,17 +236,7 @@ pub async fn save_project(
             return Ok(None);
         };
         let path = file.into_path().map_err(|e| e.to_string())?;
-        let overwrite = path.exists();
-        if !confirm_replace(&app, &path) {
-            return Ok(None);
-        }
-        nvsf_app::storage::write_atomic(
-            &path,
-            &serde_json::to_vec_pretty(&project).map_err(|e| e.to_string())?,
-            overwrite,
-        )
-        .map_err(|e| e.to_string())?;
-        Ok(Some(display_name(&path)))
+        save_project_to(&project, &path, || Ok(confirm_replace(&app, &path)))
     })
     .await
 }
@@ -278,15 +268,46 @@ pub async fn export_project(
             return Ok(None);
         };
         let path = file.into_path().map_err(|e| e.to_string())?;
-        let overwrite = path.exists();
-        if !confirm_replace(&app, &path) {
-            return Ok(None);
-        }
-        nvsf_app::export_project(&project, &path, &format, overwrite, bom, crlf)
-            .map_err(|e| e.to_string())?;
-        Ok(Some(display_name(&path)))
+        export_project_to(&project, &path, &format, bom, crlf, || {
+            Ok(confirm_replace(&app, &path))
+        })
     })
     .await
+}
+
+pub(crate) fn save_project_to(
+    project: &Project,
+    path: &std::path::Path,
+    confirm: impl FnOnce() -> Result<bool>,
+) -> Result<Option<String>> {
+    let overwrite = path.exists();
+    if !confirm()? {
+        return Ok(None);
+    }
+    nvsf_app::storage::write_atomic(
+        path,
+        &serde_json::to_vec_pretty(project).map_err(|e| e.to_string())?,
+        overwrite,
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(Some(display_name(path)))
+}
+
+pub(crate) fn export_project_to(
+    project: &Project,
+    path: &std::path::Path,
+    format: &str,
+    bom: bool,
+    crlf: bool,
+    confirm: impl FnOnce() -> Result<bool>,
+) -> Result<Option<String>> {
+    let overwrite = path.exists();
+    if !confirm()? {
+        return Ok(None);
+    }
+    nvsf_app::export_project(project, path, format, overwrite, bom, crlf)
+        .map_err(|e| e.to_string())?;
+    Ok(Some(display_name(path)))
 }
 
 #[tauri::command]

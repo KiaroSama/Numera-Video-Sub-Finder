@@ -1,4 +1,5 @@
 mod coverage_scope;
+mod extraction_witness;
 mod fixture;
 mod gate;
 mod gui;

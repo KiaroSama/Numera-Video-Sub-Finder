@@ -170,6 +170,9 @@ pub fn smoke(cli: &Path, fixture_dir: &Path, data_root: &Path) -> Result<(), Box
     if bounded(&mut invalid, Duration::from_secs(10)).is_ok() {
         return Err("Invalid input incorrectly succeeded".into());
     }
+    if label == "en.actual" {
+        crate::extraction_witness::verify(&input, data_root, fixture_dir)?;
+    }
     println!(
         "Actual native CLI/FFmpeg/ONNX English synthetic smoke passed; real en/fa/ja quality still unqualified"
     );

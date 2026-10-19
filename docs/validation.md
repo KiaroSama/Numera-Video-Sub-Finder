@@ -1,8 +1,16 @@
 # Validation status
 
-Updated: 2026-10-19. **NOT a release acceptance report.** Hosted observations below refer to the exact named SHA; corrective source is not a passing result.
+Updated: 2026-10-20. **NOT a release acceptance report.** Hosted observations below refer to the exact named SHA; corrective source is not a passing result.
 
 ## Latest hosted checkpoint
+
+[Verification on `3b100e12da3431fc7e9a5776c4017c7d6bc02eba`](https://github.com/KiaroSama/Numera-Video-Sub-Finder/actions/runs/39288850880) completed with **failure** at20:39:23Z on2026-10-19. All six native outcomes are terminal. Windows x64, Windows ARM64 and Linux ARM64 succeed. Windows x64's actual production guard exits0 in2.06seconds; the pending-close and new recovery regressions pass. This verifies the observed contention repair, not every late-edit or installation race. Linux x64 reaches coverage after its required tests/native witnesses: full4987/6882, measured4984/6806 (73.23%), critical1364/1567 (87.05%). Sixteen exclusions remove76 lines including3 hits. The unchanged80/90 floors fail.
+
+Both macOS targets fail the original screenshot with incomplete HTTP. ARM64's retained original-process observer captures ImageIO `SetupTIFFErrorHandler` through TIFF writing, AppKit `TIFFRepresentation` and the pinned driver's PNG conversion callback. Intel reaches the same request and exits with signal11, but its bounded debugger summary has no frames; the ARM64 stack is not asserted for Intel. The instrumented GUI inherited `DYLD_LIBRARY_PATH`, unlike the existing CLI/production launch paths. The pending one-line correction reuses their existing child-only environment cleaner; the loader-contamination hypothesis is not yet runtime-proven. Screenshots, native security and deadlines remain unchanged.
+
+Additional source-only witnesses exercise actual checkpoint-open consent/root/location preservation, queue registration/rollback and review save/export consent. Only external picker/probe/confirmation operations are injected; real path/hash/atomic storage policy remains shared with production. A hosted synthetic extraction witness additionally checks committed-frame cancellation, incompatible resume, active-appearance continuation, retained Unicode corrections, completed-checkpoint export and full-region exclusion. These new witnesses have not run. Rust1.99.1 replaces1.99.0 consistently in hosted toolchain pins following the official FFI/compiler patch release; no local compiler installation/build/test is performed. No current green CI or release acceptance is claimed.
+
+## Previous hosted checkpoint
 
 [Verification on `91f4de0f996e009ecb516c8bef0cd6ddde952a3f`](https://github.com/KiaroSama/Numera-Video-Sub-Finder/actions/runs/39230281748) completed with **failure** at11:48:46Z on2026-10-19. All six native outcomes are terminal. Linux ARM64 succeeds. Linux x64 passes all five Rust suite groups, including the new scope/reporting, export, command, update and queue regressions, and subsequent native execution/package witnesses, then fails coverage: full4758/6803, measured4755/6725 (70.71%), critical1227/1521 (80.67%). The16 reviewed exclusions remove78 lines including3 hits. The unchanged80/90 floors correctly fail; no further exclusions are inferred from misses.
 
