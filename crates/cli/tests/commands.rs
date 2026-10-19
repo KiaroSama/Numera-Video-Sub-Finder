@@ -1,8 +1,9 @@
 use serde_json::{Value, json};
 use std::{
     path::{Path, PathBuf},
-    process::{Command, Output},
+    process::{Child, Command, Output, Stdio},
     sync::atomic::{AtomicU32, Ordering},
+    time::{Duration, Instant},
 };
 
 static NEXT: AtomicU32 = AtomicU32::new(0);
@@ -10,18 +11,96 @@ static NEXT: AtomicU32 = AtomicU32::new(0);
 fn root() -> PathBuf {
     let id = NEXT.fetch_add(1, Ordering::Relaxed);
     let path = std::env::temp_dir().join(format!("nvsf-cli-{}-{id}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&path);
-    std::fs::create_dir_all(path.join("data")).unwrap();
+    std::fs::create_dir(&path).unwrap();
+    std::fs::create_dir(path.join("data")).unwrap();
     path
 }
 
+struct OwnedChild(Child);
+
+impl Drop for OwnedChild {
+    fn drop(&mut self) {
+        if matches!(self.0.try_wait(), Ok(Some(_))) {
+            return;
+        }
+        let _ = self.0.kill();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            if matches!(self.0.try_wait(), Ok(Some(_))) {
+                return;
+            }
+            if Instant::now() >= deadline {
+                panic!("CLI child could not be reaped within two seconds");
+            }
+            std::thread::park_timeout(Duration::from_millis(10));
+        }
+    }
+}
+
 fn nvsf(root: &Path, arguments: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_nvsf"))
+    let stdout = root.join("stdout.txt");
+    let stderr = root.join("stderr.txt");
+    let mut command = Command::new(env!("CARGO_BIN_EXE_nvsf"));
+    command
         .arg("--data-root")
         .arg(root.join("data"))
         .args(arguments)
-        .output()
-        .unwrap()
+        .current_dir(root)
+        .env("NVSF_RUNTIME_ROOT", root.join("empty-runtimes"))
+        .stdin(Stdio::null())
+        .stdout(std::fs::File::create(&stdout).unwrap())
+        .stderr(std::fs::File::create(&stderr).unwrap());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x08000000);
+    }
+    let mut child = OwnedChild(command.spawn().unwrap());
+    let started = Instant::now();
+    let mut progress = started;
+    let mut lengths = (0, 0);
+    let status = loop {
+        let current = (
+            std::fs::metadata(&stdout).unwrap().len(),
+            std::fs::metadata(&stderr).unwrap().len(),
+        );
+        assert!(
+            current.0 <= 1024 * 1024 && current.1 <= 1024 * 1024,
+            "CLI capture exceeds 1MiB"
+        );
+        if current != lengths {
+            lengths = current;
+            progress = Instant::now();
+        }
+        if let Some(status) = child.0.try_wait().unwrap() {
+            break status;
+        }
+        assert!(
+            started.elapsed() < Duration::from_secs(10),
+            "CLI exceeded ten-second wall limit"
+        );
+        assert!(
+            progress.elapsed() < Duration::from_secs(5),
+            "CLI exceeded five-second idle limit"
+        );
+        std::thread::park_timeout(Duration::from_millis(10));
+    };
+    let capture = |path: &Path| {
+        use std::io::Read;
+        let mut bytes = Vec::new();
+        std::fs::File::open(path)
+            .unwrap()
+            .take(1024 * 1024 + 1)
+            .read_to_end(&mut bytes)
+            .unwrap();
+        assert!(bytes.len() <= 1024 * 1024, "Final CLI capture exceeds 1MiB");
+        bytes
+    };
+    Output {
+        status,
+        stdout: capture(&stdout),
+        stderr: capture(&stderr),
+    }
 }
 
 fn project(root: &Path, input: &str, completed: bool) -> PathBuf {
@@ -217,7 +296,7 @@ fn export_writes_the_saved_corrections_and_refuses_silent_overwrite() {
 }
 
 #[test]
-fn resume_rejects_relative_checkpoint_paths_instead_of_guessing() {
+fn resume_rejects_identical_source_and_output_paths() {
     let root = root();
     let checkpoint = project(&root, root.join("video.srt").to_str().unwrap(), false);
     let output = nvsf(&root, &["resume", checkpoint.to_str().unwrap()]);

@@ -1,3 +1,4 @@
+mod coverage_scope;
 mod fixture;
 mod gate;
 mod gui;

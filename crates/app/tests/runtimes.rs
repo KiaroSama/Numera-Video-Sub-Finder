@@ -104,3 +104,49 @@ fn managed_runtime_inventory_requires_a_private_executable_helper() {
         "shared-writable helper admitted"
     );
 }
+
+#[test]
+fn managed_selection_rejects_oversized_malformed_and_escaping_pointers() {
+    let directory = tempfile::tempdir().unwrap();
+    let paths = Paths::new(Some(&directory.path().join("data"))).unwrap();
+    let pointer = paths.root.join("runtime-selection.json");
+
+    std::fs::write(&pointer, serde_json::to_vec(&"a".repeat(300)).unwrap()).unwrap();
+    assert!(runtimes::managed(&paths).is_err());
+
+    std::fs::write(&pointer, br#""not-a-hex-identity""#).unwrap();
+    assert!(runtimes::managed(&paths).is_err());
+
+    let valid = "a".repeat(64);
+    std::fs::write(&pointer, serde_json::to_vec(&valid).unwrap()).unwrap();
+    assert!(
+        runtimes::managed(&paths).is_err(),
+        "no pack directory exists"
+    );
+
+    std::fs::create_dir_all(paths.root.join("runtimes").join(&valid)).unwrap();
+    assert!(
+        runtimes::managed(&paths).is_err(),
+        "no signed inventory exists"
+    );
+    assert!(
+        !paths
+            .root
+            .join("runtimes")
+            .join(&valid)
+            .join("runtime-pack.json")
+            .exists()
+    );
+}
+
+#[test]
+fn signature_authentication_bounds_inputs_before_verification() {
+    for (manifest, signature) in [
+        (vec![b' '; 1024 * 1024 + 1], b"bad signature".to_vec()),
+        (b"{}".to_vec(), vec![b' '; 4097]),
+    ] {
+        let error = runtimes::authenticate(&manifest, &signature).unwrap_err();
+        assert!(matches!(error, nvsf_app::AppError::Message(message)
+            if message == "Runtime signature or manifest exceeds limits"));
+    }
+}

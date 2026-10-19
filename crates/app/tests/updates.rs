@@ -139,6 +139,76 @@ fn macos_update_archive_checks_real_headers_and_forbids_wrong_target_or_links() 
 }
 
 #[test]
+fn update_contract_limits_reject_malformed_metadata_without_mutating_preferences() {
+    let artifact = updates::Artifact {
+        url:
+            "https://github.com/KiaroSama/Numera-Video-Sub-Finder/releases/download/v0.2.0/app.bin"
+                .into(),
+        signature: "fixture-not-an-authenticated-signature".into(),
+        sha256: "a".repeat(64),
+        bytes: 1,
+    };
+    for bytes in [0, updates::MAX_UPDATE_BYTES + 1] {
+        let mut invalid = artifact.clone();
+        invalid.bytes = bytes;
+        assert!(updates::validate_artifact(&invalid).is_err());
+    }
+    for hash in ["a".repeat(63), "z".repeat(64)] {
+        let mut invalid = artifact.clone();
+        invalid.sha256 = hash;
+        assert!(updates::validate_artifact(&invalid).is_err());
+    }
+    for signature in [String::new(), "s".repeat(4097)] {
+        let mut invalid = artifact.clone();
+        invalid.signature = signature;
+        assert!(updates::validate_artifact(&invalid).is_err());
+    }
+    let mut manifest = serde_json::json!({
+        "version":"0.2.0","notes":"n".repeat(16385),
+        "platforms":{"fixture":artifact}
+    });
+    assert!(
+        updates::manifest(&serde_json::to_vec(&manifest).unwrap(), "0.1.0", "fixture").is_err()
+    );
+    manifest["notes"] = "".into();
+    manifest["platforms"]["fixture"]["unknown"] = true.into();
+    assert!(
+        updates::manifest(&serde_json::to_vec(&manifest).unwrap(), "0.1.0", "fixture").is_err()
+    );
+    assert_eq!(
+        updates::manifest(&vec![b' '; 1024 * 1024 + 1], "0.1.0", "fixture")
+            .unwrap_err()
+            .to_string(),
+        "Operation failed: Update metadata exceeds 1MiB"
+    );
+    assert_eq!(
+        updates::verify_signature(&vec![0; 1024 * 1024 + 1], b"invalid")
+            .unwrap_err()
+            .to_string(),
+        "Operation failed: Signed metadata exceeds limits"
+    );
+    assert_eq!(
+        updates::verify_signature(b"{}", &vec![0; 4097])
+            .unwrap_err()
+            .to_string(),
+        "Operation failed: Release signature exceeds limits"
+    );
+
+    let directory = tempfile::tempdir().unwrap();
+    let paths = Paths::new(Some(directory.path())).unwrap();
+    let path = paths.root.join("updates.json");
+    for value in [
+        b"{\"schema\":2,\"enabled\":false,\"last_attempt\":null}".as_slice(),
+        b"{\"schema\":1,\"enabled\":false,\"last_attempt\":null,\"unknown\":true}".as_slice(),
+        b"not json".as_slice(),
+    ] {
+        std::fs::write(&path, value).unwrap();
+        assert!(updates::preferences(&paths).is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), value);
+    }
+}
+
+#[test]
 fn update_preferences_are_atomic_bounded_and_preserve_disabled_choice() {
     let directory = tempfile::tempdir().unwrap();
     let paths = Paths::new(Some(directory.path())).unwrap();

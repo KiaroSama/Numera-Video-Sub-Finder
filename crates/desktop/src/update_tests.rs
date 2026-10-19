@@ -128,6 +128,95 @@ fn native_close_joins_the_owned_hourly_scheduler() {
 }
 
 #[test]
+fn discovered_release_is_only_an_offer_and_a_failed_check_clears_it() {
+    let directory = tempfile::tempdir().unwrap();
+    let paths = nvsf_app::Paths::new(Some(directory.path())).unwrap();
+    let log = nvsf_app::logging::Log::new(&paths, "nvsf-desktop");
+    let host = Host::new(paths, log);
+    let mut platforms = std::collections::BTreeMap::new();
+    for os in ["windows", "linux", "darwin"] {
+        for format in ["portable", "nsis", "msi", "app", "appimage", "deb", "rpm"] {
+            platforms.insert(
+                format!("{os}-{}-{format}", std::env::consts::ARCH),
+                nvsf_app::updates::Artifact {
+                    url: "https://github.com/KiaroSama/Numera-Video-Sub-Finder/releases/download/v0.2.0/app.bin".into(),
+                    signature: "fixture-not-an-authenticated-signature".into(),
+                    sha256: "a".repeat(64),
+                    bytes: 123,
+                },
+            );
+        }
+    }
+    let manifest = nvsf_app::updates::Manifest {
+        version: "0.2.0".into(),
+        notes: "Fixture offer".into(),
+        platforms,
+    };
+    let status = tauri::async_runtime::block_on(updates::check_with(&host, true, async {
+        Ok(Some(manifest))
+    }))
+    .unwrap();
+    assert_eq!(status.state, "available");
+    assert_eq!(status.version.as_deref(), Some("0.2.0"));
+    assert!(status.token.is_some());
+    assert_eq!(status.total, 123);
+    assert_eq!(status.downloaded, 0);
+    assert!(
+        nvsf_app::updates::preferences(&host.0.paths)
+            .unwrap()
+            .last_attempt
+            .is_some()
+    );
+    assert_eq!(std::fs::read_dir(&host.0.paths.cache).unwrap().count(), 0);
+    let skipped = tauri::async_runtime::block_on(updates::check_with(&host, false, async {
+        panic!("daily cadence must not poll the release request")
+    }))
+    .unwrap();
+    assert_eq!(skipped.token, status.token);
+    let failed = tauri::async_runtime::block_on(updates::check_with(&host, true, async {
+        Err(nvsf_app::fail("controlled metadata failure"))
+    }))
+    .unwrap();
+    assert_eq!(failed.state, "error");
+    assert!(failed.token.is_none());
+    assert!(failed.message.contains("controlled metadata failure"));
+    assert_eq!(failed.downloaded, 0);
+    let current =
+        tauri::async_runtime::block_on(updates::check_with(&host, true, async { Ok(None) }))
+            .unwrap();
+    assert_eq!(current.state, "current");
+    assert!(current.token.is_none());
+    assert!(host.shutdown());
+}
+
+#[test]
+fn busy_and_closing_workspaces_do_not_poll_metadata() {
+    let directory = tempfile::tempdir().unwrap();
+    let paths = nvsf_app::Paths::new(Some(directory.path())).unwrap();
+    let log = nvsf_app::logging::Log::new(&paths, "nvsf-desktop");
+    let host = Host::new(paths, log);
+    let operation = model_manager::begin(&host).unwrap();
+    let result = tauri::async_runtime::block_on(updates::check_with(&host, true, async {
+        panic!("resource ownership must prevent metadata polling")
+    }));
+    assert!(result.err().unwrap().contains("resource operation"));
+    assert!(
+        nvsf_app::updates::preferences(&host.0.paths)
+            .unwrap()
+            .last_attempt
+            .is_none()
+    );
+    drop(operation);
+    assert!(host.begin_close().unwrap());
+    let status = tauri::async_runtime::block_on(updates::check_with(&host, true, async {
+        panic!("closing workspace must not poll metadata")
+    }))
+    .unwrap();
+    assert_eq!(status.state, "idle");
+    assert!(host.shutdown());
+}
+
+#[test]
 fn shared_resource_reservation_refuses_source_closing_and_concurrent_operations() {
     let directory = tempfile::tempdir().unwrap();
     let paths = nvsf_app::Paths::new(Some(directory.path())).unwrap();

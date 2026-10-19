@@ -1,5 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+#[cfg(test)]
+mod command_tests;
 #[cfg(feature = "e2e")]
 mod e2e;
 mod files;

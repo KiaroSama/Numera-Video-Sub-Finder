@@ -112,6 +112,37 @@ fn corrupt_queue_file_is_preserved_and_surfaced() {
 }
 
 #[test]
+fn failed_queue_persistence_rolls_back_state_and_preserves_the_checkpoint() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path();
+    let host = host(root);
+    let row = record(root, "rollback");
+    let id = row.id.clone();
+    let checkpoint = row.output.with_extension("nvsf.json");
+    std::fs::write(&checkpoint, b"existing checkpoint").unwrap();
+    {
+        let mut store = lock(&host.0.queue).unwrap();
+        store.file.records.push(row);
+        store.save(root).unwrap();
+    }
+    let persisted = root.join("desktop-queue.json");
+    let original = std::fs::read(&persisted).unwrap();
+    std::fs::rename(&persisted, root.join("preserved-queue.json")).unwrap();
+    std::fs::create_dir(&persisted).unwrap();
+    assert!(mark(&host, &id, "failed", Some("new error".into())).is_err());
+    let store = lock(&host.0.queue).unwrap();
+    assert_eq!(store.file.records[0].state, "queued");
+    assert!(store.file.records[0].error.is_none());
+    assert!(store.file.records[0].checkpoint.is_none());
+    assert_eq!(
+        std::fs::read(root.join("preserved-queue.json")).unwrap(),
+        original
+    );
+    assert_eq!(std::fs::read(checkpoint).unwrap(), b"existing checkpoint");
+    assert!(persisted.is_dir());
+}
+
+#[test]
 fn mark_updates_state_and_truncates_worker_errors() {
     let directory = tempfile::tempdir().unwrap();
     let root = directory.path();

@@ -1,8 +1,20 @@
 # Validation status
 
-Updated: 2026-10-18. **NOT a release acceptance report.** Hosted observations below refer to the exact named SHA; corrective source is not a passing result.
+Updated: 2026-10-19. **NOT a release acceptance report.** Hosted observations below refer to the exact named SHA; corrective source is not a passing result.
 
-## Current hosted verification
+## Latest hosted checkpoint
+
+[Final verification on `ff9775763af6d5857982fb4d7d24573950de8140`](https://github.com/KiaroSama/Numera-Video-Sub-Finder/actions/runs/39156536020) is **not green**. Windows x64/ARM64 and Linux ARM64 native jobs succeed. Linux x64 fails coverage at4534/6803 (66.65% overall,78.93% critical). Dependencies, Miri, mutation and both CodeQL lanes succeed only in their named scope. The run completed with failure at22:45:29Z on2026-10-18; all six native outcomes are terminal. Intel passed its instrumented build, required Rust suites and maintenance CLI witness, then failed production compilation after360seconds without output; later OCR/GUI/package stages were not reached.
+
+macOS ARM64 fails the original test-only WebDriver screenshot request with an incomplete HTTP response and child SIGBUS at11126ms. LLDB emits its version but no attach acknowledgement within3seconds; immediate/final owned crash-report scans are empty. This identifies the screenshot-request boundary, not a proven fault in a particular WebKit function or a production feature. No native stack establishes the root cause. The production build excludes the WebDriver plugin.
+
+The previous `866f4d8` run failed coverage at4481/6803 (65.87% overall,78.87% critical), both macOS GUI checks and a Windows ARM64 production shutdown observation. The current Windows ARM64 lane succeeds; that does not prove every shutdown race repaired. `f98a09b` ultimately passed both Windows and Linux ARM64, failed Linux x64 coverage/macOS ARM64 attachment, and failed Intel provisioning on GitHub DNS resolution, an infrastructure failure rather than an application defect.
+
+Intel's bounded timeout snapshot contains an owned runnable `rustc` process with7:24.48 cumulative CPU and701488KiB RSS, beneath Cargo/Tauri. This disproves neither a stall nor useful ongoing compilation; a single cumulative sample cannot establish progress, the active compiler phase or an optimization root cause. Cleanup was verified. No timeout or production optimization was changed.
+
+The reviewed boundary-scope implementation and app export/runtime tests are authored, not compiled or run. Its16 source-hash-bound dialog/network ranges retain all safety logic and full metrics. Historical accounting excludes78 executable lines and remains below80%; it is neither new runtime evidence nor a green coverage claim. Separate boundary, WASM, native-platform and changed-line acceptance remains open. No local application build/test fallback or final release publication occurred.
+
+## Earlier hosted verification
 
 [Final verification on `af61eb454fb7ff6beb229d235df0066fd7a0f7ef`](https://github.com/KiaroSama/Numera-Video-Sub-Finder/actions/runs/39112986254) completed with **failure** at12:18:26Z on2026-10-18; all six native outcomes are terminal. Both Windows architectures and Linux ARM64 native jobs succeed. Both macOS targets pass builds and Rust suites, then fail the unchanged3-second debugger-attachment gate before the original screenshot, with each original GUI still alive. ARM64's instrumented/production builds take310.65/217.41seconds; Intel's take711.88/566.27seconds. Cleanup is verified. Their diagnostic archives contain only timing HTML, so the new version marker is unavailable and no debugger-startup or permission conclusion is justified. Linux x64 again passes the production GUI guard in2.61seconds, then fails coverage. Both debug/release exports succeed in0.45/0.38seconds; their deduplicated union measures59.9% overall and73.3% critical, below the unchanged80%/90% floors. A further source-confirmed omission is the explicitly targeted media cdylib object directory; the release report now receives that declared target while retaining host objects. Its effect on coverage is unknown.
 

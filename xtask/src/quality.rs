@@ -3,6 +3,15 @@ use std::{collections::BTreeMap, error::Error, path::Path};
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
 pub fn coverage(input: &Path, output: &Path) -> Result<()> {
+    let scope = crate::coverage_scope::Scope::load(&std::env::current_dir()?)?;
+    coverage_scoped(input, output, &scope)
+}
+
+fn coverage_scoped(
+    input: &Path,
+    output: &Path,
+    scope: &crate::coverage_scope::Scope,
+) -> Result<()> {
     let text = std::fs::read_to_string(input)?;
     if text.len() > 64 * 1024 * 1024 {
         return Err("Oversized coverage report".into());
@@ -44,34 +53,23 @@ pub fn coverage(input: &Path, output: &Path) -> Result<()> {
     if files.is_empty() {
         return Err("No instrumentable owned source in coverage".into());
     }
-    let total: usize = files.values().map(BTreeMap::len).sum();
-    let covered: usize = files
-        .values()
-        .map(|lines| lines.values().filter(|n| **n).count())
-        .sum();
-    let critical: Vec<_> = files
-        .iter()
-        .filter(|(p, _)| {
-            p.starts_with("crates/core/src/")
-                || p.ends_with("/storage.rs")
-                || p.ends_with("/extraction.rs")
-                || p.ends_with("/resume.rs")
-                || p.ends_with("/queue.rs")
-        })
-        .collect();
-    let critical_total: usize = critical.iter().map(|(_, lines)| lines.len()).sum();
-    let critical_hit: usize = critical
-        .iter()
-        .map(|(_, lines)| lines.values().filter(|n| **n).count())
-        .sum();
-    let ratio = covered as f64 / total as f64;
-    let critical_ratio = if critical_total > 0 {
-        critical_hit as f64 / critical_total as f64
-    } else {
-        0.
-    };
+    let full = crate::coverage_scope::counts(&files);
+    let measured = crate::coverage_scope::counts(&scope.measured(&files)?);
+    let ratio = measured.covered as f64 / measured.lines as f64;
+    let critical_ratio = measured.critical_covered as f64 / measured.critical_lines as f64;
     let native_pass = ratio >= 0.80 && critical_ratio >= 0.90;
-    let record = json!({"schema":1,"source_sha":std::env::var("GITHUB_SHA")?,"scope":"native-instrumented-owned-source","lines":total,"covered":covered,"coverage":ratio,"critical_coverage":critical_ratio,"passed":native_pass,"full_product_qualified":false,"remaining":"WASM UI browser coverage and changed-line/native-platform union require separate evidence","files":files});
+    let record = json!({
+        "schema":1,"source_sha":std::env::var("GITHUB_SHA")?,
+        "scope":"native-owned-source-with-reviewed-external-boundaries",
+        "lines":measured.lines,"covered":measured.covered,"coverage":ratio,
+        "critical_coverage":critical_ratio,"passed":native_pass,
+        "full":full,"measured":measured,
+        "excluded_lines":full.lines-measured.lines,
+        "excluded_covered":full.covered-measured.covered,
+        "exclusions":scope.exclusions,"full_product_qualified":false,
+        "remaining":"Excluded boundary acceptance, WASM UI browser coverage and changed-line/native-platform union require separate evidence",
+        "files":files
+    });
     std::fs::write(output, serde_json::to_vec_pretty(&record)?)?;
     if !native_pass {
         return Err(format!(
@@ -129,7 +127,12 @@ mod tests {
                 source.display(), source.display()
             ),
         ).unwrap();
-        coverage(&input, &output).unwrap();
+        let scope = crate::coverage_scope::Scope::parse(
+            br#"{"schema":1,"approval":"D012","exclusions":[]}"#,
+            &root,
+        )
+        .unwrap();
+        coverage_scoped(&input, &output, &scope).unwrap();
         let report: serde_json::Value =
             serde_json::from_slice(&std::fs::read(output).unwrap()).unwrap();
         assert_eq!(report["lines"], 3);
@@ -140,12 +143,67 @@ mod tests {
     }
 
     #[test]
+    fn scoped_report_retains_full_hits_and_fails_below_unchanged_floors() {
+        use sha2::{Digest, Sha256};
+        let dir = tempfile::tempdir().unwrap();
+        let path = "crates/desktop/src/files.rs";
+        let source = "fn picker() {\n    dialog();\n    validate();\n}\n";
+        std::fs::create_dir_all(dir.path().join("crates/desktop/src")).unwrap();
+        std::fs::write(dir.path().join(path), source).unwrap();
+        let manifest = json!({"schema":1,"approval":"D012","exclusions":[{
+            "path":path,"start":2,"end":2,
+            "source_sha256":format!("{:x}", Sha256::digest(source.as_bytes())),
+            "category":"native-dialog","reason":"Native picker invocation",
+            "acceptance":"OPEN: native selection and cancellation"
+        }]});
+        let scope = crate::coverage_scope::Scope::parse(
+            &serde_json::to_vec(&manifest).unwrap(),
+            dir.path(),
+        )
+        .unwrap();
+        let root = std::env::current_dir().unwrap().canonicalize().unwrap();
+        let input = dir.path().join("profiles.lcov");
+        let output = dir.path().join("coverage.json");
+        std::fs::write(
+            &input,
+            format!(
+                "SF:{}\nDA:2,0\nDA:3,0\nend_of_record\nSF:{}\nDA:1,1\nend_of_record\n",
+                root.join(path).display(),
+                root.join("crates/core/src/time.rs").display(),
+            ),
+        )
+        .unwrap();
+        let error = coverage_scoped(&input, &output, &scope).unwrap_err();
+        assert!(error.to_string().contains("Coverage below retained floors"));
+        let report: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(output).unwrap()).unwrap();
+        assert_eq!(report["full"]["lines"], 3);
+        assert_eq!(report["full"]["covered"], 1);
+        assert_eq!(report["measured"]["lines"], 2);
+        assert_eq!(report["measured"]["covered"], 1);
+        assert_eq!(report["excluded_lines"], 1);
+        assert_eq!(report["excluded_covered"], 0);
+        assert_eq!(report["coverage"], 0.5);
+        assert_eq!(report["critical_coverage"], 1.0);
+        assert_eq!(report["passed"], false);
+        assert_eq!(report["full_product_qualified"], false);
+        assert_eq!(report["files"][path]["2"], false);
+        assert_eq!(report["files"][path]["3"], false);
+        assert_eq!(report["exclusions"], manifest["exclusions"]);
+    }
+
+    #[test]
     fn malformed_and_empty_quality_data_fails_closed() {
         let dir = tempfile::tempdir().unwrap();
         let input = dir.path().join("input");
         let output = dir.path().join("report");
         std::fs::write(&input, b"TN:\n").unwrap();
-        assert!(coverage(&input, &output).is_err());
+        let scope = crate::coverage_scope::Scope::parse(
+            br#"{"schema":1,"approval":"D012","exclusions":[]}"#,
+            dir.path(),
+        )
+        .unwrap();
+        assert!(coverage_scoped(&input, &output, &scope).is_err());
         for data in [
             "{}",
             "{\"caught\":0,\"missed\":0,\"timeout\":0}",
