@@ -4,6 +4,10 @@ Updated: 2026-10-19. **NOT a release acceptance report.** Hosted observations be
 
 ## Latest hosted checkpoint
 
+[Verification on `f5cc81f1c7839e03486a8dd3ceff22fb4f0ce450`](https://github.com/KiaroSama/Numera-Video-Sub-Finder/actions/runs/39219089976) is **not green**. All six native targets and the mutation result-validator build fail before the new tests execute: the coverage-scope digest formatter incorrectly requires `LowerHex` on the SHA-2 0.11.1 output array. The run completed with failure at09:23:06Z on2026-10-19; every native failure log identifies the same expression. Miri, dependency checks and both CodeQL lanes pass only their named tiers. Corrective source formats individual bytes using the existing two-digit lowercase convention and adds the official `hello world` SHA-256 reference; it is not yet compiled or runtime-verified. Coverage floors, scope records and product assertions are unchanged.
+
+## Previous completed hosted verification
+
 [Final verification on `ff9775763af6d5857982fb4d7d24573950de8140`](https://github.com/KiaroSama/Numera-Video-Sub-Finder/actions/runs/39156536020) is **not green**. Windows x64/ARM64 and Linux ARM64 native jobs succeed. Linux x64 fails coverage at4534/6803 (66.65% overall,78.93% critical). Dependencies, Miri, mutation and both CodeQL lanes succeed only in their named scope. The run completed with failure at22:45:29Z on2026-10-18; all six native outcomes are terminal. Intel passed its instrumented build, required Rust suites and maintenance CLI witness, then failed production compilation after360seconds without output; later OCR/GUI/package stages were not reached.
 
 macOS ARM64 fails the original test-only WebDriver screenshot request with an incomplete HTTP response and child SIGBUS at11126ms. LLDB emits its version but no attach acknowledgement within3seconds; immediate/final owned crash-report scans are empty. This identifies the screenshot-request boundary, not a proven fault in a particular WebKit function or a production feature. No native stack establishes the root cause. The production build excludes the WebDriver plugin.

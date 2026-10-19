@@ -118,6 +118,10 @@ fn no_observed_boundary_or_empty_critical_scope_cannot_pass() {
 
 #[test]
 fn source_identity_ignores_checkout_line_endings_not_content() {
+    assert_eq!(
+        digest("hello world"),
+        "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
+    );
     assert_eq!(digest("first\r\nsecond\r\n"), digest("first\nsecond\n"));
     assert_ne!(digest("first\nsecond\n"), digest("first\nchanged\n"));
 }

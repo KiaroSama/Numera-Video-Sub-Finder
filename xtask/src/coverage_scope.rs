@@ -74,10 +74,10 @@ fn bounded(path: &Path, limit: u64) -> Result<Vec<u8>> {
 
 // Git may convert checkout newlines; identity still binds every source character.
 fn digest(source: &str) -> String {
-    format!(
-        "{:x}",
-        Sha256::digest(source.replace("\r\n", "\n").as_bytes())
-    )
+    Sha256::digest(source.replace("\r\n", "\n").as_bytes())
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 
 impl Scope {

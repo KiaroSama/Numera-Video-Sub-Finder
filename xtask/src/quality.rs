@@ -152,7 +152,7 @@ mod tests {
         std::fs::write(dir.path().join(path), source).unwrap();
         let manifest = json!({"schema":1,"approval":"D012","exclusions":[{
             "path":path,"start":2,"end":2,
-            "source_sha256":format!("{:x}", Sha256::digest(source.as_bytes())),
+            "source_sha256":Sha256::digest(source.as_bytes()).iter().map(|byte| format!("{byte:02x}")).collect::<String>(),
             "category":"native-dialog","reason":"Native picker invocation",
             "acceptance":"OPEN: native selection and cancellation"
         }]});
