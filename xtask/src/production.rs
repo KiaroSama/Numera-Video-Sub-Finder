@@ -289,7 +289,18 @@ pub fn smoke(gui: &Path, data: &Path, output: &Path) -> Result<()> {
             }
             listener::absent()?;
             let (log, length) = diagnostic(&logs)?;
-            let window = native_window(pid, evidence.as_path(), &mut helper_index)?;
+            let observation = native_window(pid, evidence.as_path(), &mut helper_index);
+            #[cfg(target_os = "linux")]
+            if observation
+                .as_ref()
+                .is_err_and(|error| linux::interrupted_window_query(&error.to_string()))
+            {
+                // A vanished X11 child is an interrupted query, not proof of absence.
+                budget.observe(format!("startup:{length}:false"))?;
+                std::thread::park_timeout(Duration::from_millis(40));
+                continue;
+            }
+            let window = observation?;
             budget.observe(format!("startup:{length}:{}", window.is_some()))?;
             if log.contains("[INFO] [APP] Startup version=")
                 && let Some(window) = window

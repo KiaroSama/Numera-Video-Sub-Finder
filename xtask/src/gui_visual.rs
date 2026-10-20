@@ -136,7 +136,10 @@ pub fn layout(driver: &Driver, output: &Path) -> Result<()> {
             output.join("control-focus.json"),
             serde_json::to_vec_pretty(&json!({"before":before,"native":native,"after":focused}))?,
         )?;
-        if native["focused"] != true
+        // Native parent focus is diagnostic: an embedded WebView can hold input focus
+        // while its parent reports false, including after successful macOS activation.
+        if !native["focused"].is_boolean()
+            || native["error"].is_string()
             || focused["documentFocused"] != true
             || focused["matchesFocus"] != true
             || focused["active"] != true

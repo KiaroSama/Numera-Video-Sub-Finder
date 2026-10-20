@@ -117,9 +117,50 @@ pub fn capture(pid: u32, package: &Path, output: &Path) -> Result<()> {
     Ok(())
 }
 
+pub(super) fn interrupted_window_query(message: &str) -> bool {
+    let Some(text) = message
+        .strip_prefix("X11 native window query failed (xdotool and virtual display required): ")
+    else {
+        return false;
+    };
+    let lines: Vec<_> = text.lines().map(str::trim).collect();
+    lines.len() == 5
+        && lines[0] == "X Error of failed request:  BadWindow (invalid Window parameter)"
+        && lines[1] == "Major opcode of failed request:  15 (X_QueryTree)"
+        && lines[2]
+            .strip_prefix("Resource id in failed request:  0x")
+            .is_some_and(|id| !id.is_empty() && u64::from_str_radix(id, 16).is_ok())
+        && [
+            (3, "Serial number of failed request:  "),
+            (4, "Current serial number in output stream:  "),
+        ]
+        .iter()
+        .all(|(index, prefix)| {
+            lines[*index]
+                .strip_prefix(prefix)
+                .is_some_and(|value| value.parse::<u64>().is_ok())
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn only_exact_disappearing_window_query_is_an_interrupted_observation() {
+        let diagnostic = "X11 native window query failed (xdotool and virtual display required): X Error of failed request:  BadWindow (invalid Window parameter)\n  Major opcode of failed request:  15 (X_QueryTree)\n  Resource id in failed request:  0x400009\n  Serial number of failed request:  93\n  Current serial number in output stream:  93";
+        assert!(interrupted_window_query(diagnostic));
+        for rejected in [
+            diagnostic.replace("BadWindow", "BadAccess"),
+            diagnostic.replace("15 (X_QueryTree)", "20 (X_GetProperty)"),
+            diagnostic.replace("0x400009", "invalid"),
+            format!("{diagnostic}\nUnable to open display"),
+            "BadWindow".into(),
+            String::new(),
+        ] {
+            assert!(!interrupted_window_query(&rejected));
+        }
+    }
+
     #[test]
     fn library_summary_excludes_addresses_private_paths_and_unrelated_mappings() {
         let maps = "abc-def r-xp 000 00:00 1 /usr/lib/libgtk-3.so.0.2404.32\nabc-def r--p 000 00:00 1 /usr/lib/libgtk-3.so.0.2404.32\nabc-def r-xp 000 00:00 1 /private/package/runtimes/libharfbuzz.so.14\nabc-def r-xp 000 00:00 1 /private/person/customer.bin\n";
