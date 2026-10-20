@@ -563,6 +563,48 @@ fn review_save_and_export_preserve_files_without_overwrite_confirmation() {
 }
 
 #[test]
+fn model_file_actions_preserve_installed_bytes_on_denial_cancel_and_invalid_import() {
+    use crate::model_manager;
+    let (directory, app) = workspace();
+    let host = app.state::<Host>();
+    let source = directory.path().join("candidate 日本.onnx");
+    let installed = host.inner().0.paths.models.join("det.onnx");
+    std::fs::write(&source, b"invalid candidate").unwrap();
+    std::fs::write(&installed, b"preserved model").unwrap();
+    assert!(
+        model_manager::import_model_from(host.inner(), "det", directory.path(), || panic!(
+            "directory must be rejected"
+        ))
+        .is_err()
+    );
+    assert!(
+        model_manager::import_model_from(host.inner(), "det", &source, || false)
+            .unwrap()
+            .is_none()
+    );
+    host.inner().0.model_cancel.store(true, Ordering::Release);
+    assert_eq!(
+        model_manager::import_model_from(host.inner(), "det", &source, || true).unwrap_err(),
+        "Model import cancelled before activation"
+    );
+    let destination = directory.path().join("export.onnx");
+    assert_eq!(
+        model_manager::export_model_to(host.inner(), "det", &destination).unwrap_err(),
+        "Model export cancelled"
+    );
+    host.inner().0.model_cancel.store(false, Ordering::Release);
+    assert!(
+        model_manager::import_model_from(host.inner(), "det", &source, || true)
+            .unwrap_err()
+            .contains("Import checksum mismatch")
+    );
+    assert!(model_manager::export_model_to(host.inner(), "det", &destination).is_err());
+    assert_eq!(std::fs::read(&installed).unwrap(), b"preserved model");
+    assert_eq!(std::fs::read(&source).unwrap(), b"invalid candidate");
+    assert!(!destination.exists());
+}
+
+#[test]
 fn denied_resource_commands_do_not_start_network_or_native_inference() {
     let (_directory, app) = workspace();
     let host = app.state::<Host>();

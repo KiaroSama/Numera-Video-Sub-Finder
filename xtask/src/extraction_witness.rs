@@ -147,6 +147,39 @@ pub fn verify(input: &Path, data: &Path, root: &Path) -> Result<()> {
     if !unreadable.to_string().contains("Cue crop is unreadable") {
         return Err(format!("Blank-crop witness failed before recognition: {unreadable}").into());
     }
+    for spec in nvsf_app::models::specs()?
+        .into_iter()
+        .filter(|spec| spec.id != "ja-specialist")
+    {
+        nvsf_app::models::verify(&paths, &spec.id)?;
+    }
+    for language in ["eng", "fas", "jpn"] {
+        nvsf_app::languages::verify(&paths, language)?;
+    }
+    nvsf_app::models::install_defaults(&paths)?;
+    let bundled = root.join("bundled");
+    let bundled_models = bundled.join("data/models");
+    std::fs::create_dir_all(&bundled_models)?;
+    std::fs::copy(
+        paths.models.join("en-ja.onnx"),
+        bundled_models.join("en-ja.onnx"),
+    )?;
+    let mut seeded = Paths::new(Some(&root.join("seeded-models")))?;
+    seeded.runtimes = bundled.join("runtimes");
+    nvsf_app::models::seed_bundled(&seeded)?;
+    nvsf_app::models::verify(&seeded, "en-ja")?;
+    std::fs::write(
+        bundled_models.join("det.onnx"),
+        b"corrupted bundled candidate",
+    )?;
+    if !nvsf_app::models::seed_bundled(&seeded)
+        .err()
+        .is_some_and(|e| e.to_string().contains("Bundled model integrity failed"))
+        || seeded.models.join("det.onnx").exists()
+    {
+        return Err("Corrupt bundled candidate was not rejected before activation".into());
+    }
+    nvsf_app::models::verify(&seeded, "en-ja")?;
     let exported_model = root.join("en-ja.onnx");
     nvsf_app::models::export_model(&paths, "en-ja", &exported_model)?;
     if nvsf_app::models::export_model(&paths, "en-ja", &exported_model).is_ok() {
@@ -169,7 +202,7 @@ pub fn verify(input: &Path, data: &Path, root: &Path) -> Result<()> {
         &root.join("report.json"),
         &serde_json::to_vec_pretty(&serde_json::json!({
             "source_sha":std::env::var("GITHUB_SHA")?, "passed":true, "synthetic":true,
-            "proof":["cancel after committed frame", "incompatible resume preservation", "active appearance resume", "saved Unicode correction export", "overwrite refusal", "completed checkpoint export without decoding", "balanced full exclusion", "real subtitle-band suggestion", "blank cue rejection", "verified model export/import and corrupt replacement refusal"],
+            "proof":["cancel after committed frame", "incompatible resume preservation", "active appearance resume", "saved Unicode correction export", "overwrite refusal", "completed checkpoint export without decoding", "balanced full exclusion", "real subtitle-band suggestion", "blank cue rejection", "verified model export/import and corrupt replacement refusal", "installed default reuse and verified bundled seed with corrupt candidate refusal"],
             "not_proved":["real-language quality", "native pause UI", "power-loss durability"],
             "elapsed_ms":started.elapsed().as_millis()
         }))?,

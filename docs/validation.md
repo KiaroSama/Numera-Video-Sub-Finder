@@ -2,7 +2,13 @@
 
 Updated: 2026-10-20. **NOT a release acceptance report.** Hosted observations below refer to the exact named SHA; corrective source is not a passing result.
 
-## Latest hosted checkpoint
+## Current hosted verification
+
+[Verification on `9136376ae20541c5dea42f16f7f95a298cfcd314`](https://github.com/KiaroSama/Numera-Video-Sub-Finder/actions/runs/39350974211) is **not green**. Windows x64, Windows ARM64 and Linux ARM64 native jobs succeed. Linux x64 passes its required Rust suites, twelve instrumented GUI behaviors, five production lifecycle observations (1.686seconds), and the extended extraction/resource witness (2.343seconds), then fails overall coverage: full5457/7055, measured5454/6979 (78.15%). Critical coverage1496/1643 (91.05%) exceeds the unchanged90% floor; overall80% remains unmet. The same16 exclusions remove76 lines including3 hits. Both macOS targets retain three actual theme screenshots, then fail the same visible-focus assertion despite the CSS addition. Their extended extraction witnesses pass in2.815seconds on ARM64 and7.294seconds on Intel. Both failures report `No child processes` when querying child status; this is not proof that either original GUI remained alive. The run completed with failure at04:20:05Z on2026-10-20; all six native outcomes are terminal.
+
+The next unexecuted source slice exercises shared authenticated managed-runtime repair using the actual signed candidate and local payload acquisition, plus model/language import/export denial, cancellation and invalid-byte preservation. These are not HTTP/TLS download, process-restart, native-picker or platform-signing qualification. No threshold or exclusion expansion is used.
+
+## Previous hosted checkpoint
 
 [Verification on `ea2fcb0b5293fff0f6d1e0931dcfa0ce83dae6b0`](https://github.com/KiaroSama/Numera-Video-Sub-Finder/actions/runs/39328747279) is **not green**. Windows x64, Windows ARM64 and Linux ARM64 succeed. Linux x64 passes the new real extraction lifecycle witness in1.288seconds, then fails coverage: full5136/6968, measured5133/6892 (74.48%), critical1465/1634 (89.66%), with76 excluded lines including3 hits. The unchanged80/90 floors remain mandatory.
 

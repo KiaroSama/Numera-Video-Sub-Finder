@@ -118,14 +118,35 @@ pub fn layout(driver: &Driver, output: &Path) -> Result<()> {
         }
         // The pinned driver emits synthetic Tab events without native focus traversal.
         // Programmatic focus verifies the visible focus contract, not keyboard navigation.
-        let focused = driver.script("const e=document.querySelector('#header-theme');e.focus();const s=getComputedStyle(e);return {active:document.activeElement===e,outline:s.outlineStyle,width:s.outlineWidth,method:'programmatic; native Tab traversal unverified'};")?;
-        if focused["active"] != true || focused["outline"] == "none" || focused["width"] == "0px" {
-            return Err(format!("Control focus is not visible: {focused}").into());
-        }
+        let observe = "const e=document.querySelector('#header-theme');e.focus();const s=getComputedStyle(e);return {documentFocused:document.hasFocus(),matchesFocus:e.matches(':focus'),active:document.activeElement===e,outline:s.outlineStyle,width:s.outlineWidth,method:'programmatic; native Tab traversal unverified'};";
+        let before = driver.script(observe)?;
+        std::fs::write(
+            output.join("control-focus-before.json"),
+            serde_json::to_vec_pretty(&before)?,
+        )?;
+        // Showing a macOS window does not activate its application; session selection
+        // in the pinned driver is logical only. Activate through the native CI surface.
+        let native = driver.request(
+            reqwest::Method::POST,
+            "/execute/async",
+            json!({"script":"const done=arguments[arguments.length-1];window.__TAURI__.core.invoke('e2e_focus').then(focused=>done({focused}),()=>done({error:'Native focus command failed'}));","args":[]}),
+        )?;
+        let focused = driver.script(observe)?;
         std::fs::write(
             output.join("control-focus.json"),
-            serde_json::to_vec_pretty(&focused)?,
+            serde_json::to_vec_pretty(&json!({"before":before,"native":native,"after":focused}))?,
         )?;
+        if native["focused"] != true
+            || focused["documentFocused"] != true
+            || focused["matchesFocus"] != true
+            || focused["active"] != true
+            || focused["outline"] == "none"
+            || focused["width"] == "0px"
+        {
+            return Err(
+                format!("Control focus is not visible: native={native} webview={focused}").into(),
+            );
+        }
         Ok(())
     })();
     let restored = driver.request(reqwest::Method::POST, "/window/rect", original);

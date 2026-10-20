@@ -80,19 +80,40 @@ pub async fn import_model(
     model_id(&id)?;
     let host = host.inner().clone();
     let operation = begin(&host)?;
-    blocking(move ||{
-        let _operation=operation;
-        let Some(file)=app.dialog().file().set_title("Import checksummed ONNX model").add_filter("ONNX model",&["onnx"]).blocking_pick_file()else{return Ok(None);};
-        let source=file.into_path().map_err(|e|e.to_string())?.canonicalize().map_err(|e|e.to_string())?;
-        if !source.is_file(){return Err("Select a regular ONNX model file".into());}
-        if host.0.paths.models.join(format!("{id}.onnx")).exists()
-            && !app.dialog().message("Replace this installed model with the selected checksummed artifact? Existing jobs are stopped and invalid imports preserve the current model.")
-                .title("Replace installed model").buttons(MessageDialogButtons::OkCancelCustom("Verify and replace".into(),"Cancel".into())).blocking_show(){return Ok(None);}
-        if host.0.model_cancel.load(Ordering::Acquire){return Err("Model import cancelled before activation".into());}
-        nvsf_app::models::import_model(&host.0.paths,&id,&source).map_err(|e|e.to_string())?;
-        host.0.log.event("INFO","MODELS","Explicit model artifact imported after integrity checks");
-        Ok(Some(id))
+    blocking(move || {
+        let _operation = operation;
+        let Some(file) = app.dialog().file().set_title("Import checksummed ONNX model").add_filter("ONNX model", &["onnx"]).blocking_pick_file() else { return Ok(None); };
+        let source = file.into_path().map_err(|e| e.to_string())?;
+        import_model_from(&host, &id, &source, || {
+            app.dialog().message("Replace this installed model with the selected checksummed artifact? Existing jobs are stopped and invalid imports preserve the current model.")
+                .title("Replace installed model").buttons(MessageDialogButtons::OkCancelCustom("Verify and replace".into(), "Cancel".into())).blocking_show()
+        })
     }).await
+}
+
+pub(crate) fn import_model_from(
+    host: &Host,
+    id: &str,
+    source: &std::path::Path,
+    confirm: impl FnOnce() -> bool,
+) -> Result<Option<String>> {
+    let source = source.canonicalize().map_err(|e| e.to_string())?;
+    if !source.is_file() {
+        return Err("Select a regular ONNX model file".into());
+    }
+    if host.0.paths.models.join(format!("{id}.onnx")).exists() && !confirm() {
+        return Ok(None);
+    }
+    if host.0.model_cancel.load(Ordering::Acquire) {
+        return Err("Model import cancelled before activation".into());
+    }
+    nvsf_app::models::import_model(&host.0.paths, id, &source).map_err(|e| e.to_string())?;
+    host.0.log.event(
+        "INFO",
+        "MODELS",
+        "Explicit model artifact imported after integrity checks",
+    );
+    Ok(Some(id.into()))
 }
 
 #[tauri::command]
@@ -117,22 +138,29 @@ pub async fn export_model(
             return Ok(None);
         };
         let destination = file.into_path().map_err(|e| e.to_string())?;
-        if destination.is_symlink() {
-            return Err("Choose a regular model export destination".into());
-        }
-        if host.0.model_cancel.load(Ordering::Acquire) {
-            return Err("Model export cancelled".into());
-        }
-        nvsf_app::models::export_model(&host.0.paths, &id, &destination)
-            .map_err(|e| e.to_string())?;
-        host.0.log.event(
-            "INFO",
-            "MODELS",
-            "Verified artifact exported without overwriting existing files",
-        );
-        Ok(Some(display_name(&destination)))
+        export_model_to(&host, &id, &destination).map(Some)
     })
     .await
+}
+
+pub(crate) fn export_model_to(
+    host: &Host,
+    id: &str,
+    destination: &std::path::Path,
+) -> Result<String> {
+    if destination.is_symlink() {
+        return Err("Choose a regular model export destination".into());
+    }
+    if host.0.model_cancel.load(Ordering::Acquire) {
+        return Err("Model export cancelled".into());
+    }
+    nvsf_app::models::export_model(&host.0.paths, id, destination).map_err(|e| e.to_string())?;
+    host.0.log.event(
+        "INFO",
+        "MODELS",
+        "Verified artifact exported without overwriting existing files",
+    );
+    Ok(display_name(destination))
 }
 
 #[cfg(test)]

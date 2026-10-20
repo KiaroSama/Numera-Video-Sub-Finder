@@ -55,6 +55,8 @@ fn main() {
             "e2e_fixture",
             #[cfg(feature = "e2e")]
             "e2e_save_edits",
+            #[cfg(feature = "e2e")]
+            "e2e_focus",
         ])),
     )
     .expect("Native desktop resources and command permissions must be valid");

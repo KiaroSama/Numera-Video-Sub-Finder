@@ -233,6 +233,164 @@ fn archive_notices(root: &Path, output: &Path) -> Result<()> {
     Ok(())
 }
 
+fn repair_witness(stage: &Path, manifest: &[u8], signature: &[u8], work: &Path) -> Result<()> {
+    use nvsf_app::{AppError, Paths, runtimes};
+    use std::{io::Read, sync::atomic::AtomicBool};
+    let temporary = tempfile::tempdir_in(work)?;
+    let paths = Paths::new(Some(&temporary.path().join("Repair data 日本")))?;
+    let project = paths.projects.join("preserved.json");
+    let model = paths.models.join("preserved.onnx");
+    std::fs::write(&project, b"existing project")?;
+    std::fs::write(&model, b"existing model")?;
+    let base = format!(
+        "{}/releases/download/v{}",
+        nvsf_app::updates::REPOSITORY,
+        env!("CARGO_PKG_VERSION")
+    );
+    let cancel = AtomicBool::new(false);
+    let no_fetch = |_: &Entry| -> nvsf_app::Result<std::fs::File> {
+        panic!("Refused repair must not acquire a payload")
+    };
+    let denied =
+        runtimes::repair_with_fetch(&paths, manifest, signature, &base, false, &cancel, no_fetch);
+    if !denied
+        .err()
+        .is_some_and(|e| e.to_string().contains("approval"))
+    {
+        return Err("Repair denial did not fail before payload acquisition".into());
+    }
+    let mut tampered = manifest.to_vec();
+    tampered.push(b' ');
+    if runtimes::repair_with_fetch(&paths, &tampered, signature, &base, true, &cancel, no_fetch)
+        .is_ok()
+    {
+        return Err("Tampered repair manifest was accepted".into());
+    }
+    let cancelled = AtomicBool::new(true);
+    if !matches!(
+        runtimes::repair_with_fetch(
+            &paths, manifest, signature, &base, true, &cancelled, no_fetch,
+        ),
+        Err(AppError::Cancelled)
+    ) {
+        return Err("Pre-cancelled signed repair was not refused".into());
+    }
+    let pointer = paths.root.join("runtime-selection.json");
+    if pointer.exists() || runtimes::managed(&paths)?.is_some() {
+        return Err("Refused repair activated a runtime selection".into());
+    }
+    let fetch = |entry: &Entry| -> nvsf_app::Result<std::fs::File> {
+        Ok(std::fs::File::open(stage.join(&entry.file))?)
+    };
+    let installed =
+        runtimes::repair_with_fetch(&paths, manifest, signature, &base, true, &cancel, fetch)?;
+    let selected = runtimes::managed(&paths)?.ok_or("Signed repair selection absent")?;
+    if selected != installed || installed.parent() != Some(paths.root.join("runtimes").as_path()) {
+        return Err("Signed repair did not activate its contained immutable pack".into());
+    }
+    let original = std::fs::read(&pointer)?;
+    if runtimes::repair_with_fetch(&paths, manifest, signature, &base, true, &cancel, fetch)?
+        != installed
+    {
+        return Err("Repeated signed repair changed the selected pack identity".into());
+    }
+    let short = runtimes::repair_with_fetch(
+        &paths,
+        manifest,
+        signature,
+        &base,
+        true,
+        &cancel,
+        |_| -> nvsf_app::Result<std::io::Cursor<&[u8]>> { Ok(std::io::Cursor::new(b"corrupt")) },
+    );
+    if !short
+        .err()
+        .is_some_and(|e| e.to_string().contains("Runtime integrity failed"))
+    {
+        return Err("Short/corrupt repair did not fail signed payload verification".into());
+    }
+    struct CorruptRead(std::fs::File);
+    impl Read for CorruptRead {
+        fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+            let count = self.0.read(buffer)?;
+            if count > 0 {
+                buffer[0] ^= 1;
+            }
+            Ok(count)
+        }
+    }
+    let corrupt =
+        runtimes::repair_with_fetch(&paths, manifest, signature, &base, true, &cancel, |entry| {
+            Ok(CorruptRead(fetch(entry)?))
+        });
+    if !corrupt
+        .err()
+        .is_some_and(|e| e.to_string().contains("Runtime integrity failed"))
+    {
+        return Err("Same-size corrupt repair payload passed checksum verification".into());
+    }
+    let transport = runtimes::repair_with_fetch(
+        &paths,
+        manifest,
+        signature,
+        &base,
+        true,
+        &cancel,
+        |_| -> nvsf_app::Result<std::fs::File> {
+            Err(
+                std::io::Error::new(std::io::ErrorKind::TimedOut, "controlled repair timeout")
+                    .into(),
+            )
+        },
+    );
+    if !matches!(transport, Err(AppError::Io(e)) if e.kind() == std::io::ErrorKind::TimedOut) {
+        return Err("Repair transport error was not propagated".into());
+    }
+    struct CancelRead<'a> {
+        file: std::fs::File,
+        cancel: &'a AtomicBool,
+    }
+    impl Read for CancelRead<'_> {
+        fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+            let count = self.file.read(buffer)?;
+            self.cancel
+                .store(true, std::sync::atomic::Ordering::Release);
+            Ok(count)
+        }
+    }
+    let interrupted =
+        runtimes::repair_with_fetch(&paths, manifest, signature, &base, true, &cancel, |entry| {
+            Ok(CancelRead {
+                file: fetch(entry)?,
+                cancel: &cancel,
+            })
+        });
+    if !matches!(interrupted, Err(AppError::Cancelled)) {
+        return Err("Cancellation during repair payload read did not stop activation".into());
+    }
+    if std::fs::read(&pointer)? != original
+        || std::fs::read(&project)? != b"existing project"
+        || std::fs::read(&model)? != b"existing model"
+        || runtimes::managed(&paths)?.as_ref() != Some(&installed)
+    {
+        return Err("Failed repair changed the selected pack or application data".into());
+    }
+    let pack: Pack = serde_json::from_slice(manifest)?;
+    pack.verify(&installed)?;
+    if std::fs::read_dir(paths.root.join("runtimes"))?.count() != 2 {
+        return Err("Repair left an undeclared staging directory".into());
+    }
+    let mut reopened = Paths::new(Some(&paths.root))?;
+    reopened.runtimes = runtimes::managed(&reopened)?.ok_or("Reopened selection absent")?;
+    if runtimes::diagnose(&reopened)
+        .iter()
+        .any(|row| row.state != "verified")
+    {
+        return Err("Reopened repaired pack failed actual native health".into());
+    }
+    Ok(())
+}
+
 pub fn generate(target: &str, runtimes: &Path, output: &Path) -> Result<()> {
     if std::env::var("GITHUB_ACTIONS").as_deref() != Ok("true")
         || std::env::var("RUNNER_ENVIRONMENT").as_deref() != Ok("github-hosted")
@@ -413,10 +571,11 @@ pub fn generate(target: &str, runtimes: &Path, output: &Path) -> Result<()> {
         return Err("Final runtime manifest differs from admitted bytes".into());
     }
     nvsf_app::runtimes::authenticate(&final_manifest, &final_signature)?;
+    repair_witness(&stage, &final_manifest, &final_signature, &work)?;
     if std::fs::read_dir(output)?.count() != pack.files.len() + 2 {
         return Err("Final runtime output contains undeclared assets".into());
     }
-    let report = serde_json::json!({"schema":1,"source_sha":source,"target":target,"passed":true,"tests":5,"failed":0,"skipped":0,"status":"candidate-not-for-publication","proof":["same-source native closure and notices","signed manifest authenticated with embedded key","modified signed metadata refused","actual staged native API health","final output payload hashes and authenticated metadata"],"not_proved":["platform-native signing","download/repair/restart","installer/update lifecycle"]});
+    let report = serde_json::json!({"schema":1,"source_sha":source,"target":target,"passed":true,"tests":6,"failed":0,"skipped":0,"status":"candidate-not-for-publication","proof":["same-source native closure and notices","signed manifest authenticated with embedded key","modified signed metadata refused","actual staged native API health","final output payload hashes and authenticated metadata","shared authenticated repair admission, cancellation and activation with local payload acquisition"],"not_proved":["platform-native signing","HTTP/TLS repair download and process restart","installer/update lifecycle"]});
     std::fs::OpenOptions::new()
         .write(true)
         .create_new(true)

@@ -170,7 +170,11 @@ fn main() {
         ] };
     }
     #[cfg(feature = "e2e")]
-    let builder = builder.invoke_handler(commands![e2e::e2e_fixture, e2e::e2e_save_edits]);
+    let builder = builder.invoke_handler(commands![
+        e2e::e2e_fixture,
+        e2e::e2e_save_edits,
+        e2e::e2e_focus,
+    ]);
     #[cfg(not(feature = "e2e"))]
     let builder = builder.invoke_handler(commands![]);
     log.event("INFO", "DESKTOP", "phase=native-build-started");

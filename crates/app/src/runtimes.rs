@@ -281,6 +281,32 @@ pub fn repair(
     consent: bool,
     cancel: &AtomicBool,
 ) -> Result<PathBuf> {
+    let mut client = None;
+    repair_with_fetch(paths, manifest, signature, base, consent, cancel, |entry| {
+        if client.is_none() {
+            client = Some(crate::updates::client(Duration::from_secs(20))?);
+        }
+        client
+            .as_ref()
+            .ok_or_else(|| fail("Runtime transfer client unavailable"))?
+            .get(format!("{base}/{}-{}", target(), entry.file))
+            .send()
+            .and_then(|r| r.error_for_status())
+            .map_err(|e| fail(e.to_string()))
+    })
+}
+
+/// Acquisition adapter for authenticated packs; all admission and activation policy is shared.
+/// Callers must supply only the payload for the requested signed entry.
+pub fn repair_with_fetch<R: Read>(
+    paths: &Paths,
+    manifest: &[u8],
+    signature: &[u8],
+    base: &str,
+    consent: bool,
+    cancel: &AtomicBool,
+    mut fetch: impl FnMut(&Entry) -> Result<R>,
+) -> Result<PathBuf> {
     if !consent {
         return Err(fail(
             "Explicit app-local dependency repair approval required",
@@ -298,16 +324,11 @@ pub fn repair(
     let _lock = crate::storage::JobLock::acquire(&root.join("repair.lock"))?;
     let stage = tempfile::tempdir_in(&root)?;
     let deadline = std::time::Instant::now() + Duration::from_secs(600);
-    let client = crate::updates::client(Duration::from_secs(20))?;
     for entry in &pack.files {
         if cancel.load(Ordering::Acquire) {
             return Err(crate::AppError::Cancelled);
         }
-        let mut response = client
-            .get(format!("{base}/{}-{}", pack.target, entry.file))
-            .send()
-            .and_then(|r| r.error_for_status())
-            .map_err(|e| fail(e.to_string()))?;
+        let mut response = fetch(entry)?;
         let mut file = std::fs::OpenOptions::new()
             .create_new(true)
             .write(true)
