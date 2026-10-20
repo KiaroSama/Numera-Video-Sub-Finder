@@ -32,7 +32,10 @@ impl Driver {
         body: Value,
     ) -> Result<Value> {
         #[cfg(target_os = "macos")]
-        if route == "/screenshot" && !self.debugger_attempted.replace(true) {
+        if route == "/screenshot"
+            && std::env::var("NVSF_GUI_CRASH_DEBUGGER").as_deref() == Ok("1")
+            && !self.debugger_attempted.replace(true)
+        {
             match crate::gui_debugger::Debugger::attach(self.owned_pid, &self.evidence) {
                 Ok((debugger, acknowledged)) => {
                     *self.debugger.borrow_mut() = Some(debugger);
@@ -94,7 +97,12 @@ impl Driver {
     pub(super) fn wait(&self, predicate: &str, seconds: u64) -> Result<()> {
         let deadline = Instant::now() + Duration::from_secs(seconds);
         loop {
-            if self.script(predicate)?.as_bool() == Some(true) {
+            if self
+                .script(predicate)
+                .map_err(|error| format!("GUI predicate request failed: {predicate}; {error}"))?
+                .as_bool()
+                == Some(true)
+            {
                 return Ok(());
             }
             let error =
