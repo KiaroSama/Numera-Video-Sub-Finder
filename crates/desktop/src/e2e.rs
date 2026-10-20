@@ -126,6 +126,8 @@ pub async fn e2e_save_edits(host: tauri::State<'_, Host>, output_token: String) 
 #[tauri::command]
 pub fn e2e_focus(window: tauri::WebviewWindow) -> Result<bool> {
     window.set_focus().map_err(|e| e.to_string())?;
+    let webview: &tauri::Webview = window.as_ref();
+    webview.set_focus().map_err(|e| e.to_string())?;
     window.is_focused().map_err(|e| e.to_string())
 }
 

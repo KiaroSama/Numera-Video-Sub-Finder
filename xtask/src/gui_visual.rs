@@ -131,11 +131,13 @@ pub fn layout(driver: &Driver, output: &Path) -> Result<()> {
             "/execute/async",
             json!({"script":"const done=arguments[arguments.length-1];window.__TAURI__.core.invoke('e2e_focus').then(focused=>done({focused}),()=>done({error:'Native focus command failed'}));","args":[]}),
         )?;
+        let settled = driver.wait("const e=document.querySelector('#header-theme');e.focus();return document.hasFocus() && e.matches(':focus') && document.activeElement===e;", 5);
         let focused = driver.script(observe)?;
         std::fs::write(
             output.join("control-focus.json"),
             serde_json::to_vec_pretty(&json!({"before":before,"native":native,"after":focused}))?,
         )?;
+        settled?;
         // Native parent focus is diagnostic: an embedded WebView can hold input focus
         // while its parent reports false, including after successful macOS activation.
         if !native["focused"].is_boolean()
