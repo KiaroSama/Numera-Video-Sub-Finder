@@ -281,6 +281,126 @@ fn pending_close_survives_operation_contention_without_duplicate_admission() {
 }
 
 #[test]
+fn update_stream_checks_size_digest_cancel_and_cleans_unverified_bytes() {
+    use std::{
+        io::{self, Cursor, Read},
+        time::{Duration, Instant},
+    };
+    let directory = tempfile::tempdir().unwrap();
+    let paths = nvsf_app::Paths::new(Some(directory.path())).unwrap();
+    let log = nvsf_app::logging::Log::new(&paths, "nvsf-desktop");
+    let host = Host::new(paths, log);
+    let artifact = nvsf_app::updates::Artifact {
+        url:
+            "https://github.com/KiaroSama/Numera-Video-Sub-Finder/releases/download/v0.2.0/app.bin"
+                .into(),
+        signature: "not-a-signature-this-test-does-not-authenticate".into(),
+        sha256: "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9".into(),
+        bytes: 11,
+    };
+    let deadline = || Instant::now() + Duration::from_secs(2);
+    let receive = |data: &[u8]| {
+        updates::receive_update(&host, &artifact, None, Cursor::new(data), deadline())
+    };
+    assert_eq!(
+        updates::receive_update(
+            &host,
+            &artifact,
+            Some(12),
+            Cursor::new(b"hello world"),
+            deadline()
+        )
+        .err()
+        .unwrap(),
+        "Update payload size differs from release inventory"
+    );
+    for (data, error) in [
+        (
+            b"short".as_slice(),
+            "Update checksum or length mismatch; installed application unchanged",
+        ),
+        (
+            b"wrong bytes".as_slice(),
+            "Update checksum or length mismatch; installed application unchanged",
+        ),
+        (
+            b"hello world!".as_slice(),
+            "Update exceeds declared payload size",
+        ),
+    ] {
+        assert_eq!(receive(data).err().unwrap(), error);
+        assert_eq!(std::fs::read_dir(&host.0.paths.cache).unwrap().count(), 0);
+    }
+    assert_eq!(
+        updates::receive_update(
+            &host,
+            &artifact,
+            None,
+            Cursor::new(b"hello world"),
+            Instant::now()
+        )
+        .err()
+        .unwrap(),
+        "Update transfer exceeded 600-second deadline"
+    );
+    host.0.model_cancel.store(true, Ordering::Release);
+    assert_eq!(
+        receive(b"hello world").err().unwrap(),
+        "Update download cancelled; installed application unchanged"
+    );
+    host.0.model_cancel.store(false, Ordering::Release);
+    struct CancelRead<'a>(&'a std::sync::atomic::AtomicBool);
+    impl Read for CancelRead<'_> {
+        fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+            buffer[..11].copy_from_slice(b"hello world");
+            self.0.store(true, Ordering::Release);
+            Ok(11)
+        }
+    }
+    assert_eq!(
+        updates::receive_update(
+            &host,
+            &artifact,
+            None,
+            CancelRead(&host.0.model_cancel),
+            deadline()
+        )
+        .err()
+        .unwrap(),
+        "Update download cancelled; installed application unchanged"
+    );
+    host.0.model_cancel.store(false, Ordering::Release);
+    struct FailedRead;
+    impl Read for FailedRead {
+        fn read(&mut self, _: &mut [u8]) -> io::Result<usize> {
+            Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "controlled stalled update read",
+            ))
+        }
+    }
+    assert_eq!(
+        updates::receive_update(&host, &artifact, None, FailedRead, deadline())
+            .err()
+            .unwrap(),
+        "controlled stalled update read"
+    );
+    assert_eq!(std::fs::read_dir(&host.0.paths.cache).unwrap().count(), 0);
+    let file = receive(b"hello world").unwrap();
+    assert_eq!(std::fs::read(file.path()).unwrap(), b"hello world");
+    let status = updates::update_status_inner(&host).unwrap();
+    assert_eq!(status.state, "downloading");
+    assert_eq!(status.downloaded, 11);
+    assert!(
+        status.token.is_none(),
+        "stream integrity is not signature or installation approval"
+    );
+    drop(file);
+    assert_eq!(std::fs::read_dir(&host.0.paths.cache).unwrap().count(), 0);
+    assert!(host.shutdown());
+}
+
+#[test]
 fn shared_resource_reservation_refuses_source_closing_and_concurrent_operations() {
     let directory = tempfile::tempdir().unwrap();
     let paths = nvsf_app::Paths::new(Some(directory.path())).unwrap();

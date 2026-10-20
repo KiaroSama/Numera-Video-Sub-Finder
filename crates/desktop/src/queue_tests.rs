@@ -160,6 +160,105 @@ fn queue_registration_preserves_grants_and_rolls_back_failed_persistence() {
 }
 
 #[test]
+fn queue_regrant_rechecks_workspace_and_record_after_external_selection() {
+    use crate::{
+        queue::{Grant, regrant_queue_with},
+        state::{Destination, Source},
+    };
+    use std::sync::atomic::Ordering;
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path();
+    let host = host(root);
+    let row = record(root, "regrant");
+    let id = row.id.clone();
+    let grant = Grant {
+        source: Source {
+            token: "source-regrant".into(),
+            name: "regrant.mp4".into(),
+            fingerprint: row.source_hash.clone(),
+            media: nvsf_core::MediaInfo {
+                width: 640,
+                height: 360,
+                duration_ms: Some(1000),
+                codec: "h264".into(),
+                time_base_num: 1,
+                time_base_den: 1000,
+                subtitle_streams: 0,
+                rotation: 0,
+            },
+        },
+        output: Destination {
+            token: "output-regrant".into(),
+            name: "regrant.srt".into(),
+        },
+    };
+    assert_eq!(
+        regrant_queue_with(&host, &id, |_| panic!("missing record"))
+            .err()
+            .unwrap(),
+        "Queue record not found"
+    );
+    {
+        let mut store = lock(&host.0.queue).unwrap();
+        store.file.records.push(row.clone());
+        store.save(root).unwrap();
+    }
+    let original = std::fs::read(root.join("desktop-queue.json")).unwrap();
+    host.0.unsaved.store(true, Ordering::Release);
+    assert_eq!(
+        regrant_queue_with(&host, &id, |_| panic!("unsaved edits"))
+            .err()
+            .unwrap(),
+        "Save current corrections before regranting/resuming a queue entry"
+    );
+    host.0.unsaved.store(false, Ordering::Release);
+    assert!(
+        regrant_queue_with(&host, &id, |_| Ok(None))
+            .unwrap()
+            .is_none()
+    );
+    assert!(lock(&host.0.queue).unwrap().grants.is_empty());
+    assert_eq!(
+        regrant_queue_with(&host, &id, |_| {
+            host.0.closing.store(true, Ordering::Release);
+            Ok(Some(grant.clone()))
+        })
+        .err()
+        .unwrap(),
+        "Wait for source operations, update installation or application shutdown to finish"
+    );
+    host.0.closing.store(false, Ordering::Release);
+    assert!(lock(&host.0.queue).unwrap().grants.is_empty());
+    assert_eq!(
+        regrant_queue_with(&host, &id, |_| {
+            lock(&host.0.queue).unwrap().file.records.clear();
+            Ok(Some(grant.clone()))
+        })
+        .err()
+        .unwrap(),
+        "Queue record was removed while its pickers were open"
+    );
+    {
+        let mut store = lock(&host.0.queue).unwrap();
+        assert!(store.grants.is_empty());
+        store.file.records.push(row);
+    }
+    let entries = regrant_queue_with(&host, &id, |selected| {
+        assert_eq!(selected.id, id);
+        Ok(Some(grant))
+    })
+    .unwrap()
+    .unwrap();
+    assert_eq!(entries.len(), 1);
+    assert!(!entries[0].needs_regrant);
+    assert_eq!(entries[0].id, id);
+    assert_eq!(
+        std::fs::read(root.join("desktop-queue.json")).unwrap(),
+        original
+    );
+}
+
+#[test]
 fn queue_round_trip_preserves_states_and_reports_regrant() {
     let directory = tempfile::tempdir().unwrap();
     let root = directory.path();

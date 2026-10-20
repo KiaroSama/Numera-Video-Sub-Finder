@@ -410,6 +410,96 @@ fn review_commands_reject_invalid_identity_without_loading_native_resources() {
 }
 
 #[test]
+fn native_file_grants_validate_identity_and_limits_before_publication() {
+    let (directory, app) = workspace();
+    let host = app.state::<Host>();
+    let source = directory.path().join("source 日本.mp4");
+    std::fs::write(&source, b"original source").unwrap();
+    let canonical = source.canonicalize().unwrap();
+    let fingerprint = nvsf_app::storage::hash_file(&source).unwrap();
+    let probe = |path: &std::path::Path| {
+        assert_eq!(path, canonical);
+        Ok(project().media)
+    };
+    assert!(
+        files::grant_source_with(host.inner(), directory.path(), None, |_| panic!(
+            "directory"
+        ))
+        .is_err()
+    );
+    assert!(
+        files::grant_source_with(
+            host.inner(),
+            &directory.path().join("missing"),
+            None,
+            |_| panic!("missing")
+        )
+        .is_err()
+    );
+    assert_eq!(
+        files::grant_source_with(host.inner(), &source, Some("wrong"), |_| panic!(
+            "identity mismatch"
+        ))
+        .err()
+        .unwrap(),
+        "Selected video does not match the project's source fingerprint"
+    );
+    assert_eq!(
+        files::grant_source_with(host.inner(), &source, None, |_| Err("probe failed".into()))
+            .err()
+            .unwrap(),
+        "probe failed"
+    );
+    assert!(lock(&host.inner().0.sources).unwrap().is_empty());
+    host.inner().0.closing.store(true, Ordering::Release);
+    assert!(files::grant_source_with(host.inner(), &source, None, |_| panic!("closing")).is_err());
+    host.inner().0.closing.store(false, Ordering::Release);
+    let admitted =
+        files::grant_source_with(host.inner(), &source, Some(&fingerprint), probe).unwrap();
+    assert_eq!(admitted.fingerprint, fingerprint);
+    assert_eq!(admitted.name, "source 日本.mp4");
+    assert_eq!(host.source(&admitted.token).unwrap(), canonical);
+    {
+        let mut sources = lock(&host.inner().0.sources).unwrap();
+        sources.extend((0..1023).map(|i| (format!("filled-{i}"), canonical.clone())));
+        assert_eq!(sources.len(), 1024);
+    }
+    assert_eq!(
+        files::grant_source_with(host.inner(), &source, None, probe)
+            .err()
+            .unwrap(),
+        "Source limit reached; restart the workspace to release old grants"
+    );
+    assert_eq!(lock(&host.inner().0.sources).unwrap().len(), 1024);
+    let output = directory.path().join("output 日本.SRT");
+    std::fs::write(&output, b"existing subtitles").unwrap();
+    assert_eq!(
+        files::grant_output(host.inner(), &source).err().unwrap(),
+        "Choose a destination ending in .srt"
+    );
+    assert!(files::grant_output(host.inner(), &directory.path().join("missing/out.srt")).is_err());
+    assert!(lock(&host.inner().0.destinations).unwrap().is_empty());
+    let destination = files::grant_output(host.inner(), &output).unwrap();
+    assert_eq!(destination.name, "output 日本.SRT");
+    assert_eq!(
+        host.destination(&destination.token).unwrap(),
+        output.canonicalize().unwrap()
+    );
+    {
+        let mut destinations = lock(&host.inner().0.destinations).unwrap();
+        destinations.extend((0..255).map(|i| (format!("filled-{i}"), output.clone())));
+        assert_eq!(destinations.len(), 256);
+    }
+    assert_eq!(
+        files::grant_output(host.inner(), &output).err().unwrap(),
+        "Output grant limit reached; restart the workspace"
+    );
+    assert_eq!(lock(&host.inner().0.destinations).unwrap().len(), 256);
+    assert_eq!(std::fs::read(&source).unwrap(), b"original source");
+    assert_eq!(std::fs::read(&output).unwrap(), b"existing subtitles");
+}
+
+#[test]
 fn review_save_and_export_preserve_files_without_overwrite_confirmation() {
     let (directory, _app) = workspace();
     let mut corrected = project();

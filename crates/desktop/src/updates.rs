@@ -347,13 +347,38 @@ fn download(app: &tauri::AppHandle, host: &Host, token: &str) -> Result<Status> 
         .send()
         .and_then(|r| r.error_for_status())
         .map_err(|e| e.to_string())?;
-    if response
-        .content_length()
-        .is_some_and(|n| n != artifact.bytes)
+    let file = receive_update(
+        host,
+        &artifact,
+        response.content_length(),
+        response,
+        deadline,
+    )?;
+    let bytes = std::fs::read(file.path()).map_err(|e| e.to_string())?;
+    update.verify(&bytes).map_err(|e| e.to_string())?;
+    nvsf_app::update_payload::validate(&bytes, &offer.target).map_err(|e| e.to_string())?;
+    if host.0.maintenance.cancel.load(Ordering::Acquire)
+        || host.0.model_cancel.load(Ordering::Acquire)
     {
+        return Err("Update download cancelled before verified activation".into());
+    }
+    offer.file = Some(file);
+    let mut status = lock(&host.0.maintenance.status)?;
+    status.state = "verified".into();
+    status.message = if automatic() { "Signature and checksum verified. Save edits and approve installation when ready." } else { "Verified download ready. Use Save download and the format-specific installation guide; no automatic replacement is supported." }.into();
+    Ok(status.clone())
+}
+
+pub(crate) fn receive_update(
+    host: &Host,
+    artifact: &updates::Artifact,
+    content_length: Option<u64>,
+    mut response: impl Read,
+    deadline: Instant,
+) -> Result<tempfile::NamedTempFile> {
+    if content_length.is_some_and(|n| n != artifact.bytes) {
         return Err("Update payload size differs from release inventory".into());
     }
-    let mut response = response;
     let mut file =
         tempfile::NamedTempFile::new_in(&host.0.paths.cache).map_err(|e| e.to_string())?;
     {
@@ -364,7 +389,7 @@ fn download(app: &tauri::AppHandle, host: &Host, token: &str) -> Result<Status> 
     let mut received = 0u64;
     let mut buffer = [0u8; 65536];
     loop {
-        if std::time::Instant::now() >= deadline {
+        if Instant::now() >= deadline {
             return Err("Update transfer exceeded 600-second deadline".into());
         }
         if host.0.maintenance.cancel.load(Ordering::Acquire)
@@ -392,19 +417,7 @@ fn download(app: &tauri::AppHandle, host: &Host, token: &str) -> Result<Status> 
     {
         return Err("Update checksum or length mismatch; installed application unchanged".into());
     }
-    let bytes = std::fs::read(file.path()).map_err(|e| e.to_string())?;
-    update.verify(&bytes).map_err(|e| e.to_string())?;
-    nvsf_app::update_payload::validate(&bytes, &offer.target).map_err(|e| e.to_string())?;
-    if host.0.maintenance.cancel.load(Ordering::Acquire)
-        || host.0.model_cancel.load(Ordering::Acquire)
-    {
-        return Err("Update download cancelled before verified activation".into());
-    }
-    offer.file = Some(file);
-    let mut status = lock(&host.0.maintenance.status)?;
-    status.state = "verified".into();
-    status.message = if automatic() { "Signature and checksum verified. Save edits and approve installation when ready." } else { "Verified download ready. Use Save download and the format-specific installation guide; no automatic replacement is supported." }.into();
-    Ok(status.clone())
+    Ok(file)
 }
 
 #[tauri::command]

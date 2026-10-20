@@ -211,8 +211,15 @@ pub fn client(timeout: Duration) -> Result<reqwest::blocking::Client> {
 }
 
 pub(crate) fn metadata(response: reqwest::blocking::Response, limit: u64) -> Result<Vec<u8>> {
+    read_metadata(
+        response,
+        limit,
+        std::time::Instant::now() + Duration::from_secs(20),
+    )
+}
+
+fn read_metadata(response: impl Read, limit: u64, deadline: std::time::Instant) -> Result<Vec<u8>> {
     let mut response = response.take(limit + 1);
-    let deadline = std::time::Instant::now() + Duration::from_secs(20);
     let mut bytes = Vec::new();
     let mut buffer = [0u8; 8192];
     loop {
@@ -311,4 +318,46 @@ pub fn target(format: &str) -> String {
         std::env::consts::OS
     };
     format!("{os}-{}-{format}", std::env::consts::ARCH)
+}
+
+#[cfg(test)]
+mod transfer_tests {
+    use super::*;
+    use std::{
+        io::{self, Cursor},
+        time::Instant,
+    };
+
+    #[test]
+    fn release_metadata_reads_are_bounded_and_fail_on_transport_errors() {
+        let deadline = || Instant::now() + Duration::from_secs(2);
+        assert_eq!(
+            read_metadata(Cursor::new(b"{}"), 2, deadline()).unwrap(),
+            b"{}"
+        );
+        assert!(
+            read_metadata(Cursor::new(b"{}x"), 2, deadline())
+                .unwrap_err()
+                .to_string()
+                .contains("byte budget")
+        );
+        assert!(
+            read_metadata(Cursor::new(b"{}"), 2, Instant::now())
+                .unwrap_err()
+                .to_string()
+                .contains("transfer deadline")
+        );
+        struct FailedRead;
+        impl Read for FailedRead {
+            fn read(&mut self, _: &mut [u8]) -> io::Result<usize> {
+                Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    "controlled metadata timeout",
+                ))
+            }
+        }
+        assert!(
+            matches!(read_metadata(FailedRead, 2, deadline()), Err(crate::AppError::Io(e)) if e.kind() == io::ErrorKind::TimedOut)
+        );
+    }
 }

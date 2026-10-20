@@ -36,7 +36,7 @@ pub fn install(
     {
         return Ok(());
     }
-    let mut offset = if partial.is_file() {
+    let offset = if partial.is_file() {
         partial.metadata()?.len()
     } else {
         0
@@ -66,51 +66,88 @@ pub fn install(
         .send()
         .and_then(|r| r.error_for_status())
         .map_err(|e| fail(format!("Model download failed: {e}")))?;
-    if offset > 0 && response.status() != reqwest::StatusCode::PARTIAL_CONTENT {
-        offset = 0;
+    let partial_content = response.status() == reqwest::StatusCode::PARTIAL_CONTENT;
+    let range = response
+        .headers()
+        .get(reqwest::header::CONTENT_RANGE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .to_owned();
+    Transfer {
+        bytes,
+        sha256,
+        destination,
+        cancel,
+        deadline,
     }
-    if offset > 0 {
-        let expected = format!("bytes {offset}-");
-        let range = response
-            .headers()
-            .get(reqwest::header::CONTENT_RANGE)
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or("");
-        if !range.starts_with(&expected) || !range.ends_with(&format!("/{bytes}")) {
-            return Err(fail("Invalid resumed model response range"));
+    .receive(offset, partial_content, &range, &mut response)
+}
+
+struct Transfer<'a> {
+    bytes: u64,
+    sha256: &'a str,
+    destination: &'a Path,
+    cancel: &'a AtomicBool,
+    deadline: Instant,
+}
+
+impl Transfer<'_> {
+    fn receive(
+        &self,
+        mut offset: u64,
+        partial_content: bool,
+        range: &str,
+        mut response: impl Read,
+    ) -> Result<()> {
+        let Self {
+            bytes,
+            sha256,
+            destination,
+            cancel,
+            deadline,
+        } = *self;
+        let partial = destination.with_extension("partial");
+        if offset > 0 && !partial_content {
+            offset = 0;
         }
-    }
-    check_transfer(cancel, deadline)?;
-    let mut file = std::fs::OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(offset == 0)
-        .open(&partial)?;
-    use std::io::Seek;
-    file.seek(std::io::SeekFrom::Start(offset))?;
-    let mut buffer = [0u8; 65536];
-    let mut received = offset;
-    loop {
+        if offset > 0 {
+            let expected = format!("bytes {offset}-");
+            if !range.starts_with(&expected) || !range.ends_with(&format!("/{bytes}")) {
+                return Err(fail("Invalid resumed model response range"));
+            }
+        }
         check_transfer(cancel, deadline)?;
-        let n = response.read(&mut buffer)?;
-        if n == 0 {
-            break;
+        let mut file = std::fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(offset == 0)
+            .open(&partial)?;
+        use std::io::Seek;
+        file.seek(std::io::SeekFrom::Start(offset))?;
+        let mut buffer = [0u8; 65536];
+        let mut received = offset;
+        loop {
+            check_transfer(cancel, deadline)?;
+            let n = response.read(&mut buffer)?;
+            if n == 0 {
+                break;
+            }
+            received = received
+                .checked_add(n as u64)
+                .ok_or_else(|| fail("Model size overflow"))?;
+            if received > bytes {
+                return Err(fail("Model download exceeds declared size"));
+            }
+            file.write_all(&buffer[..n])?;
         }
-        received = received
-            .checked_add(n as u64)
-            .ok_or_else(|| fail("Model size overflow"))?;
-        if received > bytes {
-            return Err(fail("Model download exceeds declared size"));
+        file.flush()?;
+        file.sync_all()?;
+        drop(file);
+        if received != bytes {
+            return Err(fail("Incomplete model download; partial bytes retained"));
         }
-        file.write_all(&buffer[..n])?;
+        activate(&partial, destination, bytes, sha256, cancel, deadline)
     }
-    file.flush()?;
-    file.sync_all()?;
-    drop(file);
-    if received != bytes {
-        return Err(fail("Incomplete model download; partial bytes retained"));
-    }
-    activate(&partial, destination, bytes, sha256, cancel, deadline)
 }
 
 fn check_transfer(cancel: &AtomicBool, deadline: Instant) -> Result<()> {
@@ -166,3 +203,7 @@ fn activate(
     std::fs::remove_file(partial)?;
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "model_download_tests.rs"]
+mod tests;

@@ -74,7 +74,7 @@ button:disabled, input:disabled, select:disabled { opacity: .52; cursor: not-all
 button.primary { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
 button.primary:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); }
 button.danger { color: var(--error); border-color: var(--error); }
-:focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; }
+:focus-visible, select:focus { outline: 3px solid var(--focus); outline-offset: 3px; }
 main:focus { outline: none; }
 input:not([type="checkbox"]):not([type="range"]), select, textarea { color: var(--text); background: var(--input); border: 1px solid var(--strong-border); border-radius: 8px; padding: 10px 12px; width: 100%; }
 textarea { resize: vertical; min-height: 110px; line-height: 1.65; }
@@ -305,5 +305,5 @@ input:not([type="checkbox"]):not([type="range"]), select, textarea { min-width: 
 @media (forced-colors: active) {
   button, input, select, textarea, .state-chip { border-color: ButtonText; }
   .nav-item.active, .cue-row.selected { outline: 2px solid Highlight; outline-offset: -3px; }
-  :focus-visible { outline-color: Highlight; }
+  :focus-visible, select:focus { outline-color: Highlight; }
 }

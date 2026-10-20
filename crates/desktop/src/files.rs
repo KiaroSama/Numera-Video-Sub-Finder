@@ -27,40 +27,13 @@ pub async fn pick_source(
         else {
             return Ok(None);
         };
-        let path = file
-            .into_path()
-            .map_err(|e| e.to_string())?
-            .canonicalize()
-            .map_err(|e| e.to_string())?;
-        if !path.is_file() {
-            return Err("Select a regular local video file".into());
-        }
-        let _operation = lock(&host.0.operation)?;
-        host.ensure_idle()?;
-        let fingerprint = nvsf_app::storage::hash_file(&path).map_err(|e| e.to_string())?;
-        if expected_hash.is_some_and(|expected| fingerprint != expected) {
-            return Err("Selected video does not match the project's source fingerprint".into());
-        }
-        let media = nvsf_app::media::MediaRuntime::load(&host.0.paths)
-            .and_then(|runtime| runtime.probe(&path))
-            .map_err(|e| e.to_string())?;
-        let token = host.token("source");
-        let mut grants = lock(&host.0.sources)?;
-        if grants.len() >= 1024 {
-            return Err("Source limit reached; restart the workspace to release old grants".into());
-        }
-        grants.insert(token.clone(), path.clone());
-        host.0.log.event(
-            "INFO",
-            "SOURCE",
-            "Native source granted and metadata probed",
-        );
-        Ok(Some(Source {
-            token,
-            name: display_name(&path),
-            fingerprint,
-            media,
-        }))
+        let path = file.into_path().map_err(|e| e.to_string())?;
+        grant_source_with(&host, &path, expected_hash.as_deref(), |path| {
+            nvsf_app::media::MediaRuntime::load(&host.0.paths)
+                .and_then(|runtime| runtime.probe(path))
+                .map_err(|e| e.to_string())
+        })
+        .map(Some)
     })
     .await
 }
@@ -83,38 +56,78 @@ pub async fn choose_output(
             return Ok(None);
         };
         let path = file.into_path().map_err(|e| e.to_string())?;
-        if path
-            .extension()
-            .and_then(|e| e.to_str())
-            .is_none_or(|e| !e.eq_ignore_ascii_case("srt"))
-        {
-            return Err("Choose a destination ending in .srt".into());
-        }
-        state::path_text(&path)?;
-        if path.is_symlink() {
-            return Err("Output is a symlink; choose a regular destination".into());
-        }
-        let parent = path
-            .parent()
-            .ok_or_else(|| "Output directory does not exist".to_string())?
-            .canonicalize()
-            .map_err(|e| e.to_string())?;
-        let name = path
-            .file_name()
-            .ok_or_else(|| "Output needs a filename".to_string())?;
-        let path = parent.join(name);
-        let token = host.token("output");
-        let mut grants = lock(&host.0.destinations)?;
-        if grants.len() >= 256 {
-            return Err("Output grant limit reached; restart the workspace".into());
-        }
-        grants.insert(token.clone(), path.clone());
-        Ok(Some(Destination {
-            token,
-            name: display_name(&path),
-        }))
+        grant_output(&host, &path).map(Some)
     })
     .await
+}
+
+pub(crate) fn grant_source_with(
+    host: &Host,
+    path: &std::path::Path,
+    expected_hash: Option<&str>,
+    probe: impl FnOnce(&std::path::Path) -> Result<nvsf_core::MediaInfo>,
+) -> Result<Source> {
+    let path = path.canonicalize().map_err(|e| e.to_string())?;
+    if !path.is_file() {
+        return Err("Select a regular local video file".into());
+    }
+    let _operation = lock(&host.0.operation)?;
+    host.ensure_idle()?;
+    let fingerprint = nvsf_app::storage::hash_file(&path).map_err(|e| e.to_string())?;
+    if expected_hash.is_some_and(|expected| fingerprint != expected) {
+        return Err("Selected video does not match the project's source fingerprint".into());
+    }
+    let media = probe(&path)?;
+    let token = host.token("source");
+    let mut grants = lock(&host.0.sources)?;
+    if grants.len() >= 1024 {
+        return Err("Source limit reached; restart the workspace to release old grants".into());
+    }
+    grants.insert(token.clone(), path.clone());
+    host.0.log.event(
+        "INFO",
+        "SOURCE",
+        "Native source granted and metadata probed",
+    );
+    Ok(Source {
+        token,
+        name: display_name(&path),
+        fingerprint,
+        media,
+    })
+}
+
+pub(crate) fn grant_output(host: &Host, path: &std::path::Path) -> Result<Destination> {
+    if path
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_none_or(|e| !e.eq_ignore_ascii_case("srt"))
+    {
+        return Err("Choose a destination ending in .srt".into());
+    }
+    state::path_text(path)?;
+    if path.is_symlink() {
+        return Err("Output is a symlink; choose a regular destination".into());
+    }
+    let parent = path
+        .parent()
+        .ok_or_else(|| "Output directory does not exist".to_string())?
+        .canonicalize()
+        .map_err(|e| e.to_string())?;
+    let name = path
+        .file_name()
+        .ok_or_else(|| "Output needs a filename".to_string())?;
+    let path = parent.join(name);
+    let token = host.token("output");
+    let mut grants = lock(&host.0.destinations)?;
+    if grants.len() >= 256 {
+        return Err("Output grant limit reached; restart the workspace".into());
+    }
+    grants.insert(token.clone(), path.clone());
+    Ok(Destination {
+        token,
+        name: display_name(&path),
+    })
 }
 
 #[tauri::command]

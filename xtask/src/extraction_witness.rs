@@ -125,6 +125,43 @@ pub fn verify(input: &Path, data: &Path, root: &Path) -> Result<()> {
     {
         return Err("Full exclusion did not suppress synthetic text without inventing cues".into());
     }
+    let suggestions = nvsf_app::regions::suggest(&paths, input, "en")?;
+    if suggestions.is_empty() || suggestions.len() > 2 || suggestions == [Rect::default()] {
+        return Err(
+            "Actual region suggestion omitted subtitle bands or invented extra bands".into(),
+        );
+    }
+    for region in &suggestions {
+        region.validate()?;
+    }
+    if !suggestions
+        .iter()
+        .any(|region| region.y + region.height > 0.8)
+    {
+        return Err("Suggested bands omitted the known bottom subtitle".into());
+    }
+    let unreadable =
+        nvsf_app::regions::recognize_cue(&paths, input, 500, Rect::new(0.0, 0.0, 1.0, 0.1)?, "en")
+            .err()
+            .ok_or("Blank upper crop incorrectly produced a recognition candidate")?;
+    if !unreadable.to_string().contains("Cue crop is unreadable") {
+        return Err(format!("Blank-crop witness failed before recognition: {unreadable}").into());
+    }
+    let exported_model = root.join("en-ja.onnx");
+    nvsf_app::models::export_model(&paths, "en-ja", &exported_model)?;
+    if nvsf_app::models::export_model(&paths, "en-ja", &exported_model).is_ok() {
+        return Err("Model export replaced an existing destination".into());
+    }
+    let imported = Paths::new(Some(&root.join("imported-model")))?;
+    nvsf_app::models::import_model(&imported, "en-ja", &exported_model)?;
+    let admitted = nvsf_app::models::verify(&imported, "en-ja")?;
+    let expected_model = storage::hash_file(&admitted)?;
+    std::fs::write(&exported_model, b"corrupted import candidate")?;
+    if nvsf_app::models::import_model(&imported, "en-ja", &exported_model).is_ok()
+        || storage::hash_file(&admitted)? != expected_model
+    {
+        return Err("Corrupt model import replaced the verified installed model".into());
+    }
     if started.elapsed() >= Duration::from_secs(60) {
         return Err("Extraction lifecycle witnesses exceeded60s budget".into());
     }
@@ -132,7 +169,7 @@ pub fn verify(input: &Path, data: &Path, root: &Path) -> Result<()> {
         &root.join("report.json"),
         &serde_json::to_vec_pretty(&serde_json::json!({
             "source_sha":std::env::var("GITHUB_SHA")?, "passed":true, "synthetic":true,
-            "proof":["cancel after committed frame", "incompatible resume preservation", "active appearance resume", "saved Unicode correction export", "overwrite refusal", "completed checkpoint export without decoding", "balanced full exclusion"],
+            "proof":["cancel after committed frame", "incompatible resume preservation", "active appearance resume", "saved Unicode correction export", "overwrite refusal", "completed checkpoint export without decoding", "balanced full exclusion", "real subtitle-band suggestion", "blank cue rejection", "verified model export/import and corrupt replacement refusal"],
             "not_proved":["real-language quality", "native pause UI", "power-loss durability"],
             "elapsed_ms":started.elapsed().as_millis()
         }))?,

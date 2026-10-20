@@ -362,35 +362,45 @@ pub async fn queue_regrant(
 ) -> Result<Option<Vec<QueueEntry>>> {
     let host = host.inner().clone();
     blocking(move || {
-        host.ensure_idle()?;
-        if host.0.unsaved.load(std::sync::atomic::Ordering::Acquire) {
-            return Err("Save current corrections before regranting/resuming a queue entry".into());
-        }
-        let record = {
-            let store = lock(&host.0.queue)?;
-            store.check()?;
-            store
-                .file
-                .records
-                .iter()
-                .find(|r| r.id == id)
-                .cloned()
-                .ok_or_else(|| "Queue record not found".to_string())?
-        };
-        let Some(grant) = crate::resume::regrant(&app, &host, &record)? else {
-            return Ok(None);
-        };
-        let _operation = lock(&host.0.operation)?;
-        host.ensure_idle()?;
-        let mut store = lock(&host.0.queue)?;
-        store.check()?;
-        if !store.file.records.iter().any(|r| r.id == id) {
-            return Err("Queue record was removed while its pickers were open".into());
-        }
-        store.grants.insert(id, grant);
-        Ok(Some(store.entries()?))
+        regrant_queue_with(&host, &id, |record| {
+            crate::resume::regrant(&app, &host, record)
+        })
     })
     .await
+}
+
+pub(crate) fn regrant_queue_with(
+    host: &Host,
+    id: &str,
+    regrant: impl FnOnce(&Record) -> Result<Option<Grant>>,
+) -> Result<Option<Vec<QueueEntry>>> {
+    host.ensure_idle()?;
+    if host.0.unsaved.load(std::sync::atomic::Ordering::Acquire) {
+        return Err("Save current corrections before regranting/resuming a queue entry".into());
+    }
+    let record = {
+        let store = lock(&host.0.queue)?;
+        store.check()?;
+        store
+            .file
+            .records
+            .iter()
+            .find(|r| r.id == id)
+            .cloned()
+            .ok_or_else(|| "Queue record not found".to_string())?
+    };
+    let Some(grant) = regrant(&record)? else {
+        return Ok(None);
+    };
+    let _operation = lock(&host.0.operation)?;
+    host.ensure_idle()?;
+    let mut store = lock(&host.0.queue)?;
+    store.check()?;
+    if !store.file.records.iter().any(|r| r.id == id) {
+        return Err("Queue record was removed while its pickers were open".into());
+    }
+    store.grants.insert(id.into(), grant);
+    Ok(Some(store.entries()?))
 }
 
 #[derive(Serialize)]

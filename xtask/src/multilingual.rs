@@ -419,6 +419,36 @@ pub fn verify(cli: &Path, ffmpeg: &Path, data_root: &Path, output: &Path) -> Res
         let mut child = OwnedProcess::spawn(&mut install, &capture)?;
         child.wait(&capture, Duration::from_secs(60), Duration::from_secs(30))?;
         languages::verify(&paths, case.code)?;
+        if case.code == "rus" {
+            let exported = root.join("exported-rus.traineddata");
+            languages::export(&paths, case.code, &exported)?;
+            if languages::export(&paths, case.code, &exported).is_ok() {
+                return Err("Language export replaced an existing destination".into());
+            }
+            let imported = Paths::new(Some(&root.join("imported-language")))?;
+            languages::import(
+                &imported,
+                case.code,
+                &exported,
+                &std::sync::atomic::AtomicBool::new(false),
+            )?;
+            let selected = languages::verify(&imported, case.code)?;
+            if sha(&selected)? != sha(&exported)? {
+                return Err("Imported language differs from the verified export".into());
+            }
+            if !matches!(
+                languages::import(
+                    &imported,
+                    case.code,
+                    &exported,
+                    &std::sync::atomic::AtomicBool::new(true)
+                ),
+                Err(nvsf_app::AppError::Cancelled)
+            ) {
+                return Err("Cancelled language import was not refused".into());
+            }
+            languages::verify(&imported, case.code)?;
+        }
         render(&ffmpeg, &root, case)?;
         let input = root.join(format!("{}.mp4", case.code));
         let subtitle = root.join(format!("{}.srt", case.code));
