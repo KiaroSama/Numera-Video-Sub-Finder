@@ -164,8 +164,28 @@ pub fn verify(input: &Path, data: &Path, root: &Path) -> Result<()> {
         paths.models.join("en-ja.onnx"),
         bundled_models.join("en-ja.onnx"),
     )?;
-    let mut seeded = Paths::new(Some(&root.join("seeded-models")))?;
-    seeded.runtimes = bundled.join("runtimes");
+    // Paths::new seeds from the inherited package before callers can override runtimes.
+    // This witness needs an empty root and only its explicitly selected bundle.
+    let seed_root = root.join("seeded-models");
+    let seeded = Paths {
+        models: seed_root.join("models"),
+        projects: seed_root.join("projects"),
+        logs: seed_root.join("logs"),
+        cache: seed_root.join("cache"),
+        root: seed_root,
+        runtimes: bundled.join("runtimes"),
+    };
+    for directory in [
+        &seeded.models,
+        &seeded.projects,
+        &seeded.logs,
+        &seeded.cache,
+    ] {
+        std::fs::create_dir_all(directory)?;
+    }
+    if seeded.models.join("det.onnx").exists() {
+        return Err("Bundled seed witness must start without a detector".into());
+    }
     nvsf_app::models::seed_bundled(&seeded)?;
     nvsf_app::models::verify(&seeded, "en-ja")?;
     std::fs::write(
