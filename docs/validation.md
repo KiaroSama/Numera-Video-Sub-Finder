@@ -8,6 +8,10 @@ Updated: 2026-10-21. **NOT a release acceptance report.** Hosted observations be
 
 The owner subsequently authorizes subsidiary-branch convergence. Four reviewed Dependabot histories are integrated without replacing later product source; only CodeQL init/analyze pins advance together from4.38.3 to4.39.0 at immutable commit6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee. Its default bundle2.27.2 exceeds the new2.20.7 minimum, and the existing workspace-root checkout remains supported. Replacement exact-source verification is pending; no product/signing/corpus acceptance is inferred from a merge.
 
+## Pending review-close correction
+
+Source now replaces the asynchronous dirty-bit sample at native close with a bounded actual-WebView acknowledgement of dirty/draft/revision/busy state, freezes editing during consent, refuses changed or missing acknowledgements and retains completed projects until return to review. Pure authorization regressions and an E2E-only probe in the existing real GUI session are authored. No compilation, runtime pass, native-dialog qualification or new coverage ratio is claimed for this unverified tree. All prior scope exclusions, coverage floors, native shutdown limits and signing/corpus blockers remain unchanged.
+
 ## Previous hosted verification
 
 [Verification on `41fec473f34f42ff857882012d6a3df29827759f`](https://github.com/KiaroSama/Numera-Video-Sub-Finder/actions/runs/39514916779) completes **all six native target jobs successfully**, including Intel macOS's12 GUI behaviors and5 production lifecycle checks with0 failures/0 skips. Linux measured coverage is5673/7085 (80.07%), critical91.05%, with the unchanged76 excluded lines/3 hits; full product qualification remains false. Selected Intel/Linux reports were inspected through bounded ranges and member CRCs, not local verification of the whole multi-gigabyte artifact hashes. The hosted aggregate downloader verifies all six digests.

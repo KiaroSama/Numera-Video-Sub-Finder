@@ -29,6 +29,41 @@ pub fn mount() {
 fn App(initial_theme: String) -> impl IntoView {
     let ui = Ui::new(initial_theme.clone());
     crate::maintenance::watch(ui);
+    if let Some(window) = web_sys::window() {
+        let snapshot = Closure::<dyn FnMut(bool) -> wasm_bindgen::JsValue>::new(move |closing| {
+            ui.closing.set(closing);
+            let state = json!({
+                "dirty": ui.dirty.get_untracked(),
+                "draft": ui.draft_dirty.get_untracked(),
+                "revision": ui.revision.get_untracked(),
+                "busy": ui.busy.get_untracked(),
+            });
+            serde::Serialize::serialize(&state, &serde_wasm_bindgen::Serializer::json_compatible())
+                .unwrap_or(wasm_bindgen::JsValue::NULL)
+        });
+        if js_sys::Reflect::set(&window, &"__NVSF_REVIEW_STATE__".into(), snapshot.as_ref())
+            .is_err()
+        {
+            ui.error.set(Some(
+                "Review close protection could not initialize; closing will be refused".into(),
+            ));
+        }
+        let snapshot = StoredValue::new_local(snapshot);
+        on_cleanup(move || {
+            if let Some(window) = web_sys::window() {
+                let _ = js_sys::Reflect::delete_property(&window, &"__NVSF_REVIEW_STATE__".into());
+            }
+            snapshot.with_value(|_| {});
+        });
+    }
+    Effect::new(move |_| {
+        if !ui.closing.get()
+            && let Some(project) = ui.pending_project.get_untracked()
+        {
+            ui.pending_project.set(None);
+            ui.load(project);
+        }
+    });
     let main = NodeRef::<leptos::html::Main>::new();
     let routes = [
         ("Extract", "M4 5h16v14H4z M10 9l6 3-6 3z"),
@@ -109,7 +144,9 @@ fn App(initial_theme: String) -> impl IntoView {
         });
         let keyboard = Closure::<dyn FnMut(web_sys::KeyboardEvent)>::new(
             move |event: web_sys::KeyboardEvent| {
-                if event.is_composing()
+                if web_sys::window().is_some_and(|window| {
+                    js_sys::Reflect::has(&window, &"__NVSF_CLOSE_LOCK__".into()).unwrap_or(true)
+                }) || event.is_composing()
                     || !(event.ctrl_key() || event.meta_key())
                     || event.alt_key()
                 {
