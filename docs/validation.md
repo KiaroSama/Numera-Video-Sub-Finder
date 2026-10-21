@@ -4,6 +4,12 @@ Updated: 2026-10-21. **NOT a release acceptance report.** Hosted observations be
 
 ## Current hosted verification
 
+[Verification on `1dcb0c64c8f5203325b6ddac1f38b60f47d9b602`](https://github.com/KiaroSama/Numera-Video-Sub-Finder/actions/runs/39534505073) completes **all14 jobs successfully**, including all six native targets and both aggregate gates. The corrected preserved artifact paths pass exact-source/schema/count/hash validation; the hosted downloader verifies all six archive digests. Measured coverage remains5673/7085 (80.07%), critical91.05%, with76 excluded lines/3 hits and `full_product_qualified=false`. The patched trust dependencies pass the actual advisory audit with0 vulnerabilities; informational maintenance warnings remain separate.
+
+The owner subsequently authorizes subsidiary-branch convergence. Four reviewed Dependabot histories are integrated without replacing later product source; only CodeQL init/analyze pins advance together from4.38.3 to4.39.0 at immutable commit6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee. Its default bundle2.27.2 exceeds the new2.20.7 minimum, and the existing workspace-root checkout remains supported. Replacement exact-source verification is pending; no product/signing/corpus acceptance is inferred from a merge.
+
+## Previous hosted verification
+
 [Verification on `41fec473f34f42ff857882012d6a3df29827759f`](https://github.com/KiaroSama/Numera-Video-Sub-Finder/actions/runs/39514916779) completes **all six native target jobs successfully**, including Intel macOS's12 GUI behaviors and5 production lifecycle checks with0 failures/0 skips. Linux measured coverage is5673/7085 (80.07%), critical91.05%, with the unchanged76 excluded lines/3 hits; full product qualification remains false. Selected Intel/Linux reports were inspected through bounded ranges and member CRCs, not local verification of the whole multi-gigabyte artifact hashes. The hosted aggregate downloader verifies all six digests.
 
 Overall CI still fails for two separate causes: newly published RUSTSEC-2026-0382/0383 require patched `rustls-webpki0.103.16` and `webpki-root-certs1.0.10`, and the aggregate reader incorrectly omits the preserved `packages/` artifact path component. The pending correction updates only those two transitive package versions/checksums and all three aggregate report paths; dependency edges, certificate verification, every report assertion, coverage floors and execution bounds remain unchanged. It has not yet run. No release or platform-signing qualification is claimed.
