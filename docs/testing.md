@@ -61,6 +61,8 @@ Portable tests cover daily cadence/disable/manual policy, stable SemVer preceden
 
 The existing offline partial-download regression additionally requires pre-cancelled complete bytes to remain unactivated and preserved. Shared model/language transfer source now checks a total deadline and cancellation through final hash/copy and before atomic persistence; late-read cancellation and slow-transfer fault execution are not established by that offline case and remain required hosted evidence.
 
+At exact `41fec47`, all six native target jobs pass, including Intel's12 actual GUI behaviors and5 production lifecycle observations without the intrusive debugger. The aggregate nevertheless fails because multi-path uploads retain `packages/reports/`, while the reader looked directly under `reports/`. The correction preserves that archive layout and every report/schema/SHA/hash/count/coverage assertion, changing only the three reader paths. The same run's advisory audit reports RUSTSEC-2026-0382/0383; precise stable patches to rustls-webpki0.103.16 and webpki-root-certs1.0.10 preserve all other dependency identities/edges and certificate checks. Replacement hosted verification is pending.
+
 All CI lanes are children of the manual Final verification root. No local application test or compilation fallback is authorized. Native final signing/publication remains blocked when approved platform credentials are unavailable.
 
 ## Evidence integrity

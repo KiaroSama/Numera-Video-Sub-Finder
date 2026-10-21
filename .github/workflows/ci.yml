@@ -333,7 +333,7 @@ jobs:
       - name: Check six exact-source reports
         run: |
           for id in $(jq -r '.targets[].id' ci/targets.json); do
-            jq -e --arg sha "$GITHUB_SHA" --arg id "$id" '.schema==1 and .source_sha==$sha and .target==$id and (.files|length>=2) and all(.files[]; (.sha256|test("^[a-f0-9]{64}$")))' ".ci-work/downloaded/reports/$id.json"
+            jq -e --arg sha "$GITHUB_SHA" --arg id "$id" '.schema==1 and .source_sha==$sha and .target==$id and (.files|length>=2) and all(.files[]; (.sha256|test("^[a-f0-9]{64}$")))' ".ci-work/downloaded/packages/reports/$id.json"
             for kind in standalone gui production suites bundles maintenance multilingual runtime-pack update-assets; do
               minimum=1
               case "$kind" in
@@ -341,7 +341,7 @@ jobs:
                 bundles|update-assets) minimum=2 ;; maintenance|runtime-pack) minimum=5 ;;
                 multilingual) minimum=7; case "$id" in windows-*) minimum=6 ;; esac ;;
               esac
-              jq -e --arg sha "$GITHUB_SHA" --arg id "$id" --argjson minimum "$minimum" '.schema==1 and .source_sha==$sha and .target==$id and .passed==true and .tests>=$minimum and .failed==0 and .skipped==0' ".ci-work/downloaded/reports/$id-$kind.json"
+              jq -e --arg sha "$GITHUB_SHA" --arg id "$id" --argjson minimum "$minimum" '.schema==1 and .source_sha==$sha and .target==$id and .passed==true and .tests>=$minimum and .failed==0 and .skipped==0' ".ci-work/downloaded/packages/reports/$id-$kind.json"
             done
           done
-          jq -e --arg sha "$GITHUB_SHA" '.source_sha==$sha and .passed==true and .coverage>=0.80 and .critical_coverage>=0.90' .ci-work/downloaded/reports/coverage.json
+          jq -e --arg sha "$GITHUB_SHA" '.source_sha==$sha and .passed==true and .coverage>=0.80 and .critical_coverage>=0.90' .ci-work/downloaded/packages/reports/coverage.json

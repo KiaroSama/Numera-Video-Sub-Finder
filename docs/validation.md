@@ -1,8 +1,14 @@
 # Validation status
 
-Updated: 2026-10-20. **NOT a release acceptance report.** Hosted observations below refer to the exact named SHA; corrective source is not a passing result.
+Updated: 2026-10-21. **NOT a release acceptance report.** Hosted observations below refer to the exact named SHA; corrective source is not a passing result.
 
 ## Current hosted verification
+
+[Verification on `41fec473f34f42ff857882012d6a3df29827759f`](https://github.com/KiaroSama/Numera-Video-Sub-Finder/actions/runs/39514916779) completes **all six native target jobs successfully**, including Intel macOS's12 GUI behaviors and5 production lifecycle checks with0 failures/0 skips. Linux measured coverage is5673/7085 (80.07%), critical91.05%, with the unchanged76 excluded lines/3 hits; full product qualification remains false. Selected Intel/Linux reports were inspected through bounded ranges and member CRCs, not local verification of the whole multi-gigabyte artifact hashes. The hosted aggregate downloader verifies all six digests.
+
+Overall CI still fails for two separate causes: newly published RUSTSEC-2026-0382/0383 require patched `rustls-webpki0.103.16` and `webpki-root-certs1.0.10`, and the aggregate reader incorrectly omits the preserved `packages/` artifact path component. The pending correction updates only those two transitive package versions/checksums and all three aggregate report paths; dependency edges, certificate verification, every report assertion, coverage floors and execution bounds remain unchanged. It has not yet run. No release or platform-signing qualification is claimed.
+
+## Previous hosted verification
 
 [Verification on `60ee0b500f4cdcfeff82b14f0013c4af3d56d84f`](https://github.com/KiaroSama/Numera-Video-Sub-Finder/actions/runs/39450138202) completed with **failure**. Both Windows targets, both Linux targets and macOS ARM64 native jobs succeed, as do the shared dependency, Miri, mutation, inventory and both CodeQL jobs. Intel's first attempt hit the unchanged360-second compiler-output idle limit; one failed-job-only confirmation on the same source passes compilation. That confirmation captures all three theme screenshots, both layouts and actual document/element focus with the original solid3px outline after native window plus embedded-WebView focus. It then times out on `/execute/sync` during extraction: the isolated worker completes60frames/4cues in11.731seconds, but the desktop never reports completion before the request fails. The original GUI remains alive; no native fault stack is available.
 
