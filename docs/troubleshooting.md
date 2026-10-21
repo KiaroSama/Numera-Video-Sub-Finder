@@ -6,6 +6,8 @@
 - Output exists or unavailable: choose another destination or explicitly approve replacement. Each output is atomically published; multi-track files cannot be a single cross-file filesystem transaction. The combined file is published last.
 - Required accelerator unavailable: an ordinary CPU package cannot prove accelerator operator placement. Use CPU only if the requested policy permits; do not replace a strict failure with an unverified CPU/GPU claim.
 
+A refused close preserves the open workspace. Finish an active review operation, apply/save or explicitly discard the current draft, then close again. Missing or changed review acknowledgements are recorded in the desktop log; do not force-terminate the application while corrections need saving.
+
 Use doctor for resource inventory, not quality or acceleration certification. Logs are in the selected data root/logs; they use UTC and unique run names with bounded historical retention. Review private paths before sharing diagnostics. Preserve failure evidence; never attach media, crops, credentials or complete private project data to a public issue by default.
 
 Unsigned macOS distribution may be rejected by platform policy. Do not globally disable Gatekeeper/signature checks. Installer/signing/IME/device limitations are listed in validation rather than hidden behind a successful compile.

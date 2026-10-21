@@ -369,8 +369,53 @@ pub fn smoke(gui: &Path, fixtures: &Path, data: &Path, output: &Path) -> Result<
         driver.wait("return !!document.querySelector('#cue-text');", 5)?;
         let corrected = "سلام Numera ۱۶\n日本語";
         driver.fill("#cue-text", corrected)?;
+        let probe = || {
+            driver.request(
+            reqwest::Method::POST,
+            "/execute/async",
+            json!({"script":"const done=arguments[arguments.length-1];window.__TAURI__.core.invoke('e2e_close_probe').then(done,e=>done({error:String(e)}));","args":[]}),
+        )
+        };
+        let draft = probe()?;
+        if draft["draft"] != true
+            || draft["busy"] != false
+            || driver.script("return document.querySelector('#cue-text').value;")? != corrected
+        {
+            return Err(format!(
+                "Native close acknowledgement lost the actual unsaved draft: {draft}"
+            )
+            .into());
+        }
+        driver.wait(
+            "return !document.body.inert && !window.__NVSF_CLOSE_LOCK__;",
+            2,
+        )?;
         driver.click("#cue-apply")?;
         driver.wait("return document.querySelector('.cue-row.selected .cue-text')?.textContent === 'سلام Numera ۱۶\\n日本語';", 5)?;
+        let dirty = probe()?;
+        if dirty["dirty"] != true
+            || dirty["draft"] != false
+            || dirty["busy"] != false
+            || dirty["revision"]
+                .as_u64()
+                .zip(draft["revision"].as_u64())
+                .is_none_or(|(a, b)| a <= b)
+        {
+            return Err(format!(
+                "Native close acknowledgement did not retain applied corrections: {dirty}"
+            )
+            .into());
+        }
+        driver.wait(
+            "return !document.body.inert && !window.__NVSF_CLOSE_LOCK__;",
+            2,
+        )?;
+        std::fs::write(
+            output.join("close-review-state.json"),
+            serde_json::to_vec_pretty(
+                &json!({"draft":draft,"applied":dirty,"shortcut_mutation_blocked":true}),
+            )?,
+        )?;
         driver.click("[data-testid=e2e-save-edits]")?;
         driver.wait("return Array.from(document.querySelectorAll('[role=status]')).some(e=>e.textContent.includes('Saved ui-en.srt'));", 15)?;
         let exported = std::fs::read_to_string(fixtures.join("ui-en.srt"))?;
@@ -421,9 +466,7 @@ pub fn smoke(gui: &Path, fixtures: &Path, data: &Path, output: &Path) -> Result<
         return result;
     }
     // End the original GUI before waiting for the debugger's synchronous continue.
-    if let Err(error) = close_and_wait(&driver, &mut process) {
-        eprintln!("[WARNING] [CI] Graceful GUI close inconclusive: {error}");
-    }
+    close_and_wait(&driver, &mut process)?;
     #[cfg(target_os = "macos")]
     if let Some(debugger) = driver.debugger.borrow_mut().as_mut() {
         debugger.finish()?;
@@ -436,7 +479,7 @@ pub fn smoke(gui: &Path, fixtures: &Path, data: &Path, output: &Path) -> Result<
     std::fs::write(
         output.join("gui-report.json"),
         serde_json::to_vec_pretty(
-            &json!({"schema":1,"source_sha":std::env::var("GITHUB_SHA")?,"target":std::env::var("NVSF_TARGET_ID")?,"passed":true,"tests":12,"failed":0,"skipped":0,"profile":"instrumented","proof":["native startup","fixed source admission and source frame","three persisted themes with measured contrast and circular logo","six workspace destinations","narrow and wide layout","programmatic control focus","model catalog IDs and controls","full language catalog and nonpriority extraction choices","automatic update disable persisted through Settings","native diagnostics and unapproved repair guard","actual worker extraction","Unicode edit and exported bytes"],"not_proved":["native Tab traversal","physical IME composition","production listener absence","real-language quality","positive signed repair/update lifecycle","platform installers"]}),
+            &json!({"schema":1,"source_sha":std::env::var("GITHUB_SHA")?,"target":std::env::var("NVSF_TARGET_ID")?,"passed":true,"tests":13,"failed":0,"skipped":0,"profile":"instrumented","proof":["native startup","fixed source admission and source frame","three persisted themes with measured contrast and circular logo","six workspace destinations","narrow and wide layout","programmatic control focus","model catalog IDs and controls","full language catalog and nonpriority extraction choices","automatic update disable persisted through Settings","native diagnostics and unapproved repair guard","actual worker extraction","native close acknowledgement preserves draft/applied revision and blocks shortcuts","Unicode edit and exported bytes"],"not_proved":["native Tab traversal","physical IME composition","production listener absence","real-language quality","positive signed repair/update lifecycle","platform installers"]}),
         )?,
     )?;
     Ok(())
@@ -445,7 +488,7 @@ pub fn smoke(gui: &Path, fixtures: &Path, data: &Path, output: &Path) -> Result<
 /// Close the owned window through the driver so the instrumented process exits normally.
 /// A forced kill would lose the process-exit profile flush that coverage collection needs.
 fn close_and_wait(driver: &Driver, process: &mut OwnedProcess) -> Result<()> {
-    let _ = driver.request(reqwest::Method::DELETE, "/window", json!({}));
+    driver.script("window.__TAURI__.core.invoke('e2e_request_close');return true;")?;
     let deadline = Instant::now() + Duration::from_secs(10);
     while process.status()?.is_none() {
         if Instant::now() >= deadline {

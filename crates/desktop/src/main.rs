@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod close;
 #[cfg(test)]
 mod command_tests;
 #[cfg(feature = "e2e")]
@@ -174,6 +175,8 @@ fn main() {
         e2e::e2e_fixture,
         e2e::e2e_save_edits,
         e2e::e2e_focus,
+        e2e::e2e_close_probe,
+        e2e::e2e_request_close,
     ]);
     #[cfg(not(feature = "e2e"))]
     let builder = builder.invoke_handler(commands![]);
@@ -191,63 +194,37 @@ fn main() {
             return;
         };
         match event {
-        tauri::RunEvent::ExitRequested { api, .. } => {
-            if let Err(error) = shutdown.begin_close() {
-                shutdown.0.log.event("WARNING", "DESKTOP", &error);
-                api.prevent_exit();
-                return;
+            tauri::RunEvent::ExitRequested { api, .. } => {
+                if !shutdown
+                    .0
+                    .exit_approved
+                    .load(std::sync::atomic::Ordering::Acquire)
+                {
+                    api.prevent_exit();
+                    close::request(app, &shutdown);
+                }
             }
-            if !shutdown.shutdown() {
-                shutdown.0.closing.store(false, std::sync::atomic::Ordering::Release);
-                api.prevent_exit();
-            }
-        }
-        tauri::RunEvent::WindowEvent {
-            label,
-            event: tauri::WindowEvent::CloseRequested { api, .. },
-            ..
-        } if label == "main" => {
-            shutdown.0.log.event("INFO", "DESKTOP", "phase=native-close-received");
-            api.prevent_close();
-            let host = shutdown.clone();
-            let app = app.clone();
-            tauri::async_runtime::spawn(async move {
-                match host.wait_to_close(std::time::Duration::from_secs(2)).await {
-                    Ok(true) => {}
-                    Ok(false) => return,
-                    Err(error) => { host.0.log.event("WARNING", "DESKTOP", &error); return; }
-                }
-                let completion = host.clone();
-                let result = tauri::async_runtime::spawn_blocking(move || {
-                use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
-                if host.0.unsaved.load(std::sync::atomic::Ordering::Acquire)
-                    && !app.dialog().message("Your review has unsaved changes. Return to save them, or discard and close?")
-                        .title("Unsaved review changes").buttons(MessageDialogButtons::OkCancelCustom("Discard and close".into(), "Return to review".into())).blocking_show() {
-                    host.0.closing.store(false, std::sync::atomic::Ordering::Release);
-                    return;
-                }
-                if !host.shutdown() {
-                    host.0.closing.store(false, std::sync::atomic::Ordering::Release);
-                    app.dialog().message("An extraction or model operation is still stopping. The application remains open to preserve checkpoints and resources. Wait for cancellation to finish, then close again.").title("Worker shutdown pending").blocking_show();
-                    return;
-                }
-                host.0.log.event("INFO", "DESKTOP", "phase=shutdown-complete");
-                app.exit(0);
-                }).await;
-                if result.is_err() {
-                    completion.0.closing.store(false, std::sync::atomic::Ordering::Release);
-                    completion.0.log.event("ERROR", "DESKTOP", "Native close task stopped unexpectedly; application remains open");
-                }
-            });
-        }
-        tauri::RunEvent::Exit => {
-            if let Some(host) = app.try_state::<Host>() {
-                host.inner().0
+            tauri::RunEvent::WindowEvent {
+                label,
+                event: tauri::WindowEvent::CloseRequested { api, .. },
+                ..
+            } if label == "main" => {
+                shutdown
+                    .0
                     .log
-                    .event("INFO", "DESKTOP", "Native event loop exited");
+                    .event("INFO", "DESKTOP", "phase=native-close-received");
+                api.prevent_close();
+                close::request(app, &shutdown);
             }
-        }
-        _ => {}
+            tauri::RunEvent::Exit => {
+                if let Some(host) = app.try_state::<Host>() {
+                    host.inner()
+                        .0
+                        .log
+                        .event("INFO", "DESKTOP", "Native event loop exited");
+                }
+            }
+            _ => {}
         }
     });
 }

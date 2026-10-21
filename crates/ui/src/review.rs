@@ -160,9 +160,9 @@ fn CueEditor(ui: Ui) -> impl IntoView {
             <div class="editor-heading"><h3>{move ||ui.selected.get().map(|id|format!("Cue {id}")).unwrap_or_default()}</h3>
                 <span class="muted">{move ||ui.selected_cue().and_then(|c|c.confidence).map(|c|format!("Model score {c:.3}")).unwrap_or_else(||"Confidence not reported".into())}</span></div>
             <label for="cue-text">"Subtitle text (logical Unicode)"</label>
-            <textarea id="cue-text" dir="auto" rows="4" spellcheck="false" prop:value=move ||text.get() on:input=move |e|{text.set(event_target_value(&e));ui.draft_dirty.set(true);}></textarea>
-            <div class="time-fields"><label for="cue-start">"Start"<input id="cue-start" class="mono" prop:value=move ||start.get() on:input=move |e|{start.set(event_target_value(&e));ui.draft_dirty.set(true);}/></label>
-                <label for="cue-end">"End"<input id="cue-end" class="mono" prop:value=move ||end.get() on:input=move |e|{end.set(event_target_value(&e));ui.draft_dirty.set(true);}/></label></div>
+            <textarea id="cue-text" dir="auto" rows="4" spellcheck="false" prop:value=move ||text.get() on:input=move |e|{if !ui.closing.get_untracked(){text.set(event_target_value(&e));ui.draft_dirty.set(true);}}></textarea>
+            <div class="time-fields"><label for="cue-start">"Start"<input id="cue-start" class="mono" prop:value=move ||start.get() on:input=move |e|{if !ui.closing.get_untracked(){start.set(event_target_value(&e));ui.draft_dirty.set(true);}}/></label>
+                <label for="cue-end">"End"<input id="cue-end" class="mono" prop:value=move ||end.get() on:input=move |e|{if !ui.closing.get_untracked(){end.set(event_target_value(&e));ui.draft_dirty.set(true);}}/></label></div>
             <div class="button-row"><button id="cue-apply" class="primary" on:click=move |_|apply()>"Apply correction"</button>
                 <button disabled=move ||!ui.draft_dirty.get() on:click=move |_|{ui.draft_dirty.set(false);ui.revision.update(|v|*v+=1);}>"Discard draft"</button>
                 <button disabled=move ||ui.draft_dirty.get() on:click=move |_|if let Some(id)=ui.selected.get_untracked(){ui.edit(move |cues|{let cue=cues.iter_mut().find(|c|c.id==id).ok_or_else(||Error::Invalid("Cue not found".into()))?;cue.reviewed=true;Ok(())});}>"Accept cue"</button>

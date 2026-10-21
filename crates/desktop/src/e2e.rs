@@ -131,6 +131,20 @@ pub fn e2e_focus(window: tauri::WebviewWindow) -> Result<bool> {
     window.is_focused().map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+pub async fn e2e_close_probe(
+    window: tauri::WebviewWindow,
+    host: tauri::State<'_, Host>,
+) -> Result<serde_json::Value> {
+    let host = host.inner().clone();
+    crate::state::blocking(move || crate::close::probe(&window, &host)).await
+}
+
+#[tauri::command]
+pub fn e2e_request_close(window: tauri::WebviewWindow) -> Result<()> {
+    window.close().map_err(|error| error.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

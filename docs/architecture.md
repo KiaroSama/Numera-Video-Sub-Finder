@@ -20,6 +20,8 @@ Detector crops feed the selected recognition model. Appearance tracking separate
 
 Cue IDs are unique within a project. Original OCR is kept separately from edited text. Undo/redo and structural edits operate through core validation; explicit re-OCR replacement never silently discards corrections. Export validates nonempty Unicode and positive intervals, then atomically writes to the selected destination.
 
+Native close and application exit use the same host-owned handshake: freeze WebView input, acknowledge actual Rust UI dirty/draft/revision/busy state, obtain discard consent when needed, recheck that state and then perform bounded shutdown. Missing or changed acknowledgements preserve the open workspace. Completed extraction projects wait in UI state until a deferred close returns control; global save/undo cannot mutate the review while consent is pending.
+
 ## Native admission and maintenance
 
 The app/CLI/desktop do not startup-link FFmpeg. `MediaRuntime` loads only the selected explicit native root and retains the library across callbacks. Requests/metadata use bounded JSON; RGB descriptors are borrowed synchronously and copied before return. ABI version/layout/pointer width/architecture/library majors are checked before frame delivery; panics never unwind across C. Every media caller receives its existing `Paths`, including worker, preview, region suggestions and re-OCR.

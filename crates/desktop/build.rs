@@ -57,6 +57,10 @@ fn main() {
             "e2e_save_edits",
             #[cfg(feature = "e2e")]
             "e2e_focus",
+            #[cfg(feature = "e2e")]
+            "e2e_close_probe",
+            #[cfg(feature = "e2e")]
+            "e2e_request_close",
         ])),
     )
     .expect("Native desktop resources and command permissions must be valid");

@@ -68,6 +68,7 @@ pub struct Inner {
     pub source_busy: std::sync::atomic::AtomicBool,
     pub unsaved: std::sync::atomic::AtomicBool,
     pub closing: std::sync::atomic::AtomicBool,
+    pub exit_approved: std::sync::atomic::AtomicBool,
     close_pending: std::sync::atomic::AtomicBool,
     pub maintenance: crate::updates::Maintenance,
 }
@@ -102,6 +103,7 @@ impl Host {
             source_busy: std::sync::atomic::AtomicBool::new(false),
             unsaved: std::sync::atomic::AtomicBool::new(false),
             closing: std::sync::atomic::AtomicBool::new(false),
+            exit_approved: std::sync::atomic::AtomicBool::new(false),
             close_pending: std::sync::atomic::AtomicBool::new(false),
             maintenance: crate::updates::Maintenance::default(),
         }))
@@ -198,6 +200,7 @@ impl Host {
             .await;
         }
     }
+    #[cfg(test)]
     pub fn begin_close(&self) -> Result<bool> {
         let _operation = self.0.operation.try_lock().map_err(|_| {
             "A workspace operation is finishing; close again when it completes".to_string()

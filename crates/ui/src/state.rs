@@ -28,6 +28,8 @@ pub struct Ui {
     pub dirty: RwSignal<bool>,
     pub draft_dirty: RwSignal<bool>,
     pub busy: RwSignal<bool>,
+    pub closing: RwSignal<bool>,
+    pub pending_project: RwSignal<Option<Project>>,
     pub error: RwSignal<Option<String>>,
     pub notice: RwSignal<String>,
     pub status: RwSignal<JobStatus>,
@@ -57,6 +59,8 @@ impl Ui {
             dirty: RwSignal::new(false),
             draft_dirty: RwSignal::new(false),
             busy: RwSignal::new(false),
+            closing: RwSignal::new(false),
+            pending_project: RwSignal::new(None),
             error: RwSignal::new(None),
             notice: RwSignal::new(String::new()),
             status: RwSignal::new(JobStatus {
@@ -87,7 +91,7 @@ impl Ui {
         args: Value,
         success: impl FnOnce(T) + 'static,
     ) {
-        if self.busy.get_untracked() {
+        if self.closing.get_untracked() || self.busy.get_untracked() {
             return;
         }
         if matches!(
@@ -112,6 +116,10 @@ impl Ui {
         });
     }
     pub fn load(self, project: Project) {
+        if self.closing.get_untracked() {
+            self.pending_project.set(Some(project));
+            return;
+        }
         if !self.source.with_untracked(|s| {
             s.as_ref()
                 .is_some_and(|s| s.fingerprint == project.source_hash)
@@ -209,6 +217,9 @@ impl Ui {
             .with(|p| p.as_ref()?.cues.iter().find(|c| c.id == id).cloned())
     }
     pub fn edit(self, change: impl FnOnce(&mut Vec<Cue>) -> nvsf_core::Result<()>) {
+        if self.closing.get_untracked() {
+            return;
+        }
         let mut error = None;
         self.project.update(|project| {
             if let Some(project) = project {
@@ -228,6 +239,9 @@ impl Ui {
         }
     }
     pub fn travel(self, redo: bool) {
+        if self.closing.get_untracked() {
+            return;
+        }
         if self.draft_dirty.get_untracked() {
             self.error.set(Some(
                 "Apply or discard the current cue draft before undo/redo".into(),
@@ -347,7 +361,7 @@ impl Ui {
         let Some(project) = self.project.get_untracked() else {
             return;
         };
-        if self.busy.get_untracked() {
+        if self.closing.get_untracked() || self.busy.get_untracked() {
             return;
         }
         if self.draft_dirty.get_untracked() {
