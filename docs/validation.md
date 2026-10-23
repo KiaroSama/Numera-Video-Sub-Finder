@@ -1,16 +1,26 @@
 # Validation status
 
-Updated: 2026-10-21. **NOT a release acceptance report.** Hosted observations below refer to the exact named SHA; corrective source is not a passing result.
+Updated: 2026-10-24. **NOT a release acceptance report.** Hosted observations below refer to the exact named SHA; corrective source is not a passing result.
 
 ## Current hosted verification
 
+[Verification on `76000862eae6d18ada6c2b777dd6ad74933c2477`](https://github.com/KiaroSama/Numera-Video-Sub-Finder/actions/runs/39631949453) finishes **with failure in both attempts**. Both Windows, both Linux and macOS ARM64 native jobs succeed; all shared dependency, inventory, CodeQL, Miri and mutation jobs succeed in their stated scope. All six targets pass13 instrumented GUI behaviors, including actual review-state acknowledgement and protected Unicode corrections. Linux x64 reports5813/7253 measured lines (80.15%), critical91.05%,76 excluded lines/3 hits and `full_product_qualified=false`.
+
+Intel's production witness fails on its first `osascript` native-window query after3.05/3.19seconds, with empty helper output and the original GUI alive; owned cleanup is verified. The first attempt reaches native-build-return without frontend-show readiness; the second has no desktop log yet. No app crash or exact Apple Events internal cause is proven. The pending correction defers native automation until actual same-PID/frontend-show markers, retaining independent visible-window/close/listener/exit/cleanup assertions and every existing budget. Its literal readiness regression and new source remain unexecuted. No further identical-source rerun is planned.
+
+## Previous integrated verification
+
+[Integrated verification on `8cedc7651c0b95a9faa27c487a38a235ade83544`](https://github.com/KiaroSama/Numera-Video-Sub-Finder/actions/runs/39571756800) completes all14 jobs successfully after one failed-job confirmation. Four reviewed subsidiary histories are included, with both CodeQL pins at4.39.0. This is prior-source evidence, not a passing result for the current correction.
+
+## Previous hosted verification
+
 [Verification on `1dcb0c64c8f5203325b6ddac1f38b60f47d9b602`](https://github.com/KiaroSama/Numera-Video-Sub-Finder/actions/runs/39534505073) completes **all14 jobs successfully**, including all six native targets and both aggregate gates. The corrected preserved artifact paths pass exact-source/schema/count/hash validation; the hosted downloader verifies all six archive digests. Measured coverage remains5673/7085 (80.07%), critical91.05%, with76 excluded lines/3 hits and `full_product_qualified=false`. The patched trust dependencies pass the actual advisory audit with0 vulnerabilities; informational maintenance warnings remain separate.
 
-The owner subsequently authorizes subsidiary-branch convergence. Four reviewed Dependabot histories are integrated without replacing later product source; only CodeQL init/analyze pins advance together from4.38.3 to4.39.0 at immutable commit6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee. Its default bundle2.27.2 exceeds the new2.20.7 minimum, and the existing workspace-root checkout remains supported. Replacement exact-source verification is pending; no product/signing/corpus acceptance is inferred from a merge.
+The owner subsequently authorizes subsidiary-branch convergence. Four reviewed Dependabot histories are integrated without replacing later product source; only CodeQL init/analyze pins advance together from4.38.3 to4.39.0 at immutable commit6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee. Its default bundle2.27.2 exceeds the new2.20.7 minimum, and the existing workspace-root checkout remains supported. That integrated-source verification passes at `8cedc765` as recorded above; no product/signing/corpus acceptance is inferred from a merge.
 
-## Pending review-close correction
+## Review-close correction on `76000862`
 
-Source now replaces the asynchronous dirty-bit sample at native close with a bounded actual-WebView acknowledgement of dirty/draft/revision/busy state, freezes editing during consent, refuses changed or missing acknowledgements and retains completed projects until return to review. Pure authorization regressions and an E2E-only probe in the existing real GUI session are authored. No compilation, runtime pass, native-dialog qualification or new coverage ratio is claimed for this unverified tree. All prior scope exclusions, coverage floors, native shutdown limits and signing/corpus blockers remain unchanged.
+Native close replaces the asynchronous dirty-bit sample with a bounded actual-WebView acknowledgement of dirty/draft/revision/busy state, freezes editing during consent, refuses changed or missing acknowledgements and retains completed projects until return to review. Pure authorization regressions and the actual E2E-only probe pass on all six targets. Both Windows production guards exit successfully in2.00/4.62seconds. This does not qualify native discard-dialog interaction, updater installation or the failing Intel production-startup observation. All prior scope exclusions, coverage floors, native shutdown limits and signing/corpus blockers remain unchanged.
 
 ## Previous hosted verification
 
