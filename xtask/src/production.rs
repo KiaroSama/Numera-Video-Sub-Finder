@@ -186,31 +186,9 @@ impl Budget {
     }
 }
 
-fn diagnostic(logs: &Path) -> Result<(String, u64)> {
-    if !logs.is_dir() {
-        return Ok((String::new(), 0));
-    }
-    let mut text = String::new();
-    let mut length = 0;
-    for entry in std::fs::read_dir(logs)?.take(20) {
-        let path = entry?.path();
-        if !path
-            .file_name()
-            .is_some_and(|n| n.to_string_lossy().starts_with("nvsf-desktop_"))
-        {
-            continue;
-        }
-        let file = File::open(&path)?;
-        if file.metadata()?.len() > 1024 * 1024 {
-            return Err("Production startup log exceeds bounded diagnostic size".into());
-        }
-        let mut part = String::new();
-        file.take(1024 * 1024 + 1).read_to_string(&mut part)?;
-        length += part.len() as u64;
-        text.push_str(&part);
-    }
-    Ok((text, length))
-}
+#[path = "production_readiness.rs"]
+mod readiness;
+use readiness::diagnostic;
 
 /// `gui` must be the production executable from the staged native package, never the e2e binary.
 /// Run on hosted desktop runners/virtual displays only; this function deliberately refuses local execution.
@@ -289,6 +267,12 @@ pub fn smoke(gui: &Path, data: &Path, output: &Path) -> Result<()> {
             }
             listener::absent()?;
             let (log, length) = diagnostic(&logs)?;
+            // Do not send synchronous native automation to an uninitialized hidden window.
+            if !readiness::shown(&log, pid) {
+                budget.observe(format!("startup:{length}:false"))?;
+                std::thread::park_timeout(Duration::from_millis(40));
+                continue;
+            }
             let observation = native_window(pid, evidence.as_path(), &mut helper_index);
             #[cfg(target_os = "linux")]
             if observation
