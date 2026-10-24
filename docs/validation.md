@@ -2,7 +2,15 @@
 
 Updated: 2026-10-24. **NOT a release acceptance report.** Hosted observations below refer to the exact named SHA; corrective source is not a passing result.
 
+## Pending original worker-ownership work
+
+Windows extraction-worker source now adds application-owned kill-on-close job admission before native startup, plus a real child-process contract. This newer tree is not part of the readiness-only `86c8b7a` verification and is not compiled or executed. The blocking reader thread/join is replaced in source by a sole bounded pipe reader and two-second post-exit no-output-progress refusal, with literal and actual-child pipe regressions authored but unexecuted. Forced-parent/descendant fault qualification and in-process native preview/re-OCR remain open. These actionable implementation obligations are distinct from signing, corpus and physical-hardware blockers.
+
 ## Current hosted verification
+
+[Readiness verification on `86c8b7a799b4e8812d6d9bdf5b96dda93b51cb0a`](https://github.com/KiaroSama/Numera-Video-Sub-Finder/actions/runs/40036182746) is still collecting native outcomes. Both Linux native targets, macOS ARM64 and all six shared lanes succeed. Linux x64 reports5825/7253 measured lines (80.31%), critical91.05%,76 excluded lines/3 hits,159 suite cases,13 GUI behaviors and5 production observations with0 failures/0 skips; `full_product_qualified=false`. Selected reports were inspected with ZIP-member CRCs, not a local whole-archive digest. Both Windows targets fail Clippy because `io::Read` became unused after the diagnostic reader moved to its own module; its remaining caller is compiled only on Linux/macOS. Cleanup is verified. The pending correction scopes only that import to those platforms, without suppressing warnings or changing runtime policy. Other native outcomes, including Intel production readiness, are not yet established.
+
+## Previous hosted verification
 
 [Verification on `76000862eae6d18ada6c2b777dd6ad74933c2477`](https://github.com/KiaroSama/Numera-Video-Sub-Finder/actions/runs/39631949453) finishes **with failure in both attempts**. Both Windows, both Linux and macOS ARM64 native jobs succeed; all shared dependency, inventory, CodeQL, Miri and mutation jobs succeed in their stated scope. All six targets pass13 instrumented GUI behaviors, including actual review-state acknowledgement and protected Unicode corrections. Linux x64 reports5813/7253 measured lines (80.15%), critical91.05%,76 excluded lines/3 hits and `full_product_qualified=false`.
 

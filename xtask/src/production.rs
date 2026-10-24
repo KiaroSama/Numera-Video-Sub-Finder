@@ -1,9 +1,10 @@
 //! Hosted-only verification of the uninstrumented, packaged GUI using native window lifecycle.
 use serde_json::json;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+use std::io::Read;
 use std::{
     error::Error,
     fs::File,
-    io::Read,
     path::Path,
     process::{Child, Command, ExitStatus, Stdio},
     time::{Duration, Instant},

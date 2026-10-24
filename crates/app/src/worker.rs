@@ -2,11 +2,18 @@ use crate::extraction::Control;
 use crate::{AppError, Paths, Result, fail, storage::write_atomic};
 use nvsf_core::{ExtractConfig, Progress, Project};
 use serde::{Deserialize, Serialize};
+#[path = "worker_output.rs"]
+mod output;
+#[cfg(windows)]
+#[path = "worker_windows.rs"]
+mod windows;
+
+#[cfg(unix)]
+use std::io::Read;
 use std::{
-    io::{BufRead, BufReader, Read},
     path::Path,
     process::{Command, Stdio},
-    sync::{atomic::Ordering, mpsc},
+    sync::atomic::Ordering,
     time::{Duration, Instant},
 };
 
@@ -67,49 +74,36 @@ pub fn supervise(
         use std::os::unix::process::CommandExt;
         command.process_group(0);
     }
+    let log = crate::logging::Log::new(&paths, "nvsf-supervisor");
     let mut owned = OwnedChild(command.spawn()?);
+    log.event("INFO", "WORKER", &format!("Spawned pid={}", owned.0.id()));
+    #[cfg(windows)]
+    let job = windows::Job::attach(&owned.0)?;
     // Keep the writer outside Child: wait() closes a Child-owned stdin before waiting.
     let _parent_lease = owned
         .0
         .stdin
         .take()
         .ok_or_else(|| fail("Worker parent-lifetime pipe unavailable"))?;
+    #[cfg(windows)]
+    let _parent_lease = {
+        use std::io::Write;
+        let mut lease = _parent_lease;
+        lease.write_all(b"S")?;
+        lease
+    };
     let child = &mut owned.0;
     let pid = child.id();
     let stdout = child
         .stdout
         .take()
         .ok_or_else(|| fail("Worker progress stream unavailable"))?;
-    let (tx, rx) = mpsc::sync_channel(8);
-    let reader = std::thread::spawn(move || {
-        let mut stream = BufReader::new(stdout);
-        loop {
-            let mut bytes = Vec::new();
-            let result = stream
-                .by_ref()
-                .take(64 * 1024 * 1024 + 1)
-                .read_until(b'\n', &mut bytes);
-            match result {
-                Ok(0) => break,
-                Ok(_) if bytes.len() <= 64 * 1024 * 1024 => {
-                    if tx
-                        .send(serde_json::from_slice::<Event>(&bytes).map_err(|e| e.to_string()))
-                        .is_err()
-                    {
-                        break;
-                    }
-                }
-                _ => {
-                    let _ = tx.send(Err("Worker message exceeds limit or pipe failed".into()));
-                    break;
-                }
-            }
-        }
-    });
+    let mut reader = output::Output::new(stdout)?;
     let deadline = Instant::now() + Duration::from_secs(24 * 3600);
     let mut heartbeat = Instant::now();
     let mut output = None;
     let mut failure = None;
+    let mut exited_at = None;
     let monitored = (|| -> Result<()> {
         loop {
             let cancel = control.cancel.load(Ordering::Relaxed);
@@ -142,27 +136,29 @@ pub fn supervise(
                 });
                 break;
             }
-            match rx.recv_timeout(Duration::from_millis(50)) {
-                Ok(Ok(Event::Progress(progress))) => {
+            let mut output_progress = true;
+            match reader.poll()? {
+                output::Poll::Event(Event::Progress(progress)) => {
                     heartbeat = Instant::now();
                     callback(progress);
                 }
-                Ok(Ok(Event::Completed(project))) => {
-                    output = Some(*project);
+                output::Poll::Event(Event::Completed(project)) => output = Some(*project),
+                output::Poll::Event(Event::Failed(message)) => failure = Some(fail(message)),
+                output::Poll::Progress => {}
+                output::Poll::Pending => {
+                    output_progress = false;
+                    std::thread::park_timeout(Duration::from_millis(10));
                 }
-                Ok(Ok(Event::Failed(message))) => {
-                    failure = Some(fail(message));
-                }
-                Ok(Err(e)) => {
-                    failure = Some(fail(e));
-                    terminate(child, pid);
-                    break;
-                }
-                Err(mpsc::RecvTimeoutError::Disconnected) => break,
-                Err(mpsc::RecvTimeoutError::Timeout) => {}
+                output::Poll::Ended => break,
             }
-            if child.try_wait()?.is_some() && output.is_some() {
-                break;
+            if child.try_wait()?.is_some() {
+                let exited = exited_at.get_or_insert_with(Instant::now);
+                if output_progress {
+                    *exited = Instant::now();
+                }
+                if exited.elapsed() >= Duration::from_secs(2) {
+                    return Err(fail("Worker output remained open after process exit"));
+                }
             }
         }
         if child.try_wait()?.is_none() {
@@ -173,12 +169,33 @@ pub fn supervise(
     if monitored.is_err() && !matches!(child.try_wait(), Ok(Some(_))) {
         terminate(child, pid);
     }
+    #[cfg(windows)]
+    let job_cleanup = {
+        let result = job.terminate();
+        drop(job);
+        result
+    };
     let status = child.wait();
-    drop(rx);
-    reader
-        .join()
-        .map_err(|_| fail("Worker progress reader panicked"))?;
+    drop(reader);
+    log.event(
+        if monitored.is_ok()
+            && failure.is_none()
+            && status.as_ref().is_ok_and(|status| status.success())
+        {
+            "INFO"
+        } else {
+            "ERROR"
+        },
+        "WORKER",
+        &format!(
+            "Stopped pid={pid} monitor_ok={} exit={:?}",
+            monitored.is_ok(),
+            status.as_ref().ok().and_then(|status| status.code())
+        ),
+    );
     monitored?;
+    #[cfg(windows)]
+    job_cleanup?;
     let status = status?;
     if let Some(error) = failure {
         return Err(error);
@@ -191,6 +208,8 @@ pub fn supervise(
 
 /// Arm before native work. EOF survives a forcibly killed supervisor, unlike Rust Drop.
 pub fn guard_parent_lifetime() -> Result<()> {
+    #[cfg(windows)]
+    windows::await_start()?;
     #[cfg(unix)]
     {
         let pid = std::process::id();
