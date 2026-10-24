@@ -2,11 +2,13 @@
 
 Updated: 2026-10-24. **NOT a release acceptance report.** Hosted observations below refer to the exact named SHA; corrective source is not a passing result.
 
-## Pending original worker-ownership work
-
-Windows extraction-worker source now adds application-owned kill-on-close job admission before native startup, plus a real child-process contract. This newer tree is not part of the readiness-only `86c8b7a` verification and is not compiled or executed. The blocking reader thread/join is replaced in source by a sole bounded pipe reader and two-second post-exit no-output-progress refusal, with literal and actual-child pipe regressions authored but unexecuted. Forced-parent/descendant fault qualification and in-process native preview/re-OCR remain open. These actionable implementation obligations are distinct from signing, corpus and physical-hardware blockers.
-
 ## Current hosted verification
+
+[Verification on `96dc4176e240eacdc544a556ff7ff64c5a73f64a`](https://github.com/KiaroSama/Numera-Video-Sub-Finder/actions/runs/40053223871) completes **all14 jobs successfully**, including all six native targets and both aggregate gates. Linux x64 reports5875/7310 measured lines (80.37%), critical91.05%,76 excluded lines/3 hits,162 suite cases,13 GUI behaviors and5 production observations with0 failures/0 skips; `full_product_qualified=false`. Selected reports were inspected through bounded ranges and ZIP-member CRCs, not a local whole-archive digest.
+
+The three output-reader regressions pass on the inspected Windows x64/ARM64 and Linux x64 logs; the actual Windows job-close contract also passes on both Windows targets. Ordinary extraction, packaged GUI and native lifecycle checks pass across the six targets. This verifies the implemented ownership/output correction in its tested scope, not every forced-parent/descendant fault. Native preview/re-OCR isolation, platform signing/install/update qualification, independently annotated real OCR quality, physical accelerators and remaining full-product acceptance stay open. All subsidiary histories are carried in main; the fully merged local feature branch is deleted after exact-source CI succeeds.
+
+## Previous readiness verification
 
 [Readiness verification on `86c8b7a799b4e8812d6d9bdf5b96dda93b51cb0a`](https://github.com/KiaroSama/Numera-Video-Sub-Finder/actions/runs/40036182746) completes with failure. Both Linux targets, both macOS targets and all six shared lanes succeed. Linux x64 reports5825/7253 measured lines (80.31%), critical91.05%,76 excluded lines/3 hits,159 suite cases,13 GUI behaviors and5 production observations with0 failures/0 skips; `full_product_qualified=false`. Selected reports were inspected with ZIP-member CRCs, not a local whole-archive digest. Both Windows targets fail Clippy because `io::Read` became unused after the diagnostic reader moved to its own module; its remaining caller is compiled only on Linux/macOS. Cleanup is verified. The pending correction scopes only that import to those platforms, without suppressing warnings or changing runtime policy. Intel now passes13 GUI behaviors,158 suite cases and all5 production observations with0 failures/0 skips, including the unchanged native-window/close checks after readiness admission. This verifies the corrected observation order on that run, not the internal cause of prior Apple Events timeouts. The replacement worker/import tree remains unexecuted.
 
