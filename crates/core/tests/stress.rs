@@ -12,6 +12,108 @@ fn bounded_high_volume_export_and_interleaved_tracks_preserve_every_cue() {
 }
 
 #[test]
+fn hundred_thousand_cue_edits_keep_bounded_history_and_lossless_rollback() {
+    use nvsf_core::EditHistory;
+    let mut cues: Vec<_> = (0..100_000u64)
+        .map(|i| {
+            let mut cue = Cue::new(
+                i + 1,
+                (i % 2) as u32,
+                i * 1000,
+                i * 1000 + 500,
+                "日本".into(),
+            )
+            .unwrap();
+            cue.confidence = Some(0.9);
+            cue.crop = Some("evidence.png".into());
+            cue
+        })
+        .collect();
+    let snapshot_bytes =
+        cues.len() * (std::mem::size_of::<Cue>() + "日本".len() * 2 + "evidence.png".len());
+    let retained = (32 * 1024 * 1024 / snapshot_bytes).clamp(1, 50);
+    let mut history = EditHistory::default();
+    for revision in 1..=retained + 1 {
+        history
+            .apply(&mut cues, |rows| {
+                rows[0].track = revision as u32;
+                rows[99_999].reviewed = revision % 2 == 1;
+                Ok(())
+            })
+            .unwrap();
+    }
+    let selected = cues[99_999].clone();
+    assert!(
+        history
+            .apply(&mut cues, |rows| {
+                rows[0].text = "uncommitted correction".into();
+                rows[99_999].end_ms = rows[99_999].start_ms;
+                Ok(())
+            })
+            .is_err()
+    );
+    assert_eq!(cues[0].text, "日本");
+    assert_eq!(cues[99_999], selected);
+    for expected in (1..=retained).rev() {
+        assert!(history.undo(&mut cues));
+        assert_eq!(cues[0].track, expected as u32);
+        assert_eq!(cues[99_999].reviewed, expected % 2 == 1);
+    }
+    assert!(
+        !history.undo(&mut cues),
+        "Byte budget must evict oldest revisions"
+    );
+    for expected in 2..=retained + 1 {
+        assert!(history.redo(&mut cues));
+        assert_eq!(cues[0].track, expected as u32);
+    }
+    assert!(!history.redo(&mut cues));
+    assert!(history.undo(&mut cues));
+    history
+        .apply(&mut cues, |rows| {
+            rows[99_999].text = "اصلاح 日本".into();
+            rows[99_999].edited = true;
+            Ok(())
+        })
+        .unwrap();
+    assert!(
+        !history.can_redo(),
+        "A new edit invalidates the abandoned branch"
+    );
+    for (index, cue) in cues.iter().enumerate() {
+        assert_eq!(cue.id, index as u64 + 1);
+        assert_eq!(cue.start_ms, index as u64 * 1000);
+        assert_eq!(cue.end_ms, index as u64 * 1000 + 500);
+        assert_eq!(cue.raw_text, "日本");
+        assert_eq!(cue.confidence, Some(0.9));
+        assert_eq!(cue.crop.as_deref(), Some("evidence.png"));
+        assert_eq!(
+            cue.text,
+            if index == 99_999 {
+                "اصلاح 日本"
+            } else {
+                "日本"
+            }
+        );
+        assert_eq!(cue.edited, index == 99_999);
+        assert_eq!(
+            cue.track,
+            if index == 0 {
+                retained as u32
+            } else {
+                (index % 2) as u32
+            }
+        );
+    }
+    assert!(history.undo(&mut cues));
+    assert_eq!(cues[99_999].text, "日本");
+    assert!(!cues[99_999].edited);
+    assert!(history.redo(&mut cues));
+    assert_eq!(cues[99_999].text, "اصلاح 日本");
+    assert!(cues[99_999].edited);
+}
+
+#[test]
 fn actual_threaded_trackers_are_independent_and_numeric_gaps_are_not_merged() {
     std::thread::scope(|scope| {
         let tasks: Vec<_> = (0..2u32)

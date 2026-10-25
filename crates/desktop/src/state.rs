@@ -66,6 +66,7 @@ pub struct Inner {
     pub model_cancel: std::sync::atomic::AtomicBool,
     pub operation: Mutex<()>,
     pub source_busy: std::sync::atomic::AtomicBool,
+    pub source_cancel: std::sync::atomic::AtomicBool,
     pub unsaved: std::sync::atomic::AtomicBool,
     pub closing: std::sync::atomic::AtomicBool,
     pub exit_approved: std::sync::atomic::AtomicBool,
@@ -101,6 +102,7 @@ impl Host {
             model_cancel: std::sync::atomic::AtomicBool::new(false),
             operation: Mutex::new(()),
             source_busy: std::sync::atomic::AtomicBool::new(false),
+            source_cancel: std::sync::atomic::AtomicBool::new(false),
             unsaved: std::sync::atomic::AtomicBool::new(false),
             closing: std::sync::atomic::AtomicBool::new(false),
             exit_approved: std::sync::atomic::AtomicBool::new(false),
@@ -174,8 +176,10 @@ impl Host {
             }
         }
         let _pending = Pending(&self.0.close_pending);
+        self.0.source_cancel.store(true, Ordering::Release);
         let deadline = tokio::time::Instant::now() + budget;
         loop {
+            self.0.source_cancel.store(true, Ordering::Release);
             // Never wait for a workspace mutex on the native event-loop thread.
             match self.0.operation.try_lock() {
                 Ok(_operation) => {
@@ -217,6 +221,13 @@ impl Host {
                 "UPDATES",
                 "Close deferred until native update installation finishes",
             );
+            return false;
+        }
+        if self.0.source_busy.load(Ordering::Acquire) {
+            self.0.source_cancel.store(true, Ordering::Release);
+            self.0
+                .log
+                .event("INFO", "NATIVE", "Close waiting for native request cleanup");
             return false;
         }
         if self.0.model_busy.load(Ordering::Acquire) {

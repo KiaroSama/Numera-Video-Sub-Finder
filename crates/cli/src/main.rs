@@ -65,6 +65,11 @@ enum Commands {
     },
     Benchmark(ExtractArgs),
     #[command(hide = true)]
+    NativeRequest {
+        #[arg(long)]
+        request: PathBuf,
+    },
+    #[command(hide = true)]
     Worker {
         #[arg(long)]
         request: PathBuf,
@@ -169,6 +174,9 @@ fn main() {
     }
 }
 fn run(cli: Cli) -> Result<()> {
+    if let Commands::NativeRequest { request } = &cli.command {
+        return nvsf_app::native_request::run(request);
+    }
     if let Commands::Worker { request, control } = &cli.command {
         return run_worker(request, control);
     }
@@ -329,7 +337,9 @@ fn run(cli: Cli) -> Result<()> {
                 })?;
             }
         }
-        Commands::Worker { .. } => return Err(nvsf_app::fail("Invalid worker invocation")),
+        Commands::Worker { .. } | Commands::NativeRequest { .. } => {
+            return Err(nvsf_app::fail("Invalid worker invocation"));
+        }
     }
     log.event("INFO", "CLI", "Command completed");
     Ok(())

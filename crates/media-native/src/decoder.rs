@@ -1,10 +1,11 @@
-use crate::{Result, fail};
-use ffmpeg::{
-    format::Pixel,
-    media::Type,
-    software::scaling::{context::Context, flag::Flags},
-    util::frame::Video,
+use crate::{
+    Result,
+    color::DisplayScaler,
+    fail,
+    geometry::{DisplayTransform, display_size},
+    timeline::PresentationClock,
 };
+use ffmpeg::{media::Type, util::frame::Video};
 use ffmpeg_next as ffmpeg;
 use image::RgbImage;
 use nvsf_core::{MediaInfo, Time};
@@ -42,17 +43,20 @@ pub fn probe(path: &Path) -> Result<MediaInfo> {
     } else {
         None
     };
-    let rotation = stream
-        .metadata()
-        .get("rotate")
-        .and_then(|r| r.parse::<i32>().ok())
-        .unwrap_or(0);
-    if u64::from(codec.width()) * u64::from(codec.height()) > 33_177_600 {
-        return Err(fail("Video exceeds supported decoded pixel budget"));
-    }
+    let transform = DisplayTransform::from_stream(&stream)?;
+    // SAFETY: stream and input are live; a null frame requests stream/codec SAR only.
+    let sar = unsafe {
+        ffmpeg::ffi::av_guess_sample_aspect_ratio(
+            input.as_ptr().cast_mut(),
+            stream.as_ptr().cast_mut(),
+            std::ptr::null_mut(),
+        )
+    };
+    let (width, height) = display_size(codec.width(), codec.height(), sar.into())?;
+    let (width, height) = transform.dimensions(width, height);
     Ok(MediaInfo {
-        width: codec.width(),
-        height: codec.height(),
+        width,
+        height,
         duration_ms,
         codec: codec.id().name().into(),
         time_base_num: tb.numerator(),
@@ -61,7 +65,7 @@ pub fn probe(path: &Path) -> Result<MediaInfo> {
             .streams()
             .filter(|s| s.parameters().medium() == Type::Subtitle)
             .count(),
-        rotation,
+        rotation: transform.rotation(),
     })
 }
 
@@ -88,29 +92,15 @@ pub fn decode(
     } else {
         None
     };
-    let rotation = stream
-        .metadata()
-        .get("rotate")
-        .and_then(|r| r.parse::<i32>().ok())
-        .unwrap_or(0);
+    let transform = DisplayTransform::from_stream(&stream)?;
+    // SAFETY: stream is borrowed from this input; only the rational value is copied.
+    let stream_sar: ffmpeg::Rational = unsafe { (*stream.as_ptr()).sample_aspect_ratio.into() };
     let mut decoder = ffmpeg::codec::context::Context::from_parameters(stream.parameters())?
         .decoder()
         .video()?;
-    if decoder.width() == 0
-        || decoder.height() == 0
-        || u64::from(decoder.width()) * u64::from(decoder.height()) > 33_177_600
-    {
-        return Err(fail("Invalid or oversized decoded frame"));
-    }
-    let mut scaler = Context::get(
-        decoder.format(),
-        decoder.width(),
-        decoder.height(),
-        Pixel::RGB24,
-        decoder.width(),
-        decoder.height(),
-        Flags::BILINEAR,
-    )?;
+    display_size(decoder.width(), decoder.height(), ffmpeg::Rational(1, 1))?;
+    let codec_sar = decoder.aspect_ratio();
+    let mut scaler = DisplayScaler::new()?;
     if start_ms > 0
         && let Some(origin) = origin
     {
@@ -125,9 +115,10 @@ pub fn decode(
         input.seek(timestamp, ..timestamp)?;
         decoder.flush();
     }
-    let mut origin = origin;
-    let mut last = None;
-    let mut last_delta = 40u64;
+    let mut clock = PresentationClock::new(
+        (start_pts != ffmpeg::ffi::AV_NOPTS_VALUE).then_some(start_pts),
+        tb,
+    )?;
     let mut receive = |decoder: &mut ffmpeg::decoder::Video| -> Result<bool> {
         loop {
             let mut frame = Video::empty();
@@ -142,50 +133,27 @@ pub fn decode(
             let pts = frame.timestamp().or_else(|| frame.pts()).ok_or_else(|| {
                 fail("Frame has no presentation timestamp; accurate timing unavailable")
             })?;
-            let time = Time::from_pts(pts, i64::from(tb.numerator()), i64::from(tb.denominator()))?;
-            let origin = *origin.get_or_insert(time);
-            let at = time.relative_ms(origin)?;
-            if let Some(previous) = last {
-                if at < previous {
-                    return Err(fail("Discontinuous presentation timestamps require review"));
-                }
-                if at > previous {
-                    last_delta = at - previous;
-                }
-            }
-            last = Some(at);
+            let Some((at, duration_ms)) = clock.observe(pts, frame.packet().duration)? else {
+                continue;
+            };
             if at < start_ms {
                 continue;
             }
             if end_ms.is_some_and(|end| at >= end) {
                 return Ok(false);
             }
-            let mut rgb = Video::empty();
-            scaler.run(&frame, &mut rgb)?;
-            let row = rgb.width() as usize * 3;
-            let mut pixels = vec![0; row * rgb.height() as usize];
-            let data = rgb.data(0);
-            for y in 0..rgb.height() as usize {
-                let from = y
-                    .checked_mul(rgb.stride(0))
-                    .ok_or_else(|| fail("Frame stride overflow"))?;
-                let source = data
-                    .get(from..from + row)
-                    .ok_or_else(|| fail("Invalid native frame stride"))?;
-                pixels[y * row..(y + 1) * row].copy_from_slice(source);
-            }
-            let image = RgbImage::from_raw(rgb.width(), rgb.height(), pixels)
-                .ok_or_else(|| fail("Invalid RGB frame dimensions"))?;
-            let image = match rotation.rem_euclid(360) {
-                90 => image::imageops::rotate90(&image),
-                180 => image::imageops::rotate180(&image),
-                270 => image::imageops::rotate270(&image),
-                _ => image,
-            };
+            let frame_sar = frame.aspect_ratio();
+            let sar = [stream_sar, frame_sar, codec_sar]
+                .into_iter()
+                .find(|sar| sar.numerator() > 0 && sar.denominator() > 0)
+                .unwrap_or(ffmpeg::Rational(1, 1));
+            let (width, height) = display_size(frame.width(), frame.height(), sar)?;
+            let image = scaler.convert(&frame, width, height)?;
+            let image = transform.for_frame(&frame)?.apply(image);
             if !consume(DecodedFrame {
                 image,
                 time_ms: at,
-                estimated_duration_ms: last_delta,
+                estimated_duration_ms: duration_ms,
             })? {
                 return Ok(false);
             }

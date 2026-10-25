@@ -1,4 +1,14 @@
+mod color;
 mod decoder;
+mod geometry;
+mod timeline;
+
+#[cfg(test)]
+mod color_tests;
+#[cfg(test)]
+mod geometry_tests;
+#[cfg(test)]
+mod timeline_tests;
 
 use nvsf_core::media_abi::*;
 use serde::de::DeserializeOwned;

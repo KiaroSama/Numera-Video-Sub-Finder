@@ -25,7 +25,7 @@
     {"id":"CT-21","area":"package/runtime/ABI","command":"xtask package; xtask standalone","state":"PARTIAL"},
     {"id":"CT-22","area":"installer lifecycle","command":null,"state":"NOT_RUN"},
     {"id":"CT-23","area":"mobile","command":null,"state":"NOT_APPLICABLE","reason":"Owner cancelled Android/iPhone"},
-    {"id":"CT-24","area":"volume/resource bounds","command":"core100000 cue stress; owned worker budgets","state":"PARTIAL"},
+    {"id":"CT-24","area":"volume/resource bounds","command":"core100000 cue stress/EditHistory rollback; xtask worker-faults; owned worker budgets","state":"PARTIAL"},
     {"id":"CT-25","area":"CLI/logs","command":"app storage logs; actual CLI positive/negative","state":"PARTIAL"},
     {"id":"CT-26","area":"Unicode/export interoperability","command":"core literal formats; actual GUI exported bytes","state":"PARTIAL"},
     {"id":"CT-27","area":"hostile input/permissions","command":"core invalid contracts; desktop ACL/e2e traversal; visual proposal rejection","state":"PARTIAL"},

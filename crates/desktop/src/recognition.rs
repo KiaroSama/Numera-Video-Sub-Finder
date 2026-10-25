@@ -1,4 +1,5 @@
 use crate::state::{Host, Result, blocking, lock};
+use nvsf_app::native_request::{self, Operation, Response};
 use nvsf_core::{Recognition, Rect};
 
 #[tauri::command]
@@ -15,7 +16,20 @@ pub async fn suggest_regions(
         let _operation = lock(&host.0.operation)?;
         host.ensure_idle()?;
         let source = host.source(&token)?;
-        nvsf_app::regions::suggest(&host.0.paths, &source, &language).map_err(|e| e.to_string())
+        host.0
+            .source_cancel
+            .store(false, std::sync::atomic::Ordering::Release);
+        let (response, _) = native_request::supervise(
+            &host.0.paths,
+            &source,
+            Operation::Suggest { language },
+            &host.0.source_cancel,
+        )
+        .map_err(|e| e.to_string())?;
+        match response {
+            Response::Suggest(regions) => Ok(regions),
+            _ => Err("Native suggestion returned a different response".into()),
+        }
     })
     .await
 }
@@ -58,8 +72,24 @@ pub async fn recognize_cue(
         if nvsf_app::storage::hash_file(&source).map_err(|e| e.to_string())? != hash {
             return Err("Linked source does not match the review project's fingerprint".into());
         }
-        nvsf_app::regions::recognize_cue(&host.0.paths, &source, at_ms, region, &language)
-            .map_err(|e| e.to_string())
+        host.0
+            .source_cancel
+            .store(false, std::sync::atomic::Ordering::Release);
+        let (response, _) = native_request::supervise(
+            &host.0.paths,
+            &source,
+            Operation::Recognize {
+                at_ms,
+                region,
+                language,
+            },
+            &host.0.source_cancel,
+        )
+        .map_err(|e| e.to_string())?;
+        match response {
+            Response::Recognize(text) => Ok(text),
+            _ => Err("Native recognition returned a different response".into()),
+        }
     })
     .await
 }

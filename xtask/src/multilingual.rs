@@ -498,13 +498,19 @@ pub fn verify(cli: &Path, ffmpeg: &Path, data_root: &Path, output: &Path) -> Res
     eprintln!(
         "[INFO] [LANGUAGE-WITNESS] Re-recognizing Russian cue through the application service"
     );
-    let cue = nvsf_app::regions::recognize_cue(
+    let (response, _) = nvsf_app::native_request::supervise(
         &paths,
         &root.join("rus.mp4"),
-        500,
-        Rect::default(),
-        "rus",
+        nvsf_app::native_request::Operation::Recognize {
+            at_ms: 500,
+            region: Rect::default(),
+            language: "rus".into(),
+        },
+        &std::sync::atomic::AtomicBool::new(false),
     )?;
+    let nvsf_app::native_request::Response::Recognize(cue) = response else {
+        return Err("Native cue worker returned a different response".into());
+    };
     if !known_text(&cue.text, &["Привет", "мир"]) || started.elapsed() >= Duration::from_secs(480)
     {
         return Err(

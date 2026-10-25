@@ -54,11 +54,7 @@ pub(crate) fn regrant(
                 .map(|file| file.into_path().map_err(|e| e.to_string()))
                 .transpose()
         },
-        |source| {
-            nvsf_app::media::MediaRuntime::load(&host.0.paths)
-                .and_then(|runtime| runtime.probe(source))
-                .map_err(|e| e.to_string())
-        },
+        |source| crate::files::probe_source(host, source),
     )
 }
 

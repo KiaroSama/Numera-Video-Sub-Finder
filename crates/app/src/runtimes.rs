@@ -325,53 +325,22 @@ pub fn repair_with_fetch<R: Read>(
     let stage = tempfile::tempdir_in(&root)?;
     let deadline = std::time::Instant::now() + Duration::from_secs(600);
     for entry in &pack.files {
-        if cancel.load(Ordering::Acquire) {
-            return Err(crate::AppError::Cancelled);
-        }
-        let mut response = fetch(entry)?;
-        let mut file = std::fs::OpenOptions::new()
-            .create_new(true)
-            .write(true)
-            .open(stage.path().join(&entry.file))?;
-        let mut received = 0u64;
-        let mut bytes = [0u8; 65536];
-        loop {
-            if std::time::Instant::now() >= deadline {
-                return Err(fail("Dependency transfer exceeded 600-second deadline"));
-            }
-            if cancel.load(Ordering::Acquire) {
-                return Err(crate::AppError::Cancelled);
-            }
-            let count = response.read(&mut bytes)?;
-            if count == 0 {
-                break;
-            }
-            received = received
-                .checked_add(count as u64)
-                .ok_or_else(|| fail("Runtime download overflow"))?;
-            if received > entry.bytes {
-                return Err(fail("Runtime payload exceeds declared size"));
-            }
-            file.write_all(&bytes[..count])?;
-        }
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let mode = if entry.file == "llama-mtmd-cli" {
-                0o700
-            } else {
-                0o600
-            };
-            file.set_permissions(std::fs::Permissions::from_mode(mode))?;
-        }
-        file.sync_all()?;
+        check_transfer(cancel, deadline)?;
+        let response = fetch(entry);
+        check_transfer(cancel, deadline)?;
+        receive_entry(entry, stage.path(), cancel, deadline, response?)?;
     }
+    check_transfer(cancel, deadline)?;
     pack.verify(stage.path())?;
+    check_transfer(cancel, deadline)?;
     let mut selected = paths.clone();
     selected.runtimes = stage.path().to_path_buf();
     crate::media::MediaRuntime::load(&selected)?;
+    check_transfer(cancel, deadline)?;
     crate::runtime_health::tesseract(&selected)?;
+    check_transfer(cancel, deadline)?;
     crate::runtime_health::onnx(&selected)?;
+    check_transfer(cancel, deadline)?;
     write_atomic(&stage.path().join("runtime-pack.json"), manifest, false)?;
     write_atomic(&stage.path().join("runtime-pack.sig"), signature, false)?;
     let id = hash_file(&stage.path().join("runtime-pack.json"))?;
@@ -389,11 +358,10 @@ pub fn repair_with_fetch<R: Read>(
             return Err(fail("Existing runtime inventory identity differs"));
         }
     } else {
+        check_transfer(cancel, deadline)?;
         std::fs::rename(stage.path(), &destination)?;
     }
-    if cancel.load(Ordering::Acquire) {
-        return Err(crate::AppError::Cancelled);
-    }
+    check_transfer(cancel, deadline)?;
     write_atomic(
         &paths.root.join("runtime-selection.json"),
         &serde_json::to_vec(&id)?,
@@ -401,3 +369,61 @@ pub fn repair_with_fetch<R: Read>(
     )?;
     Ok(destination)
 }
+
+fn check_transfer(cancel: &AtomicBool, deadline: std::time::Instant) -> Result<()> {
+    if cancel.load(Ordering::Acquire) {
+        return Err(crate::AppError::Cancelled);
+    }
+    if std::time::Instant::now() >= deadline {
+        return Err(fail("Dependency transfer exceeded 600-second deadline"));
+    }
+    Ok(())
+}
+
+fn receive_entry(
+    entry: &Entry,
+    stage: &Path,
+    cancel: &AtomicBool,
+    deadline: std::time::Instant,
+    mut response: impl Read,
+) -> Result<()> {
+    check_transfer(cancel, deadline)?;
+    let mut file = std::fs::OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(stage.join(&entry.file))?;
+    let mut received = 0u64;
+    let mut bytes = [0u8; 65536];
+    loop {
+        check_transfer(cancel, deadline)?;
+        let read = response.read(&mut bytes);
+        check_transfer(cancel, deadline)?;
+        let count = read?;
+        if count == 0 {
+            break;
+        }
+        received = received
+            .checked_add(count as u64)
+            .ok_or_else(|| fail("Runtime download overflow"))?;
+        if received > entry.bytes {
+            return Err(fail("Runtime payload exceeds declared size"));
+        }
+        file.write_all(&bytes[..count])?;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = if entry.file == "llama-mtmd-cli" {
+            0o700
+        } else {
+            0o600
+        };
+        file.set_permissions(std::fs::Permissions::from_mode(mode))?;
+    }
+    file.sync_all()?;
+    check_transfer(cancel, deadline)
+}
+
+#[cfg(test)]
+#[path = "runtime_transfer_tests.rs"]
+mod transfer_tests;

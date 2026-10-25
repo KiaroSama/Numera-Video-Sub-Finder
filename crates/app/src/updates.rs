@@ -227,6 +227,9 @@ fn read_metadata(response: impl Read, limit: u64, deadline: std::time::Instant) 
             return Err(fail("Release metadata exceeded transfer deadline"));
         }
         let count = response.read(&mut buffer)?;
+        if std::time::Instant::now() >= deadline {
+            return Err(fail("Release metadata exceeded transfer deadline"));
+        }
         if count == 0 {
             break;
         }
@@ -319,6 +322,10 @@ pub fn target(format: &str) -> String {
     };
     format!("{os}-{}-{format}", std::env::consts::ARCH)
 }
+
+#[cfg(test)]
+#[path = "update_http_tests.rs"]
+mod http_tests;
 
 #[cfg(test)]
 mod transfer_tests {
