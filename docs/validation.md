@@ -1,6 +1,10 @@
 # Validation status
 
-Updated: 2026-10-24. **NOT a release acceptance report.** Hosted observations below refer to the exact named SHA; corrective source is not a passing result.
+Updated: 2026-10-26. **NOT a release acceptance report.** Hosted observations below refer to the exact named SHA; corrective source is not a passing result.
+
+## Integrated completion source — verification pending
+
+The current unexecuted batch adds displayed square-pixel geometry and eight orthogonal display orientations, FFmpeg9 metadata-aware SDR/HDR conversion, source-PTS duration handling, real loopback transfer faults and100000-cue edit/rollback stress. Desktop source probing, preview, suggestions and cue recognition now use a hidden matching-source CLI child with typed bounded results and selected resource paths. The shared worker owner retains Unix root identity until group cleanup and a separate lease guardian survives worker-root failure; Windows retains its private Job Object. Five deterministic process-fault cases include root exit followed by forced supervisor death. A test-server accept bound found in independent review was corrected before execution. These changes are source-authored, not yet passing evidence; only formatting/whitespace checks have run locally, never application compilation or execution. The previously green run below does not verify this batch.
 
 ## Current hosted verification
 

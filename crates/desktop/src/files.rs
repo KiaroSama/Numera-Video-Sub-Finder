@@ -1,8 +1,8 @@
 use crate::state::{self, Destination, Host, Result, Source, blocking, display_name, lock};
-use image::{DynamicImage, ImageFormat};
+use nvsf_app::native_request::{self, Operation, Response};
 use nvsf_core::Project;
 use serde::Serialize;
-use std::{io::Cursor, path::PathBuf};
+use std::path::PathBuf;
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
 
 #[tauri::command]
@@ -29,9 +29,7 @@ pub async fn pick_source(
         };
         let path = file.into_path().map_err(|e| e.to_string())?;
         grant_source_with(&host, &path, expected_hash.as_deref(), |path| {
-            nvsf_app::media::MediaRuntime::load(&host.0.paths)
-                .and_then(|runtime| runtime.probe(path))
-                .map_err(|e| e.to_string())
+            probe_source(&host, path)
         })
         .map(Some)
     })
@@ -61,6 +59,19 @@ pub async fn choose_output(
     .await
 }
 
+pub(crate) fn probe_source(host: &Host, path: &std::path::Path) -> Result<nvsf_core::MediaInfo> {
+    host.0
+        .source_cancel
+        .store(false, std::sync::atomic::Ordering::Release);
+    let (response, _) =
+        native_request::supervise(&host.0.paths, path, Operation::Probe, &host.0.source_cancel)
+            .map_err(|e| e.to_string())?;
+    match response {
+        Response::Probe(info) => Ok(info),
+        _ => Err("Native probe returned a different response".into()),
+    }
+}
+
 pub(crate) fn grant_source_with(
     host: &Host,
     path: &std::path::Path,
@@ -77,6 +88,9 @@ pub(crate) fn grant_source_with(
     if expected_hash.is_some_and(|expected| fingerprint != expected) {
         return Err("Selected video does not match the project's source fingerprint".into());
     }
+    host.0
+        .source_cancel
+        .store(false, std::sync::atomic::Ordering::Release);
     let media = probe(&path)?;
     let token = host.token("source");
     let mut grants = lock(&host.0.sources)?;
@@ -150,6 +164,9 @@ pub async fn preview_frame(
     {
         return Err("A source frame is already being decoded".into());
     }
+    host.0
+        .source_cancel
+        .store(false, std::sync::atomic::Ordering::Release);
     drop(operation);
     blocking(move || {
         struct Reset<'a>(&'a std::sync::atomic::AtomicBool);
@@ -160,20 +177,13 @@ pub async fn preview_frame(
         }
         let _reset = Reset(&host.0.source_busy);
         let path = host.source(&token)?;
-        let rgb = nvsf_app::media::MediaRuntime::load(&host.0.paths)
-            .and_then(|runtime| runtime.preview(&path, time_ms))
-            .map_err(|e| e.to_string())?;
-        if u64::from(rgb.width()) * u64::from(rgb.height()) > 33_177_600 {
-            return Err("Preview exceeds 8K pixel limit".into());
-        }
-        let mut buffer = Cursor::new(Vec::new());
-        DynamicImage::ImageRgb8(rgb)
-            .write_to(&mut buffer, ImageFormat::Png)
-            .map_err(|e| e.to_string())?;
-        let bytes = buffer.into_inner();
-        if bytes.len() > 8 * 1024 * 1024 {
-            return Err("Preview exceeds 8MiB IPC bound; use a smaller source frame".into());
-        }
+        let (_, bytes) = native_request::supervise(
+            &host.0.paths,
+            &path,
+            Operation::Preview { at_ms: time_ms },
+            &host.0.source_cancel,
+        )
+        .map_err(|e| e.to_string())?;
         Ok(tauri::ipc::Response::new(bytes))
     })
     .await

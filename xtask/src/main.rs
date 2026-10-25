@@ -19,6 +19,7 @@ mod production_supervisor;
 mod quality;
 mod runtime_pack;
 mod update_assets;
+mod worker_faults;
 use clap::{Parser, Subcommand};
 use std::{error::Error, path::PathBuf};
 
@@ -60,6 +61,10 @@ enum Cmd {
         fixture_dir: PathBuf,
         #[arg(long)]
         data_root: PathBuf,
+        #[arg(long)]
+        output: PathBuf,
+    },
+    WorkerFaults {
         #[arg(long)]
         output: PathBuf,
     },
@@ -170,6 +175,9 @@ fn main() {
     }
 }
 fn run() -> Result<(), Box<dyn Error>> {
+    if worker_faults::dispatch_fixture()? {
+        return Ok(());
+    }
     let log_dir = PathBuf::from(".ci-work/logs");
     std::fs::create_dir_all(&log_dir)?;
     let stamp = chrono::Utc::now().format("%Y-%m-%d_%H-%M-%S_UTC");
@@ -203,6 +211,7 @@ fn run() -> Result<(), Box<dyn Error>> {
             data_root,
             output,
         } => gui::smoke(&gui, &fixture_dir, &data_root, &output),
+        Cmd::WorkerFaults { output } => worker_faults::verify(&output),
         Cmd::GuiFault { output } => gui_failure::finalize(&output),
         #[cfg(target_os = "linux")]
         Cmd::ProductionParent { gui, state } => production_supervisor::run(&gui, &state),

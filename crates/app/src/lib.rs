@@ -7,6 +7,7 @@ pub mod logging;
 pub mod media;
 pub mod model_download;
 pub mod models;
+pub mod native_request;
 pub mod paths;
 pub mod providers;
 pub mod regions;

@@ -57,15 +57,44 @@ pub fn install(
         .redirect(reqwest::redirect::Policy::limited(4))
         .build()
         .map_err(|e| fail(e.to_string()))?;
+    acquire(
+        &client,
+        url,
+        offset,
+        &Transfer {
+            bytes,
+            sha256,
+            destination,
+            cancel,
+            deadline,
+        },
+    )
+}
+
+fn acquire(
+    client: &reqwest::blocking::Client,
+    url: &str,
+    offset: u64,
+    transfer: &Transfer<'_>,
+) -> Result<()> {
     let mut request = client.get(url);
     if offset > 0 {
         request = request.header(reqwest::header::RANGE, format!("bytes={offset}-"));
     }
-    check_transfer(cancel, deadline)?;
-    let mut response = request
-        .send()
+    check_transfer(transfer.cancel, transfer.deadline)?;
+    let response = request.send();
+    check_transfer(transfer.cancel, transfer.deadline)?;
+    let mut response = response
         .and_then(|r| r.error_for_status())
         .map_err(|e| fail(format!("Model download failed: {e}")))?;
+    if !matches!(
+        response.status(),
+        reqwest::StatusCode::OK | reqwest::StatusCode::PARTIAL_CONTENT
+    ) {
+        return Err(fail(
+            "Model response must contain a complete or resumed payload",
+        ));
+    }
     let partial_content = response.status() == reqwest::StatusCode::PARTIAL_CONTENT;
     let range = response
         .headers()
@@ -73,14 +102,7 @@ pub fn install(
         .and_then(|v| v.to_str().ok())
         .unwrap_or("")
         .to_owned();
-    Transfer {
-        bytes,
-        sha256,
-        destination,
-        cancel,
-        deadline,
-    }
-    .receive(offset, partial_content, &range, &mut response)
+    transfer.receive(offset, partial_content, &range, &mut response)
 }
 
 struct Transfer<'a> {
@@ -110,11 +132,10 @@ impl Transfer<'_> {
         if offset > 0 && !partial_content {
             offset = 0;
         }
-        if offset > 0 {
-            let expected = format!("bytes {offset}-");
-            if !range.starts_with(&expected) || !range.ends_with(&format!("/{bytes}")) {
-                return Err(fail("Invalid resumed model response range"));
-            }
+        if partial_content
+            && (offset >= bytes || range != format!("bytes {offset}-{}/{bytes}", bytes - 1))
+        {
+            return Err(fail("Invalid resumed model response range"));
         }
         check_transfer(cancel, deadline)?;
         let mut file = std::fs::OpenOptions::new()
@@ -128,8 +149,15 @@ impl Transfer<'_> {
         let mut received = offset;
         loop {
             check_transfer(cancel, deadline)?;
-            let n = response.read(&mut buffer)?;
+            let n = match response.read(&mut buffer) {
+                Ok(count) => count,
+                Err(error) => {
+                    check_transfer(cancel, deadline)?;
+                    return Err(error.into());
+                }
+            };
             if n == 0 {
+                check_transfer(cancel, deadline)?;
                 break;
             }
             received = received
@@ -207,3 +235,7 @@ fn activate(
 #[cfg(test)]
 #[path = "model_download_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "model_http_tests.rs"]
+mod http_tests;

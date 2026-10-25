@@ -177,6 +177,13 @@ jobs:
       - name: All required Rust contract suites and nonzero evidence
         timeout-minutes: 45
         run: ./scripts/ci/tests.ps1 -TargetId '${{ matrix.id }}'
+      - name: Owned worker process fault contracts
+        timeout-minutes: 2
+        run: |
+          $ext = if ($IsWindows) { '.exe' } else { '' }
+          ./scripts/ci/guard.ps1 -Name worker-faults -WallSeconds 80 -IdleSeconds 20 -Executable "$env:GITHUB_WORKSPACE/target/release/xtask$ext" -Arguments @('worker-faults','--output','.ci-work/worker-faults')
+          if ($LASTEXITCODE -ne 0) { throw 'Owned worker fault or cleanup contract failed' }
+          Copy-Item '.ci-work/worker-faults/worker-fault-report.json' '.ci-work/packages/reports/${{ matrix.id }}-worker-faults.json'
       - name: Missing-native bootstrap and maintenance CLI contracts
         timeout-minutes: 2
         run: |
@@ -302,6 +309,7 @@ jobs:
             .ci-work/fixtures/
             .ci-work/ocr-evidence/
             .ci-work/production-evidence/
+            .ci-work/worker-faults/worker-fault-report.json
             .ci-work/coverage*.lcov
             .ci-work/packages/reports/coverage.json
             target/cargo-timings/
@@ -334,10 +342,10 @@ jobs:
         run: |
           for id in $(jq -r '.targets[].id' ci/targets.json); do
             jq -e --arg sha "$GITHUB_SHA" --arg id "$id" '.schema==1 and .source_sha==$sha and .target==$id and (.files|length>=2) and all(.files[]; (.sha256|test("^[a-f0-9]{64}$")))' ".ci-work/downloaded/packages/reports/$id.json"
-            for kind in standalone gui production suites bundles maintenance multilingual runtime-pack update-assets; do
+            for kind in standalone gui production suites bundles maintenance multilingual runtime-pack update-assets worker-faults; do
               minimum=1
               case "$kind" in
-                standalone) minimum=3 ;; gui) minimum=9 ;; production) minimum=4 ;;
+                standalone) minimum=3 ;; gui) minimum=9 ;; production) minimum=4 ;; worker-faults) minimum=5 ;;
                 bundles|update-assets) minimum=2 ;; maintenance|runtime-pack) minimum=5 ;;
                 multilingual) minimum=7; case "$id" in windows-*) minimum=6 ;; esac ;;
               esac

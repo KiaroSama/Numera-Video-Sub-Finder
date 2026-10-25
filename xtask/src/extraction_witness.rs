@@ -125,7 +125,17 @@ pub fn verify(input: &Path, data: &Path, root: &Path) -> Result<()> {
     {
         return Err("Full exclusion did not suppress synthetic text without inventing cues".into());
     }
-    let suggestions = nvsf_app::regions::suggest(&paths, input, "en")?;
+    let (response, _) = nvsf_app::native_request::supervise(
+        &paths,
+        input,
+        nvsf_app::native_request::Operation::Suggest {
+            language: "en".into(),
+        },
+        &std::sync::atomic::AtomicBool::new(false),
+    )?;
+    let nvsf_app::native_request::Response::Suggest(suggestions) = response else {
+        return Err("Native suggestion worker returned a different response".into());
+    };
     if suggestions.is_empty() || suggestions.len() > 2 || suggestions == [Rect::default()] {
         return Err(
             "Actual region suggestion omitted subtitle bands or invented extra bands".into(),
@@ -140,10 +150,18 @@ pub fn verify(input: &Path, data: &Path, root: &Path) -> Result<()> {
     {
         return Err("Suggested bands omitted the known bottom subtitle".into());
     }
-    let unreadable =
-        nvsf_app::regions::recognize_cue(&paths, input, 500, Rect::new(0.0, 0.0, 1.0, 0.1)?, "en")
-            .err()
-            .ok_or("Blank upper crop incorrectly produced a recognition candidate")?;
+    let unreadable = nvsf_app::native_request::supervise(
+        &paths,
+        input,
+        nvsf_app::native_request::Operation::Recognize {
+            at_ms: 500,
+            region: Rect::new(0.0, 0.0, 1.0, 0.1)?,
+            language: "en".into(),
+        },
+        &std::sync::atomic::AtomicBool::new(false),
+    )
+    .err()
+    .ok_or("Blank upper crop incorrectly produced a recognition candidate")?;
     if !unreadable.to_string().contains("Cue crop is unreadable") {
         return Err(format!("Blank-crop witness failed before recognition: {unreadable}").into());
     }

@@ -4,12 +4,12 @@ use nvsf_core::{ExtractConfig, Progress, Project};
 use serde::{Deserialize, Serialize};
 #[path = "worker_output.rs"]
 mod output;
+#[path = "worker_process.rs"]
+pub(crate) mod process;
 #[cfg(windows)]
 #[path = "worker_windows.rs"]
 mod windows;
 
-#[cfg(unix)]
-use std::io::Read;
 use std::{
     path::Path,
     process::{Command, Stdio},
@@ -35,21 +35,7 @@ pub fn supervise(
     let scratch = tempfile::tempdir_in(&paths.cache)?;
     let request = scratch.path().join("request.json");
     write_atomic(&request, &serde_json::to_vec(&config)?, false)?;
-    let current = std::env::current_exe()?;
-    let worker = if current.file_stem().is_some_and(|s| s == "nvsf") {
-        current
-    } else {
-        current
-            .parent()
-            .ok_or_else(|| fail("Missing executable root"))?
-            .join(if cfg!(windows) { "nvsf.exe" } else { "nvsf" })
-    };
-    if !worker.is_file() {
-        return Err(fail(
-            "Packaged nvsf worker missing; reinstall matching package",
-        ));
-    }
-    let mut command = Command::new(worker);
+    let mut command = Command::new(process::executable()?);
     command
         .arg("worker")
         .arg("--request")
@@ -64,40 +50,11 @@ pub fn supervise(
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        command.creation_flags(0x08000000);
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        command.process_group(0);
-    }
     let log = crate::logging::Log::new(&paths, "nvsf-supervisor");
-    let mut owned = OwnedChild(command.spawn()?);
-    log.event("INFO", "WORKER", &format!("Spawned pid={}", owned.0.id()));
-    #[cfg(windows)]
-    let job = windows::Job::attach(&owned.0)?;
-    // Keep the writer outside Child: wait() closes a Child-owned stdin before waiting.
-    let _parent_lease = owned
-        .0
-        .stdin
-        .take()
-        .ok_or_else(|| fail("Worker parent-lifetime pipe unavailable"))?;
-    #[cfg(windows)]
-    let _parent_lease = {
-        use std::io::Write;
-        let mut lease = _parent_lease;
-        lease.write_all(b"S")?;
-        lease
-    };
-    let child = &mut owned.0;
+    let mut child = process::Process::spawn(&mut command)?;
     let pid = child.id();
-    let stdout = child
-        .stdout
-        .take()
-        .ok_or_else(|| fail("Worker progress stream unavailable"))?;
+    log.event("INFO", "WORKER", &format!("Spawned pid={pid}"));
+    let stdout = child.stdout()?;
     let mut reader = output::Output::new(stdout)?;
     let deadline = Instant::now() + Duration::from_secs(24 * 3600);
     let mut heartbeat = Instant::now();
@@ -121,13 +78,10 @@ pub fn supervise(
                 let _ = write_atomic(&scratch.path().join("cancel"), b"cancel", false);
                 let grace = Instant::now() + Duration::from_secs(2);
                 while Instant::now() < grace {
-                    if child.try_wait()?.is_some() {
+                    if child.exited()? {
                         break;
                     }
                     std::thread::park_timeout(Duration::from_millis(20));
-                }
-                if child.try_wait()?.is_none() {
-                    terminate(child, pid);
                 }
                 failure = Some(if cancel {
                     AppError::Cancelled
@@ -149,9 +103,18 @@ pub fn supervise(
                     output_progress = false;
                     std::thread::park_timeout(Duration::from_millis(10));
                 }
-                output::Poll::Ended => break,
+                output::Poll::Ended => {
+                    let grace = Instant::now() + Duration::from_secs(2);
+                    while !child.exited()? && Instant::now() < grace {
+                        std::thread::park_timeout(Duration::from_millis(10));
+                    }
+                    break;
+                }
             }
-            if child.try_wait()?.is_some() {
+            if child.exited()? {
+                if exited_at.is_none() {
+                    child.signal_tree()?;
+                }
                 let exited = exited_at.get_or_insert_with(Instant::now);
                 if output_progress {
                     *exited = Instant::now();
@@ -161,21 +124,9 @@ pub fn supervise(
                 }
             }
         }
-        if child.try_wait()?.is_none() {
-            terminate(child, pid);
-        }
         Ok(())
     })();
-    if monitored.is_err() && !matches!(child.try_wait(), Ok(Some(_))) {
-        terminate(child, pid);
-    }
-    #[cfg(windows)]
-    let job_cleanup = {
-        let result = job.terminate();
-        drop(job);
-        result
-    };
-    let status = child.wait();
+    let status = child.finish();
     drop(reader);
     log.event(
         if monitored.is_ok()
@@ -194,8 +145,6 @@ pub fn supervise(
         ),
     );
     monitored?;
-    #[cfg(windows)]
-    job_cleanup?;
     let status = status?;
     if let Some(error) = failure {
         return Err(error);
@@ -217,21 +166,28 @@ pub fn guard_parent_lifetime() -> Result<()> {
         if pid <= 1 || unsafe { getpgrp() } != pid as i32 {
             return Err(fail("Worker requires its own isolated process group"));
         }
-        std::thread::Builder::new()
-            .name("worker-parent-lease".into())
-            .spawn(move || {
-                let mut byte = [0u8; 1];
+        // SAFETY: the child below calls only async-signal-safe libc operations, never Rust
+        // allocation, locks, stdio, logging, destructors or native frameworks after fork.
+        let guardian = unsafe { fork() };
+        if guardian < 0 {
+            return Err(std::io::Error::last_os_error().into());
+        }
+        if guardian == 0 {
+            unsafe {
+                close(1);
+                close(2);
+                let mut byte = 0u8;
                 loop {
-                    match std::io::stdin().read(&mut byte) {
-                        Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
-                        _ => break,
+                    if read(0, (&mut byte as *mut u8).cast(), 1) < 0 && *errno() == 4 {
+                        continue;
                     }
+                    break;
                 }
-                // SAFETY: this live process is the verified leader of its own worker group.
-                // The parent holds the only writer and never sends input; EOF means owner loss.
-                unsafe { kill(-(pid as i32), 9) };
-                std::process::exit(70);
-            })?;
+                // This separate group member survives root exit; owner EOF kills it too.
+                kill(-(pid as i32), 9);
+                _exit(70);
+            }
+        }
     }
     Ok(())
 }
@@ -240,37 +196,14 @@ pub fn guard_parent_lifetime() -> Result<()> {
 unsafe extern "C" {
     fn getpgrp() -> i32;
     fn kill(pid: i32, signal: i32) -> i32;
-}
-
-struct OwnedChild(std::process::Child);
-impl Drop for OwnedChild {
-    fn drop(&mut self) {
-        if !matches!(self.0.try_wait(), Ok(Some(_))) {
-            let pid = self.0.id();
-            terminate(&mut self.0, pid);
-        }
-    }
-}
-
-fn terminate(child: &mut std::process::Child, pid: u32) {
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        let _ = Command::new("taskkill")
-            .args(["/PID", &pid.to_string(), "/T", "/F"])
-            .creation_flags(0x08000000)
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status();
-    }
-    #[cfg(unix)]
-    {
-        let _ = Command::new("kill")
-            .args(["-KILL", "--", &format!("-{pid}")])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status();
-    }
-    let _ = child.kill();
-    let _ = child.wait();
+    fn fork() -> i32;
+    fn close(fd: i32) -> i32;
+    fn read(fd: i32, buffer: *mut std::ffi::c_void, size: usize) -> isize;
+    fn _exit(code: i32) -> !;
+    #[cfg(target_os = "linux")]
+    #[link_name = "__errno_location"]
+    fn errno() -> *mut i32;
+    #[cfg(target_os = "macos")]
+    #[link_name = "__error"]
+    fn errno() -> *mut i32;
 }

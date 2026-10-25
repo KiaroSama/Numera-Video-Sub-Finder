@@ -220,9 +220,7 @@ pub fn register(
     config: ExtractConfig,
 ) -> Result<(String, ExtractConfig)> {
     register_with(host, source_token, output_token, config, |source| {
-        nvsf_app::media::MediaRuntime::load(&host.0.paths)
-            .and_then(|runtime| runtime.probe(source))
-            .map_err(|e| e.to_string())
+        crate::files::probe_source(host, source)
     })
 }
 

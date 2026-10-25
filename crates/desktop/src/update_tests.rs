@@ -408,6 +408,11 @@ fn shared_resource_reservation_refuses_source_closing_and_concurrent_operations(
     let host = Host::new(paths, log);
     host.0.source_busy.store(true, Ordering::Release);
     assert!(model_manager::begin(&host).is_err());
+    assert!(
+        !host.shutdown(),
+        "native request must finish owned cleanup before exit"
+    );
+    assert!(host.0.source_cancel.load(Ordering::Acquire));
     host.0.source_busy.store(false, Ordering::Release);
     host.0.closing.store(true, Ordering::Release);
     assert!(model_manager::begin(&host).is_err());
