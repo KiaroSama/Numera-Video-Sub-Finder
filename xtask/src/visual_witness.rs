@@ -32,8 +32,52 @@ fn hosted() -> Result<()> {
 pub fn provision(data_root: &Path) -> Result<()> {
     hosted()?;
     let paths = Paths::new(Some(data_root))?;
-    assistant::install(&paths, &AtomicBool::new(false))?;
-    Ok(())
+    let pack: serde_json::Value =
+        serde_json::from_str(include_str!("../../ci/assistant-models.json"))?;
+    let files: Vec<_> = pack["artifacts"]
+        .as_array()
+        .ok_or("Missing visual model inventory")?
+        .iter()
+        .map(|artifact| {
+            let file = paths.models.join("assistant").join(
+                artifact["file"]
+                    .as_str()
+                    .ok_or("Missing visual model filename")?,
+            );
+            Ok([file.with_extension("partial"), file])
+        })
+        .collect::<Result<Vec<_>>>()?
+        .into_iter()
+        .flatten()
+        .collect();
+    let mut previous = vec![0; files.len()];
+    std::thread::scope(|scope| -> Result<()> {
+        let (send, receive) = std::sync::mpsc::sync_channel(1);
+        scope.spawn(move || {
+            let result = assistant::install(&paths, &AtomicBool::new(false));
+            let _ = send.send(result);
+        });
+        loop {
+            match receive.recv_timeout(std::time::Duration::from_secs(1)) {
+                Ok(result) => return result.map_err(Into::into),
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                    return Err("Visual model provisioning thread stopped without a result".into());
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+            }
+            for (index, file) in files.iter().enumerate() {
+                let bytes = match file.metadata() {
+                    Ok(metadata) => metadata.len(),
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => 0,
+                    Err(error) => return Err(error.into()),
+                };
+                if bytes > previous[index] {
+                    println!("Visual model transfer file={index} bytes={bytes}");
+                }
+                previous[index] = bytes;
+            }
+        }
+    })
 }
 
 pub fn verify(fixture_dir: &Path, data_root: &Path, output: &Path) -> Result<()> {
