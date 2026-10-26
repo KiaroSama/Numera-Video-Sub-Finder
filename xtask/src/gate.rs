@@ -84,6 +84,8 @@ pub fn validate(reports: &Path, source: &str) -> Result<()> {
             ("runtime-pack", 5),
             ("update-assets", 2),
             ("worker-faults", 5),
+            ("specialist", 1),
+            ("visual-model", 1),
         ] {
             passed(
                 &read(&reports.join(format!("{target}-{kind}.json")))?,

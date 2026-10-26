@@ -211,6 +211,26 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Generated fixture OCR evidence capture failed' }
           ./scripts/ci/guard.ps1 -Name cli-smoke -WallSeconds 210 -IdleSeconds 90 -Executable "$env:GITHUB_WORKSPACE/$xtask" -Arguments @('smoke','--cli',"target/release/nvsf$ext",'--fixture-dir','.ci-work/fixtures','--data-root','.ci-work/data')
           if ($LASTEXITCODE -ne 0) { throw 'Actual native extraction smoke failed' }
+      - name: Actual native Japanese specialist numeric admission
+        timeout-minutes: 3
+        run: |
+          $ext = if ($IsWindows) { '.exe' } else { '' }
+          ./scripts/ci/guard.ps1 -Name specialist -WallSeconds 120 -IdleSeconds 60 -Executable "$env:GITHUB_WORKSPACE/target/release/xtask$ext" -Arguments @('specialist','--fixture-dir','.ci-work/fixtures','--data-root','.ci-work/data','--output','.ci-work/specialist')
+          if ($LASTEXITCODE -ne 0) { throw 'Actual specialist numeric model admission failed' }
+          Copy-Item '.ci-work/specialist/specialist.json' '.ci-work/packages/reports/${{ matrix.id }}-specialist.json'
+      - name: Explicit isolated optional visual model provisioning
+        timeout-minutes: 21
+        run: |
+          $ext = if ($IsWindows) { '.exe' } else { '' }
+          ./scripts/ci/guard.ps1 -Name visual-models -WallSeconds 1200 -IdleSeconds 60 -Executable "$env:GITHUB_WORKSPACE/target/release/xtask$ext" -Arguments @('visual-models','--data-root','.ci-work/visual-data')
+          if ($LASTEXITCODE -ne 0) { throw 'Hash-bound optional visual model provisioning failed' }
+      - name: Actual supervised optional visual numeric admission
+        timeout-minutes: 3
+        run: |
+          $ext = if ($IsWindows) { '.exe' } else { '' }
+          ./scripts/ci/guard.ps1 -Name visual-model -WallSeconds 120 -IdleSeconds 60 -Executable "$env:GITHUB_WORKSPACE/target/release/xtask$ext" -Arguments @('visual-model','--fixture-dir','.ci-work/fixtures','--data-root','.ci-work/visual-data','--output','.ci-work/visual-evidence')
+          if ($LASTEXITCODE -ne 0) { throw 'Actual optional visual numeric model admission failed' }
+          Copy-Item '.ci-work/visual-evidence/visual-model-report.json' '.ci-work/packages/reports/${{ matrix.id }}-visual-model.json'
       - name: Actual representative language extraction and cue recognition
         timeout-minutes: 9
         run: |
@@ -310,6 +330,10 @@ jobs:
             .ci-work/ocr-evidence/
             .ci-work/production-evidence/
             .ci-work/worker-faults/worker-fault-report.json
+            .ci-work/specialist/specialist.json
+            .ci-work/specialist/numeric-crop.png
+            .ci-work/visual-evidence/visual-model-report.json
+            .ci-work/visual-data/logs/
             .ci-work/coverage*.lcov
             .ci-work/packages/reports/coverage.json
             target/cargo-timings/
@@ -342,7 +366,7 @@ jobs:
         run: |
           for id in $(jq -r '.targets[].id' ci/targets.json); do
             jq -e --arg sha "$GITHUB_SHA" --arg id "$id" '.schema==1 and .source_sha==$sha and .target==$id and (.files|length>=2) and all(.files[]; (.sha256|test("^[a-f0-9]{64}$")))' ".ci-work/downloaded/packages/reports/$id.json"
-            for kind in standalone gui production suites bundles maintenance multilingual runtime-pack update-assets worker-faults; do
+            for kind in standalone gui production suites bundles maintenance multilingual runtime-pack update-assets worker-faults specialist visual-model; do
               minimum=1
               case "$kind" in
                 standalone) minimum=3 ;; gui) minimum=9 ;; production) minimum=4 ;; worker-faults) minimum=5 ;;
