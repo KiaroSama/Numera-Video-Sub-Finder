@@ -153,6 +153,7 @@ pub(crate) fn run_proposal(
             "-ngl",
             "0",
             "--no-mmproj-offload",
+            "--jinja",
         ])
         .stdin(Stdio::null())
         .stdout(response.try_clone()?)
