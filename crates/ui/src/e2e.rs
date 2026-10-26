@@ -20,9 +20,9 @@ pub fn FixtureControls(ui: Ui) -> impl IntoView {
         <button id="e2e-load" data-testid="e2e-load-fixture" on:click={move |_|ui.request::<Grant>("e2e_fixture",json!({"fixture":"en.mp4","output":"ui-en.srt"}),move |grant|{
             ui.source.set(Some(grant.source));ui.output.set(Some(grant.output));ui.seek(0);
         })} disabled=move ||ui.busy.get()>"Admit English CI fixture"</button>
-        <button data-testid="e2e-save-edits" disabled=move ||ui.busy.get()||ui.project.with(Option::is_none)||ui.draft_dirty.get() on:click=move |_|{
+        <button data-testid="e2e-save-edits" disabled=move ||ui.busy.get()||ui.preview_busy.get()||ui.project.with(Option::is_none)||ui.draft_dirty.get() on:click=move |_|{
             let Some(project)=ui.project.get_untracked()else{return;};let Some(output)=ui.output.get_untracked()else{return;};
-            if ui.busy.get_untracked(){return;}ui.busy.set(true);
+            if ui.busy.get_untracked()||ui.preview_busy.get_untracked(){return;}ui.busy.set(true);
             wasm_bindgen_futures::spawn_local(async move{
                 let result=async{
                     crate::ipc::call::<()>("replace_project",json!({"project":project})).await?;
