@@ -18,7 +18,9 @@ mod production;
 mod production_supervisor;
 mod quality;
 mod runtime_pack;
+mod specialist_witness;
 mod update_assets;
+mod visual_witness;
 mod worker_faults;
 use clap::{Parser, Subcommand};
 use std::{error::Error, path::PathBuf};
@@ -57,6 +59,22 @@ enum Cmd {
     Gui {
         #[arg(long)]
         gui: PathBuf,
+        #[arg(long)]
+        fixture_dir: PathBuf,
+        #[arg(long)]
+        data_root: PathBuf,
+        #[arg(long)]
+        output: PathBuf,
+    },
+    Specialist {
+        #[arg(long)]
+        fixture_dir: PathBuf,
+        #[arg(long)]
+        data_root: PathBuf,
+        #[arg(long)]
+        output: PathBuf,
+    },
+    VisualModel {
         #[arg(long)]
         fixture_dir: PathBuf,
         #[arg(long)]
@@ -167,6 +185,10 @@ enum Cmd {
         #[arg(long)]
         data_root: PathBuf,
     },
+    VisualModels {
+        #[arg(long)]
+        data_root: PathBuf,
+    },
 }
 fn main() {
     if let Err(e) = run() {
@@ -211,6 +233,16 @@ fn run() -> Result<(), Box<dyn Error>> {
             data_root,
             output,
         } => gui::smoke(&gui, &fixture_dir, &data_root, &output),
+        Cmd::Specialist {
+            fixture_dir,
+            data_root,
+            output,
+        } => specialist_witness::verify(&fixture_dir, &data_root, &output),
+        Cmd::VisualModel {
+            fixture_dir,
+            data_root,
+            output,
+        } => visual_witness::verify(&fixture_dir, &data_root, &output),
         Cmd::WorkerFaults { output } => worker_faults::verify(&output),
         Cmd::GuiFault { output } => gui_failure::finalize(&output),
         #[cfg(target_os = "linux")]
@@ -260,6 +292,7 @@ fn run() -> Result<(), Box<dyn Error>> {
             source_sha,
         } => gate::release(&reports, &source_sha),
         Cmd::RuntimeModels { data_root } => fixture::provision_models(&data_root),
+        Cmd::VisualModels { data_root } => visual_witness::provision(&data_root),
     };
     writeln!(
         log,
