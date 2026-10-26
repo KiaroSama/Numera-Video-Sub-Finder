@@ -47,7 +47,7 @@ pub fn Review(ui: Ui) -> impl IntoView {
                 <span class="muted">{move ||format!("{} matches",indices.with(Vec::len))}</span>
                 <button disabled=move ||{ui.revision.get();!ui.history.with_value(|h|h.can_undo())} on:click=move |_|ui.travel(false)>"Undo"</button>
                 <button disabled=move ||{ui.revision.get();!ui.history.with_value(|h|h.can_redo())} on:click=move |_|ui.travel(true)>"Redo"</button>
-                <button on:click=move |_|ui.persist(None,false,false) disabled=move ||ui.busy.get()>"Save project"</button>
+                <button on:click=move |_|ui.persist(None,false,false) disabled=move ||ui.busy.get()||ui.preview_busy.get()>"Save project"</button>
                 <span class="edit-state">{move ||if ui.dirty.get(){"Unsaved corrections"}else{"Project loaded"}}</span>
             </div>
             <div class="review-grid">
@@ -60,7 +60,7 @@ pub fn Review(ui: Ui) -> impl IntoView {
                         <div style=move ||format!("height:{}px",indices.with(|i|helpers::window_range(i.len(),scroll.get()).start)*helpers::ROW_HEIGHT) aria-hidden="true"></div>
                         <For each=rows key=|cue| (cue.id,cue.text.clone(),cue.reviewed,cue.start_ms,cue.end_ms,cue.confidence.map(f32::to_bits)) children=move |cue|{
                             let id=cue.id; let start=cue.start_ms;
-                            view!{<button class="cue-row" class:selected=move ||ui.selected.get()==Some(id) aria-pressed=move ||ui.selected.get()==Some(id)
+                            view!{<button class="cue-row" disabled=move ||ui.busy.get()||ui.closing.get() class:selected=move ||ui.selected.get()==Some(id) aria-pressed=move ||ui.selected.get()==Some(id)
                                 on:click=move |_|{if ui.draft_dirty.get_untracked(){ui.error.set(Some("Apply or discard your current cue draft before selecting another cue".into()));}else{ui.selected.set(Some(id));ui.seek(start);}}>
                                 <span class="cue-number mono">{format!("{:04}",id)}</span>
                                 <span class="cue-content"><span class="cue-text" dir="auto">{cue.text}</span><span class="cue-meta mono">{format!("{} → {} · Track {}",helpers::time_label(start),helpers::time_label(cue.end_ms),cue.track)}</span></span>
@@ -71,7 +71,7 @@ pub fn Review(ui: Ui) -> impl IntoView {
                         <Show when=move ||indices.with(Vec::is_empty)><p class="empty-list">"No cues match this filter."</p></Show>
                     </div>
                     <div class="cue-navigation">
-                        <button on:click=move |_|select_relative(ui,-1)>"Previous cue"</button><button on:click=move |_|select_relative(ui,1)>"Next cue"</button>
+                        <button disabled=move ||ui.busy.get()||ui.closing.get() on:click=move |_|select_relative(ui,-1)>"Previous cue"</button><button disabled=move ||ui.busy.get()||ui.closing.get() on:click=move |_|select_relative(ui,1)>"Next cue"</button>
                     </div>
                 </section>
                 <section class="panel editor-panel">
@@ -87,6 +87,9 @@ pub fn Review(ui: Ui) -> impl IntoView {
 }
 
 fn select_relative(ui: Ui, delta: isize) {
+    if ui.busy.get_untracked() || ui.closing.get_untracked() {
+        return;
+    }
     if ui.draft_dirty.get_untracked() {
         ui.error.set(Some(
             "Apply or discard the current draft before changing cues".into(),
@@ -199,7 +202,7 @@ fn Export(ui: Ui) -> impl IntoView {
     let crlf = RwSignal::new(false);
     view! {<div class="export-panel"><h3>"Export corrections"</h3><div class="button-row">
     <label for="export-format" class="sr-only">"Export format"</label><select id="export-format" on:change=move |e|format.set(event_target_value(&e))><option value="srt">"SRT"</option><option value="vtt">"WebVTT"</option><option value="ass">"ASS"</option><option value="json">"JSON evidence"</option></select>
-    <button class="primary" disabled=move ||ui.busy.get() on:click=move |_|ui.persist(Some(format.get_untracked()),bom.get_untracked(),crlf.get_untracked())>"Export…"</button></div>
+    <button class="primary" disabled=move ||ui.busy.get()||ui.preview_busy.get() on:click=move |_|ui.persist(Some(format.get_untracked()),bom.get_untracked(),crlf.get_untracked())>"Export…"</button></div>
     <div class="button-row"><label class="check"><input type="checkbox" on:change=move |e|bom.set(event_target_checked(&e))/><span>"UTF-8 BOM"</span></label><label class="check"><input type="checkbox" on:change=move |e|crlf.set(event_target_checked(&e))/><span>"CRLF line endings"</span></label></div>
     <p class="hint">"Export uses a native save dialog and confirms existing-file replacement. Unsupported formats return the backend error."</p></div>}
 }

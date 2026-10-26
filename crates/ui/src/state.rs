@@ -361,7 +361,10 @@ impl Ui {
         let Some(project) = self.project.get_untracked() else {
             return;
         };
-        if self.closing.get_untracked() || self.busy.get_untracked() {
+        if self.closing.get_untracked()
+            || self.busy.get_untracked()
+            || self.preview_busy.get_untracked()
+        {
             return;
         }
         if self.draft_dirty.get_untracked() {

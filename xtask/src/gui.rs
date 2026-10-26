@@ -416,6 +416,7 @@ pub fn smoke(gui: &Path, fixtures: &Path, data: &Path, output: &Path) -> Result<
                 &json!({"draft":draft,"applied":dirty,"shortcut_mutation_blocked":true}),
             )?,
         )?;
+        driver.wait("return document.querySelector('[data-testid=e2e-save-edits]')?.disabled===false && document.querySelector('.preview-shell')?.getAttribute('aria-busy')!=='true';", 15)?;
         driver.click("[data-testid=e2e-save-edits]")?;
         driver.wait("return Array.from(document.querySelectorAll('[role=status]')).some(e=>e.textContent.includes('Saved ui-en.srt'));", 15)?;
         let exported = std::fs::read_to_string(fixtures.join("ui-en.srt"))?;

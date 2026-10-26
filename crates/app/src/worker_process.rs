@@ -12,6 +12,7 @@ pub(crate) struct Process {
     #[cfg(windows)]
     job: Option<super::windows::Job>,
     reaped: bool,
+    tree_signalled: bool,
 }
 
 impl Process {
@@ -33,6 +34,7 @@ impl Process {
             #[cfg(windows)]
             job: None,
             reaped: false,
+            tree_signalled: false,
         };
         #[cfg(windows)]
         {
@@ -89,6 +91,9 @@ impl Process {
     }
 
     pub(crate) fn signal_tree(&mut self) -> Result<()> {
+        if self.tree_signalled {
+            return Ok(());
+        }
         #[cfg(windows)]
         if let Some(job) = &self.job {
             job.terminate()?;
@@ -106,6 +111,7 @@ impl Process {
                 }
             }
         }
+        self.tree_signalled = true;
         Ok(())
     }
 

@@ -104,10 +104,10 @@ pub fn Preview(ui: Ui) -> impl IntoView {
             <Show when=move ||ui.preview_busy.get()><span class="preview-loading" role="status">"Decoding source frame…"</span></Show>
         </div>
         <div class="scrubber">
-            <button title="Previous 100 milliseconds" disabled=move ||ui.source.with(Option::is_none) on:click=move |_|ui.seek(ui.time.get_untracked().saturating_sub(100))>"−100 ms"</button>
+            <button title="Previous 100 milliseconds" disabled=move ||ui.busy.get()||ui.closing.get()||ui.source.with(Option::is_none) on:click=move |_|ui.seek(ui.time.get_untracked().saturating_sub(100))>"−100 ms"</button>
             <input aria-label="Preview position in milliseconds" type="range" min="0" max=move ||ui.source.with(|s|s.as_ref().and_then(|s|s.media.duration_ms).unwrap_or(60_000).to_string()) step="1" prop:value=move ||ui.time.get().to_string()
-                disabled=move ||ui.source.with(Option::is_none) on:input=move |e|if let Ok(t)=event_target_value(&e).parse(){ui.time.set(t);} on:change=move |_|ui.seek(ui.time.get_untracked())/>
-            <button title="Next 100 milliseconds" disabled=move ||ui.source.with(Option::is_none) on:click=move |_|ui.seek(ui.time.get_untracked().saturating_add(100))>"+100 ms"</button>
+                disabled=move ||ui.busy.get()||ui.closing.get()||ui.source.with(Option::is_none) on:input=move |e|if let Ok(t)=event_target_value(&e).parse(){ui.time.set(t);} on:change=move |_|ui.seek(ui.time.get_untracked())/>
+            <button title="Next 100 milliseconds" disabled=move ||ui.busy.get()||ui.closing.get()||ui.source.with(Option::is_none) on:click=move |_|ui.seek(ui.time.get_untracked().saturating_add(100))>"+100 ms"</button>
             <output class="mono">{move ||helpers::time_label(ui.time.get())}</output>
         </div>
         <label class="check draw-mode"><input type="checkbox" prop:checked=move ||exclusion.get() on:change=move |e|exclusion.set(event_target_checked(&e))/><span>"Draw exclusion instead of subtitle region"</span></label>
