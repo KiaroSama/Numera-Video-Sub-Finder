@@ -346,7 +346,7 @@ fn ready(listener: &TcpListener, tree: &mut Tree, token: &[u8]) -> Result<()> {
                 let role = identity[0];
                 let pid = u32::from_le_bytes(identity[1..5].try_into()?);
                 let ready_utc_ms = i64::from_le_bytes(identity[5..13].try_into()?);
-                if ![b'O', b'W', b'D'].contains(&role)
+                if !b"OWD".contains(&role)
                     || identity[13..] != *token
                     || ready_utc_ms <= 0
                     || pid <= 1

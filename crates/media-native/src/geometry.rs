@@ -123,7 +123,7 @@ pub fn display_size(width: u32, height: u32, sar: Rational) -> Result<(u32, u32)
     } else {
         (u64::from(width) * num as u64 + den as u64 / 2) / den as u64
     };
-    if scaled == 0 || scaled > u64::from(i32::MAX) || scaled * u64::from(height) > MAX_PIXELS {
+    if scaled == 0 || scaled > i32::MAX as u64 || scaled * u64::from(height) > MAX_PIXELS {
         return Err(fail("Display aspect ratio exceeds supported pixel budget"));
     }
     Ok((scaled as u32, height))
