@@ -120,6 +120,11 @@ pub(crate) fn run_proposal(
         .write(true)
         .create_new(true)
         .open(directory.join("model-output.txt"))?;
+    let mut diagnostic = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create_new(true)
+        .open(directory.join("model-diagnostic.txt"))?;
     let mut command = Command::new(runtime);
     command
         .args(["-m"])
@@ -151,7 +156,7 @@ pub(crate) fn run_proposal(
         ])
         .stdin(Stdio::null())
         .stdout(response.try_clone()?)
-        .stderr(Stdio::null());
+        .stderr(diagnostic.try_clone()?);
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -164,8 +169,10 @@ pub(crate) fn run_proposal(
     let mut progress = Instant::now();
     loop {
         let now = response.metadata()?.len();
-        if now > 65536 {
-            return Err(fail("Visual worker response exceeds 64KiB"));
+        if now > 65536 || diagnostic.metadata()?.len() > 1024 * 1024 {
+            return Err(fail(
+                "Visual worker response or diagnostic exceeds its byte bound",
+            ));
         }
         if now != length {
             length = now;
@@ -173,7 +180,13 @@ pub(crate) fn run_proposal(
         }
         if let Some(status) = child.try_wait()? {
             if !status.success() {
-                return Err(fail("Local visual worker failed; original OCR retained"));
+                diagnostic.seek(SeekFrom::Start(0))?;
+                let mut bytes = Vec::new();
+                diagnostic.take(1024 * 1024 + 1).read_to_end(&mut bytes)?;
+                let reason = diagnostic_reason(&String::from_utf8_lossy(&bytes));
+                return Err(fail(format!(
+                    "Local visual worker failed ({status}): {reason}; original OCR retained"
+                )));
             }
             break;
         }
@@ -190,6 +203,64 @@ pub(crate) fn run_proposal(
     let mut text = String::new();
     response.take(65537).read_to_string(&mut text)?;
     validate_proposal(&text)
+}
+
+fn diagnostic_reason(text: &str) -> &'static str {
+    let text = text.to_ascii_lowercase();
+    if text
+        .lines()
+        .any(|line| line.contains("tensor '") && line.contains("not found"))
+    {
+        return "required model tensor missing";
+    }
+    for (needle, reason) in [
+        ("invalid argument", "runtime argument rejected"),
+        (
+            "unknown model architecture",
+            "unsupported model architecture",
+        ),
+        (
+            "unsupported model architecture",
+            "unsupported model architecture",
+        ),
+        ("unknown pre-tokenizer", "unsupported model tokenizer"),
+        ("unable to find tensor", "required model tensor missing"),
+        ("failed to find tensor", "required model tensor missing"),
+        (
+            "failed to load vision model",
+            "vision initialization failed",
+        ),
+        (
+            "model does not have chat template",
+            "model chat template missing",
+        ),
+        (
+            "unsupported chat template",
+            "model chat template unsupported",
+        ),
+        (
+            "this custom template is not supported",
+            "model chat template unsupported",
+        ),
+        ("failed to encode", "vision encoding failed"),
+        ("unable to eval", "multimodal evaluation failed"),
+        ("failed to decode", "token decoding failed"),
+        ("failed to allocate", "native memory allocation failed"),
+        (
+            "failed to initialize the context",
+            "model context initialization failed",
+        ),
+        (
+            "failed to load clip model",
+            "vision model initialization failed",
+        ),
+        ("failed to load model", "model initialization failed"),
+    ] {
+        if text.contains(needle) {
+            return reason;
+        }
+    }
+    "unclassified native runtime failure"
 }
 
 fn constant_crop(crop: &image::RgbImage) -> bool {
@@ -246,6 +317,32 @@ pub fn validate_proposal(text: &str) -> Result<Proposal> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn runtime_diagnostic_is_a_fixed_category_never_raw_model_text_or_paths() {
+        assert_eq!(
+            super::diagnostic_reason("error: invalid argument: /private/user"),
+            "runtime argument rejected"
+        );
+        assert_eq!(
+            super::diagnostic_reason("unknown model architecture: private-model"),
+            "unsupported model architecture"
+        );
+        assert_eq!(
+            super::diagnostic_reason("failed to load model: tensor 'private' not found"),
+            "required model tensor missing"
+        );
+        assert_eq!(
+            super::diagnostic_reason(
+                "failed to load model: unsupported model architecture private"
+            ),
+            "unsupported model architecture"
+        );
+        assert_eq!(
+            super::diagnostic_reason("arbitrary private text"),
+            "unclassified native runtime failure"
+        );
+    }
+
     #[test]
     fn constant_colored_crops_are_blank_but_spatial_text_is_not() {
         let mut crop = image::RgbImage::from_pixel(4, 2, image::Rgb([23, 32, 42]));
