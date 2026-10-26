@@ -23,6 +23,10 @@ pub enum Operation {
     Suggest {
         language: String,
     },
+    Visual {
+        at_ms: u64,
+        region: Rect,
+    },
     Recognize {
         at_ms: u64,
         region: Rect,
@@ -48,6 +52,7 @@ pub enum Response {
     Preview { width: u32, height: u32, bytes: u64 },
     Suggest(Vec<Rect>),
     Recognize(Recognition),
+    Visual(crate::assistant::Proposal),
     Failed(String),
 }
 
@@ -57,6 +62,10 @@ impl Operation {
             Self::Probe => (None, None),
             Self::Preview { at_ms } => (Some(*at_ms), None),
             Self::Suggest { language } => (None, Some(language)),
+            Self::Visual { at_ms, region } => {
+                region.validate()?;
+                (Some(*at_ms), None)
+            }
             Self::Recognize {
                 at_ms,
                 region,
@@ -117,6 +126,19 @@ impl Operation {
                         .confidence
                         .is_none_or(|c| c.is_finite() && (0.0..=1.0).contains(&c)) =>
             {
+                Ok(())
+            }
+            (Self::Visual { .. }, Response::Visual(proposal))
+                if proposal.requires_review
+                    && proposal.provider == "local-visual-cpu"
+                    && proposal.warning.len() <= 4096
+                    && proposal.unreadable == proposal.text.is_none() =>
+            {
+                let checked =
+                    crate::assistant::validate_proposal(proposal.text.as_deref().unwrap_or(""))?;
+                if checked.text != proposal.text || checked.unreadable != proposal.unreadable {
+                    return Err(fail("Invalid visual worker proposal"));
+                }
                 Ok(())
             }
             _ => Err(fail(
@@ -181,14 +203,21 @@ pub fn supervise(
         .stdout(Stdio::null());
     let mut child = process::Process::spawn(&mut command)?;
     log.event("INFO", "NATIVE", &format!("Spawned pid={}", child.id()));
-    let deadline = Instant::now() + Duration::from_secs(60);
+    let wall_seconds = if matches!(request.operation, Operation::Visual { .. }) {
+        120
+    } else {
+        60
+    };
+    let deadline = Instant::now() + Duration::from_secs(wall_seconds);
     let observed = (|| -> Result<()> {
         loop {
             if cancel.load(Ordering::Acquire) {
                 return Err(AppError::Cancelled);
             }
             if Instant::now() >= deadline {
-                return Err(fail("Native request exceeded60s wall deadline"));
+                return Err(fail(format!(
+                    "Native request exceeded{wall_seconds}s wall deadline"
+                )));
             }
             if child.exited()? {
                 return Ok(());
@@ -303,6 +332,13 @@ fn execute(paths: &Paths, request: &Request, directory: &Path) -> Result<Respons
         Operation::Suggest { language } => {
             Response::Suggest(crate::regions::suggest(paths, &request.input, language)?)
         }
+        Operation::Visual { at_ms, region } => Response::Visual(crate::assistant::run_proposal(
+            paths,
+            &request.input,
+            *at_ms,
+            *region,
+            directory,
+        )?),
         Operation::Recognize {
             at_ms,
             region,
