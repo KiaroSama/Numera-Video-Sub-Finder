@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     io::{Read, Seek, SeekFrom},
     path::{Path, PathBuf},
-    process::{Child, Command, Stdio},
+    process::{Command, Stdio},
     sync::atomic::{AtomicBool, Ordering},
     time::{Duration, Instant},
 };
@@ -77,6 +77,25 @@ pub fn propose(
     if cancel.load(Ordering::Acquire) {
         return Err(crate::AppError::Cancelled);
     }
+    let (response, _) = crate::native_request::supervise(
+        paths,
+        input,
+        crate::native_request::Operation::Visual { at_ms, region },
+        cancel,
+    )?;
+    match response {
+        crate::native_request::Response::Visual(proposal) => Ok(proposal),
+        _ => Err(fail("Unexpected visual worker response")),
+    }
+}
+
+pub(crate) fn run_proposal(
+    paths: &Paths,
+    input: &Path,
+    at_ms: u64,
+    region: Rect,
+    directory: &Path,
+) -> Result<Proposal> {
     let frame = media::MediaRuntime::load(paths)?.preview(input, at_ms)?;
     let (x, y, w, h) = region.pixels(frame.width(), frame.height())?;
     if u64::from(w) * u64::from(h) > 1_003_520 {
@@ -85,17 +104,7 @@ pub fn propose(
         ));
     }
     let crop = image::imageops::crop_imm(&frame, x, y, w, h).to_image();
-    let min = crop
-        .pixels()
-        .map(|p| p.0.iter().copied().min().unwrap_or(0))
-        .min()
-        .unwrap_or(0);
-    let max = crop
-        .pixels()
-        .map(|p| p.0.iter().copied().max().unwrap_or(0))
-        .max()
-        .unwrap_or(0);
-    if max.saturating_sub(min) < 4 {
+    if constant_crop(&crop) {
         return Ok(unreadable("Blank/constant crop; no model invocation"));
     }
     let files = verify(paths)?;
@@ -104,10 +113,13 @@ pub fn propose(
     } else {
         "llama-mtmd-cli"
     })?;
-    let scratch = tempfile::tempdir_in(&paths.cache)?;
-    let image = scratch.path().join("crop.png");
+    let image = directory.join("crop.png");
     crop.save(&image).map_err(|e| fail(e.to_string()))?;
-    let mut response = tempfile::NamedTempFile::new_in(scratch.path())?;
+    let mut response = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create_new(true)
+        .open(directory.join("model-output.txt"))?;
     let mut command = Command::new(runtime);
     command
         .args(["-m"])
@@ -140,27 +152,20 @@ pub fn propose(
             "--simple-io",
         ])
         .stdin(Stdio::null())
-        .stdout(response.as_file().try_clone()?)
+        .stdout(response.try_clone()?)
         .stderr(Stdio::null());
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
         command.creation_flags(0x08000000);
     }
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        command.process_group(0);
-    }
-    let mut owned = Owned(command.spawn()?);
+    // Inherit the native-request group/job so parent cancellation owns the entire tree.
+    let mut child = command.spawn()?;
     let start = Instant::now();
     let mut length = 0;
     let mut progress = Instant::now();
     loop {
-        if cancel.load(Ordering::Acquire) {
-            return Err(crate::AppError::Cancelled);
-        }
-        let now = response.as_file().metadata()?.len();
+        let now = response.metadata()?.len();
         if now > 65536 {
             return Err(fail("Visual worker response exceeds 64KiB"));
         }
@@ -168,7 +173,7 @@ pub fn propose(
             length = now;
             progress = Instant::now();
         }
-        if let Some(status) = owned.0.try_wait()? {
+        if let Some(status) = child.try_wait()? {
             if !status.success() {
                 return Err(fail("Local visual worker failed; original OCR retained"));
             }
@@ -183,13 +188,22 @@ pub fn propose(
         }
         std::thread::park_timeout(Duration::from_millis(20));
     }
-    response.as_file_mut().seek(SeekFrom::Start(0))?;
+    response.seek(SeekFrom::Start(0))?;
     let mut text = String::new();
-    response
-        .as_file_mut()
-        .take(65537)
-        .read_to_string(&mut text)?;
+    response.take(65537).read_to_string(&mut text)?;
     validate_proposal(&text)
+}
+
+fn constant_crop(crop: &image::RgbImage) -> bool {
+    let mut min = [255u8; 3];
+    let mut max = [0u8; 3];
+    for pixel in crop.pixels() {
+        for channel in 0..3 {
+            min[channel] = min[channel].min(pixel[channel]);
+            max[channel] = max[channel].max(pixel[channel]);
+        }
+    }
+    (0..3).all(|channel| max[channel].saturating_sub(min[channel]) < 4)
 }
 
 fn unreadable(warning: &str) -> Proposal {
@@ -231,31 +245,14 @@ pub fn validate_proposal(text: &str) -> Result<Proposal> {
     }
     Ok(Proposal{text:Some(text.into()),unreadable:false,requires_review:true,provider:"local-visual-cpu".into(),warning:"Unqualified crop transcription proposal only; CPU fallback profile, original text/timing unchanged until explicit review".into()})
 }
-struct Owned(Child);
-impl Drop for Owned {
-    fn drop(&mut self) {
-        if !matches!(self.0.try_wait(), Ok(Some(_))) {
-            let pid = self.0.id().to_string();
-            #[cfg(windows)]
-            {
-                use std::os::windows::process::CommandExt;
-                let _ = Command::new("taskkill")
-                    .args(["/PID", &pid, "/T", "/F"])
-                    .creation_flags(0x08000000)
-                    .stdout(Stdio::null())
-                    .stderr(Stdio::null())
-                    .status();
-            }
-            #[cfg(unix)]
-            {
-                let _ = Command::new("kill")
-                    .args(["-KILL", "--", &format!("-{pid}")])
-                    .stdout(Stdio::null())
-                    .stderr(Stdio::null())
-                    .status();
-            }
-            let _ = self.0.kill();
-            let _ = self.0.wait();
-        }
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn constant_colored_crops_are_blank_but_spatial_text_is_not() {
+        let mut crop = image::RgbImage::from_pixel(4, 2, image::Rgb([23, 32, 42]));
+        assert!(super::constant_crop(&crop));
+        crop.put_pixel(1, 1, image::Rgb([230, 230, 230]));
+        assert!(!super::constant_crop(&crop));
     }
 }

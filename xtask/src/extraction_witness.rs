@@ -165,6 +165,23 @@ pub fn verify(input: &Path, data: &Path, root: &Path) -> Result<()> {
     if !unreadable.to_string().contains("Cue crop is unreadable") {
         return Err(format!("Blank-crop witness failed before recognition: {unreadable}").into());
     }
+    let visual = nvsf_app::assistant::propose(
+        &paths,
+        input,
+        500,
+        Rect::new(0.0, 0.0, 1.0, 0.1)?,
+        true,
+        &std::sync::atomic::AtomicBool::new(false),
+    )?;
+    if !visual.unreadable
+        || visual.text.is_some()
+        || !visual.requires_review
+        || visual.warning != "Blank/constant crop; no model invocation"
+    {
+        return Err(
+            "Isolated blank visual crop did not preserve review-only unreadable result".into(),
+        );
+    }
     for spec in nvsf_app::models::specs()?
         .into_iter()
         .filter(|spec| spec.id != "ja-specialist")
