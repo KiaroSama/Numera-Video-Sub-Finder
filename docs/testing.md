@@ -4,7 +4,9 @@ All application compilation and execution checks run in GitHub Actions on the ex
 
 ## Current authored completion contracts
 
-Pending hosted execution: native media tests cover eight orthogonal matrix transforms, square-pixel SAR, stride/size rejection, changing dimensions, PQ/HLG conversion and source-PTS discontinuities/duration. An app integration writes a tiny lossless anamorphic Y4M source and verifies actual staged native probe/decode/seek/stop/reopen behavior. These synthetic inputs do not establish real-corpus OCR quality or arbitrary affine support.
+At exact `5d7220e`, all six native rows and both aggregates pass in run40273295294. Linux x64 records195 suite cases,13 GUI behaviors and five process faults with zero failures/skips; measured coverage82.30% and critical91.26% retain the original floors. The contracts below are verified within that hosted scope, not positive optional-model, real-corpus or physical-hardware qualification. Earlier pending descriptions refer to source-authoring checkpoints.
+
+Native media tests cover eight orthogonal matrix transforms, square-pixel SAR, stride/size rejection, changing dimensions, PQ/HLG conversion and source-PTS discontinuities/duration. An app integration writes a tiny lossless anamorphic Y4M source and verifies actual staged native probe/decode/seek/stop/reopen behavior. These synthetic inputs do not establish real-corpus OCR quality or arbitrary affine support.
 
 Shared maintenance tests use actual bounded loopback HTTP with tiny literal payloads for ranges, ignored ranges, malformed headers, nonpayload statuses, header/body stalls, disconnects, cancellation and late EOF. Production HTTPS/signature/consent remains unchanged. The fixture bounds acceptance as well as connected reads; an event releases stalled responses during cleanup. Existing signed local-payload repair acceptance remains separate from HTTP/TLS and native installer qualification.
 

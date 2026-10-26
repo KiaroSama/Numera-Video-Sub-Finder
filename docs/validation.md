@@ -2,7 +2,13 @@
 
 Updated: 2026-10-26. **NOT a release acceptance report.** Hosted observations below refer to the exact named SHA; corrective source is not a passing result.
 
-## Corrective source — verification pending
+## Current verified integration
+
+[Verification on `5d7220e8026822ad0ec2e89abe7e51e690fcf49b`](https://github.com/KiaroSama/Numera-Video-Sub-Finder/actions/runs/40273295294) completes **all14 jobs successfully**, including all six native targets and both aggregate gates. The exact tested commit was fast-forwarded into main; the merged temporary branch was deleted locally and remotely. Linux x64 reports6503/7902 measured lines (82.30%), critical91.26%,76 excluded lines/3 hits,195 suite cases,13 GUI behaviors, five production observations and five process faults, with zero failures/skips. Selected report members were inspected with bounded HTTP ranges and ZIP CRCs, not a local whole-archive hash. `full_product_qualified=false` remains explicit.
+
+This verifies the implemented native-request/visual ownership, media geometry/color/timing, HTTP transfer and edit-stress regressions within the hosted scenarios. The preview/save ordering correction passes Linux GUI execution, and both macOS process-fault gates pass after idempotent successful termination. Positive optional GGUF inference, independently annotated real en/fa/ja quality, physical accelerators, native signing/install/update/uninstall qualification and the broader release requirements remain open. No release or signed final application build is claimed.
+
+## Integration diagnostic history
 
 [The first integrated run on `de034a6af77666f039bdf656fb8252ad1f395258`](https://github.com/KiaroSama/Numera-Video-Sub-Finder/actions/runs/40241862816) completed with failure on all six native rows during static analysis. The shared mutation, Miri, dependency, inventory and both CodeQL jobs succeeded. Actual diagnostics identify the invalid `u64::from(i32::MAX)` conversion in display geometry and Clippy's byte-character-slice diagnostic in the process-fault harness. The pending correction uses the positive constant cast and equivalent byte string, without weakening checks. The same reviewed batch updates Tauri2.12.5/build2.7.4, CLI2.12.4 and Tokio1.54.1 with exact lock/archive identities. Formatting and metadata are not runtime evidence; native tests and the corrected dependency set still await Actions.
 
