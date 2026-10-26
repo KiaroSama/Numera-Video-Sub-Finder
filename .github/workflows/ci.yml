@@ -128,9 +128,9 @@ jobs:
             $stage = Join-Path $env:GITHUB_WORKSPACE ('.ci-work/tools/tauri-stage-' + [Guid]::NewGuid().ToString('N'))
             New-Item -ItemType Directory -Path $stage -ErrorAction Stop | Out-Null
             $archive = Join-Path $stage 'tauri.zip'
-            ./scripts/ci/guard.ps1 -Name tauri-download -WallSeconds 210 -IdleSeconds 60 -Executable curl -Arguments @('--fail','--location','--proto','=https','--proto-redir','=https','--connect-timeout','30','--max-time','180','--output',$archive,'https://github.com/tauri-apps/tauri/releases/download/tauri-cli-v2.12.3/cargo-tauri-x86_64-apple-darwin.zip')
+            ./scripts/ci/guard.ps1 -Name tauri-download -WallSeconds 210 -IdleSeconds 60 -Executable curl -Arguments @('--fail','--location','--proto','=https','--proto-redir','=https','--connect-timeout','30','--max-time','180','--output',$archive,'https://github.com/tauri-apps/tauri/releases/download/tauri-cli-v2.12.4/cargo-tauri-x86_64-apple-darwin.zip')
             if ($LASTEXITCODE -ne 0) { throw 'Official Intel Tauri CLI download failed' }
-            if ((Get-Item -LiteralPath $archive).Length -ne 8403582 -or (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant() -ne '333987e244ef46152c107d3e922313fd09cfd8e43cd851512609c2264348fc9b') { throw 'Official Tauri CLI archive identity mismatch' }
+            if ((Get-Item -LiteralPath $archive).Length -ne 8391002 -or (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant() -ne '164d184c0e50800dcae7bb31f0815066ebd27efc3e3bb73117974bcd2e982192') { throw 'Official Tauri CLI archive identity mismatch' }
             $zip = [IO.Compression.ZipFile]::OpenRead($archive)
             try {
               $expected = @('LICENSE-APACHE-2.0','LICENSE-MIT','README.md','cargo-tauri')
@@ -150,11 +150,11 @@ jobs:
             ./scripts/ci/guard.ps1 -Name tauri-mode -WallSeconds 15 -IdleSeconds 5 -Executable chmod -Arguments @('755',$bin)
             if ($LASTEXITCODE -ne 0) { throw 'Tauri CLI executable mode setup failed' }
           } else {
-            ./scripts/ci/guard.ps1 -Name tauri-install -WallSeconds 1200 -IdleSeconds 180 -Executable cargo -Arguments @('install','tauri-cli','--version','2.12.3','--locked','--root','.ci-work/tools')
+            ./scripts/ci/guard.ps1 -Name tauri-install -WallSeconds 1200 -IdleSeconds 180 -Executable cargo -Arguments @('install','tauri-cli','--version','2.12.4','--locked','--root','.ci-work/tools')
             if ($LASTEXITCODE -ne 0) { throw 'Tauri CLI installation failed' }
           }
           ./scripts/ci/guard.ps1 -Name tauri-version -WallSeconds 15 -IdleSeconds 5 -Executable "$env:GITHUB_WORKSPACE/.ci-work/tools/bin/cargo-tauri$(if ($IsWindows) { '.exe' } else { '' })" -Arguments @('--version') -CaptureStdoutPath "$env:GITHUB_WORKSPACE/.ci-work/tools/tauri-version.txt"
-          if ($LASTEXITCODE -ne 0 -or [IO.File]::ReadAllText("$env:GITHUB_WORKSPACE/.ci-work/tools/tauri-version.txt",[Text.Encoding]::UTF8).Trim() -ne 'tauri-cli 2.12.3') { throw 'Installed Tauri CLI version mismatch' }
+          if ($LASTEXITCODE -ne 0 -or [IO.File]::ReadAllText("$env:GITHUB_WORKSPACE/.ci-work/tools/tauri-version.txt",[Text.Encoding]::UTF8).Trim() -ne 'tauri-cli 2.12.4') { throw 'Installed Tauri CLI version mismatch' }
           if ($IsMacOS -and '${{ matrix.arch }}' -eq 'x64') { Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction Stop }
           "$env:GITHUB_WORKSPACE/.ci-work/tools/bin" >> $env:GITHUB_PATH
           $env:PATH = "$env:GITHUB_WORKSPACE/.ci-work/tools/bin$([IO.Path]::PathSeparator)$env:PATH"
