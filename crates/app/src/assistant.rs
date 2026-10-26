@@ -148,8 +148,6 @@ pub(crate) fn run_proposal(
             "-ngl",
             "0",
             "--no-mmproj-offload",
-            "--no-display-prompt",
-            "--simple-io",
         ])
         .stdin(Stdio::null())
         .stdout(response.try_clone()?)
