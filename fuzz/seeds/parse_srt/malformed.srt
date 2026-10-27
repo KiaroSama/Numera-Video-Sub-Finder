@@ -1,0 +1,8 @@
+0
+00:00:00,000 -> 00:00:00,000
+Rejected index and separator
+
+2
+999999999999999999999:99:99,999 --> -1:00:00,000
+Overflow and inverted time
+
