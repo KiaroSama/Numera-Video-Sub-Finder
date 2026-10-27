@@ -15,7 +15,7 @@ Application-owned code is GPL-3.0-or-later; see LICENSE. Native dependencies, mo
 | Tesseract language packs | ci/tessdata.json immutable tessdata_best revision | Apache-2.0 |
 | Japanese v3 ONNX specialist | ci/models.json immutable conversion/base revisions | Declared Apache-2.0; separate quality/native admission |
 | PaddleOCR-VL1.6 GGUF/projector | ci/assistant-models.json immutable official Hub revision | Declared Apache-2.0; opt-in candidate, no benchmark claim |
-| llama.cpp native helper | stable v0.6.0 peeled commit d81235049384534c167caea52b85a694f6103d14 | MIT and preserved vendor notices; experimental CLI not release-qualified |
+| llama.cpp native helper | stable v0.6.0 peeled commit d81235049384534c167caea52b85a694f6103d14 plus exact15-line ARM BF16 backport from open PR30432/head1e2669d64def085bde50d8fa13db065281aa2eb1 | MIT and preserved vendor notices; stored patch/provenance included with native notices; unmerged backport and experimental CLI not release-qualified |
 | tauri-plugin-webdriver 0.2.3 | Optional test-only upstream commit 50e7509073ca47dbf2f42a965d8161c198b96ac3, Windows COM compatibility correction | MIT; absent from production application profiles |
 | Noto Sans / Arabic / Devanagari / KR fixture fonts | google/fonts commit 1d0e46c7933245c8180fe83e47917961c913bbdb; exact bytes in xtask/src/multilingual.rs | SIL Open Font License 1.1; unmodified font bytes and original per-font copyright/license retained in hosted fixture resources, not application packages |
 | Official project logo | Supplied by project owner | Owner-authorized project branding; no unrelated proprietary logo copied |

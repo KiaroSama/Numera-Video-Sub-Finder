@@ -1,0 +1,52 @@
+From upstream PR https://github.com/ggml-org/llama.cpp/pull/30432
+Head: 1e2669d64def085bde50d8fa13db065281aa2eb1 (open, unmerged when reviewed 2026-10-27)
+Backport: only the exact 15-line ggml/src/ggml-cpu/vec.cpp addition.
+Base: d81235049384534c167caea52b85a694f6103d14
+Preimage SHA256: 31e43ec66a1e2920a549dd2f71e6ce474e68f2fc298c4d2942404ca327e763d1
+Postimage SHA256: ad14c129561bb7d9a0e5e0dbb843158760513bdbd900cdadc39490fd29eea21c
+
+MIT License
+Copyright (c) 2023-2026 The ggml authors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+--- a/ggml/src/ggml-cpu/vec.cpp
++++ b/ggml/src/ggml-cpu/vec.cpp
+@@ -195,6 +195,21 @@
+     sumf += (ggml_float)_mm_cvtss_f32(g);
+
+ #undef LOAD
++#elif defined(__ARM_NEON) && defined(__aarch64__)
++    float32x4_t sum0 = vdupq_n_f32(0.0f);
++    float32x4_t sum1 = vdupq_n_f32(0.0f);
++    for (; i + 8 <= n; i += 8) {
++        const uint16x8_t vx = vld1q_u16((const uint16_t *) (x + i));
++        const uint16x8_t vy = vld1q_u16((const uint16_t *) (y + i));
++        const float32x4_t x0 = vreinterpretq_f32_u32(vshll_n_u16(vget_low_u16(vx), 16));
++        const float32x4_t x1 = vreinterpretq_f32_u32(vshll_n_u16(vget_high_u16(vx), 16));
++        const float32x4_t y0 = vreinterpretq_f32_u32(vshll_n_u16(vget_low_u16(vy), 16));
++        const float32x4_t y1 = vreinterpretq_f32_u32(vshll_n_u16(vget_high_u16(vy), 16));
++        sum0 = vfmaq_f32(sum0, x0, y0);
++        sum1 = vfmaq_f32(sum1, x1, y1);
++    }
++    sumf += (ggml_float) vaddvq_f32(vaddq_f32(sum0, sum1));
++
+ #elif defined(__riscv_v_intrinsic) && defined(__riscv_zvfbfwma)
+     size_t vl = __riscv_vsetvlmax_e32m4();
+
