@@ -104,8 +104,28 @@ try {
     foreach ($directory in @($targetDir, (Join-Path $targetDir 'x86_64-unknown-linux-gnu'), (Split-Path -Parent $binary))) {
         if ((Get-Item -Force -LiteralPath $directory).LinkType) { throw 'Fuzz executable directory must not be a link.' }
     }
-    if (-not (Test-Path -LiteralPath $binary -PathType Leaf) -or (Get-Item -Force -LiteralPath $binary).LinkType) { throw 'Missing actual instrumented SRT fuzz executable.' }
+    if (-not (Test-Path -LiteralPath $binary -PathType Leaf)) { throw 'Missing actual instrumented SRT fuzz executable.' }
+    $binaryItem = Get-Item -Force -LiteralPath $binary
+    if (($binaryItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -or ($binaryItem.LinkType -and $binaryItem.LinkType -ne 'HardLink')) { throw 'Fuzz executable must be a regular file, not a symbolic link.' }
     $report.binary_sha256 = Hash-File $binary
+    if ($binaryItem.LinkType -eq 'HardLink') {
+        # This pinned Cargo uplifts Linux binaries with hard links from its new build layout.
+        $packageBuild = Join-Path (Split-Path -Parent $binary) 'build/nvsf-parser-fuzz'
+        foreach ($directory in @((Split-Path -Parent $packageBuild), $packageBuild)) {
+            $item = Get-Item -Force -LiteralPath $directory
+            if (-not $item.PSIsContainer -or $item.LinkType) { throw 'Fuzz compiler artifact directory must be an unlinked directory.' }
+        }
+        $units = @(Get-ChildItem -Force -LiteralPath $packageBuild -Directory)
+        if ($units.Count -ne 1 -or $units[0].Name -cnotmatch '^[0-9a-f]{16}$' -or $units[0].LinkType) { throw 'Fuzz compiler artifact requires one exact regular build unit.' }
+        $out = Get-Item -Force -LiteralPath (Join-Path $units[0].FullName 'out')
+        if (-not $out.PSIsContainer -or $out.LinkType) { throw 'Fuzz compiler output directory must not be a link.' }
+        $compiled = Get-Item -Force -LiteralPath (Join-Path $out.FullName 'parse_srt')
+        if ($compiled.PSIsContainer -or ($compiled.Attributes -band [IO.FileAttributes]::ReparsePoint) -or ($compiled.LinkType -and $compiled.LinkType -ne 'HardLink') -or (Hash-File $compiled.FullName) -ne $report.binary_sha256) {
+            throw 'Fuzz hard-linked executable differs from its exact regular compiler artifact.'
+        }
+        $report.compiler_artifact = [IO.Path]::GetRelativePath($targetDir, $compiled.FullName)
+    }
+    $report.binary_link_type = $binaryItem.LinkType
     Write-FuzzLog 'INFO' 'Instrumented parser built; replaying maintained seeds'
     $common = @('-max_len=4096','-timeout=2','-rss_limit_mb=512','-malloc_limit_mb=64',('-artifact_prefix=' + (Join-Path $work 'artifacts') + '/'),'-print_final_stats=1')
     Invoke-Guard 'fuzz-seed-replay' 30 15 $binary ($common + @('-runs=0',(Join-Path $work 'corpus')))

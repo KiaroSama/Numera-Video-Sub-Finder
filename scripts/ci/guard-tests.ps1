@@ -142,6 +142,13 @@ exit 0
             [IO.File]::WriteAllText((Join-Path $directory "stage-$stage.log"), 'owned baseline', $utf8)
         }
     }
+    # Immediate non-log entries must consume sampler pages without becoming progress.
+    [IO.Directory]::CreateDirectory((Join-Path $progress 'ffmpeg')) | Out-Null
+    for ($entry = 0; $entry -lt 128; $entry++) {
+        foreach ($relative in @("unit-$entry.c", "ffmpeg/unit-$entry.c")) {
+            [IO.File]::WriteAllText((Join-Path $progress $relative), 'owned immediate source noise', $utf8)
+        }
+    }
     $quietCode = @'
 [IO.Directory]::CreateDirectory('buildlogs/ffmpeg/source/deep')|Out-Null
 for($i=0;$i -lt 1000;$i++) {
@@ -161,6 +168,9 @@ exit 0
 $deadline=[DateTime]::UtcNow.AddSeconds(12)
 while([DateTime]::UtcNow -lt $deadline) {
     [IO.File]::AppendAllText('buildlogs/ffmpeg/source/deep/noise.log',"source-not-build-progress`n",[Text.UTF8Encoding]::new($false))
+    foreach ($path in @('buildlogs/unit-0.c', 'buildlogs/ffmpeg/unit-0.c')) {
+        [IO.File]::AppendAllText($path,"immediate-not-log-progress`n",[Text.UTF8Encoding]::new($false))
+    }
     [Threading.Thread]::Sleep(20)
 }
 exit 0
