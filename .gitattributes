@@ -7,4 +7,5 @@
 *.traineddata binary
 fuzz/seeds/parse_srt/*.srt -diff
 fuzz/seeds/parse_srt/bom-crlf.srt -text
+fuzz/seeds/parse_srt/carriage-separator.srt -text
 ci/patches/*.patch -diff

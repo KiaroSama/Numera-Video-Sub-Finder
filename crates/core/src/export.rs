@@ -74,7 +74,12 @@ pub fn parse_srt(text: &str) -> Result<Vec<Cue>> {
     }
     let text = text.trim_start_matches('\u{feff}').replace("\r\n", "\n");
     let mut cues = Vec::new();
-    for block in text.trim().split("\n\n").filter(|b| !b.trim().is_empty()) {
+    for block in text
+        .trim_start()
+        .trim_end_matches('\n')
+        .split("\n\n")
+        .filter(|b| !b.trim().is_empty())
+    {
         let mut lines = block.lines();
         let index = lines
             .next()

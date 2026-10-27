@@ -198,7 +198,7 @@ fn boundary(
         Ok(status) => status,
         Err(payload) => {
             // A hostile panic payload's Drop can panic too; it must never unwind through C.
-            std::mem::forget(payload);
+            discard_panic_payload(payload);
             send_error(error, context, "Native media operation panicked");
             ERROR
         }

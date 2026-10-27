@@ -15,14 +15,18 @@ pub struct Cue {
     pub crop: Option<String>,
 }
 
+fn valid_cue_text(text: &str) -> bool {
+    if text.trim().is_empty() || text.len() > 65_536 || text.contains('\0') {
+        return false;
+    }
+    // SRT removes CRs; body separators and boundary newlines would create extra blocks.
+    let normalized = text.replace('\r', "");
+    !normalized.contains("\n\n") && !normalized.starts_with('\n') && !normalized.ends_with('\n')
+}
+
 impl Cue {
     pub fn new(id: u64, track: u32, start_ms: u64, end_ms: u64, text: String) -> Result<Self> {
-        if end_ms <= start_ms
-            || text.trim().is_empty()
-            || text.len() > 65_536
-            || text.contains('\0')
-            || text.contains("\n\n")
-        {
+        if end_ms <= start_ms || !valid_cue_text(&text) {
             return Err(Error::Invalid(
                 "cue needs nonempty bounded text and end > start".into(),
             ));
@@ -42,10 +46,7 @@ impl Cue {
     }
     pub fn validate(&self) -> Result<()> {
         if self.end_ms <= self.start_ms
-            || self.text.trim().is_empty()
-            || self.text.len() > 65_536
-            || self.text.contains('\0')
-            || self.text.contains("\n\n")
+            || !valid_cue_text(&self.text)
             || self.raw_text.len() > 65_536
             || self.raw_text.contains('\0')
             || self

@@ -95,6 +95,12 @@ pub fn validate(reports: &Path, source: &str) -> Result<()> {
             )?;
         }
     }
+    passed(
+        &read(&reports.join("linux-x64-media-sanitizer.json"))?,
+        source,
+        "linux-x64",
+        6,
+    )?;
     println!(
         "Six exact-source native package/runtime/GUI/suite reports passed; release qualification is a separate mandatory gate"
     );
