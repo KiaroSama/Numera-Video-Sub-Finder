@@ -485,16 +485,30 @@ foreach (`$name in @('PATH','INCLUDE','LIB','LIBPATH','VCINSTALLDIR','VCToolsIns
     $tagObject = Invoke-NativeCommand -Name 'llama-tag' -Executable 'git' -Arguments @('-C', $llamaSource, 'rev-parse', 'refs/tags/v0.6.0') -Capture
     $peeled = Invoke-NativeCommand -Name 'llama-commit' -Executable 'git' -Arguments @('-C', $llamaSource, 'rev-parse', 'refs/tags/v0.6.0^{}') -Capture
     if ($tagObject -ne $llamaTagObject -or $peeled -ne $llamaCommit) { throw 'Stable llama.cpp tag/peeled-source revision changed or mismatched.' }
+    Invoke-NativeCommand -Name 'llama-line-endings' -Executable 'git' -Arguments @('-C', $llamaSource, 'config', 'core.autocrlf', 'false')
     Invoke-NativeCommand -Name 'llama-checkout' -Executable 'git' -Arguments @('-C', $llamaSource, 'checkout', '--detach', $llamaCommit)
+    $llamaPatch = Join-Path $root 'ci/patches/llama-bf16-neon.patch'
+    $llamaPatchHash = 'df3a06e51cf1496f6cf19865f2137c4214693b19c191769c904babd3f47e4c9a'
+    $llamaVec = Join-Path $llamaSource 'ggml/src/ggml-cpu/vec.cpp'
+    if ((Get-FileHash -LiteralPath $llamaPatch -Algorithm SHA256).Hash.ToLowerInvariant() -ne $llamaPatchHash -or (Get-FileHash -LiteralPath $llamaVec -Algorithm SHA256).Hash.ToLowerInvariant() -ne '31e43ec66a1e2920a549dd2f71e6ce474e68f2fc298c4d2942404ca327e763d1') { throw 'Native BF16 patch or exact upstream preimage mismatch.' }
+    Invoke-NativeCommand -Name 'llama-patch-check' -Executable 'git' -Arguments @('-C', $llamaSource, 'apply', '--check', $llamaPatch)
+    Invoke-NativeCommand -Name 'llama-patch' -Executable 'git' -Arguments @('-C', $llamaSource, 'apply', $llamaPatch)
+    if ((Get-FileHash -LiteralPath $llamaVec -Algorithm SHA256).Hash.ToLowerInvariant() -ne 'ad14c129561bb7d9a0e5e0dbb843158760513bdbd900cdadc39490fd29eea21c') { throw 'Native BF16 patched source identity mismatch.' }
     $llamaBuild = Join-Path $work 'llama-build'
-    $configure = @('-S', $llamaSource, '-B', $llamaBuild, '-DCMAKE_BUILD_TYPE=Release', '-DBUILD_SHARED_LIBS=OFF', '-DLLAMA_BUILD_IS_DEV=OFF', '-DLLAMA_BUILD_TOOLS=ON', '-DLLAMA_BUILD_TESTS=OFF', '-DLLAMA_BUILD_EXAMPLES=OFF', '-DLLAMA_BUILD_SERVER=OFF', '-DLLAMA_BUILD_APP=OFF', '-DLLAMA_OPENSSL=OFF', '-DLLAMA_SUBPROCESS=OFF', '-DMTMD_VIDEO=OFF', '-DGGML_NATIVE=OFF', '-DGGML_METAL=OFF', '-DGGML_BLAS=OFF', '-DGGML_CUDA=OFF', '-DGGML_OPENMP=OFF', '-DGGML_CPU_KLEIDIAI=OFF')
+    $configure = @('-S', (Join-Path $root 'ci/native-tests'), "-DNVSF_LLAMA_SOURCE=$llamaSource", '-B', $llamaBuild, '-DCMAKE_BUILD_TYPE=Release', '-DBUILD_SHARED_LIBS=OFF', '-DLLAMA_BUILD_IS_DEV=OFF', '-DLLAMA_BUILD_COMMON=ON', '-DLLAMA_BUILD_TOOLS=ON', '-DLLAMA_BUILD_TESTS=OFF', '-DLLAMA_BUILD_EXAMPLES=OFF', '-DLLAMA_BUILD_SERVER=OFF', '-DLLAMA_BUILD_APP=OFF', '-DLLAMA_OPENSSL=OFF', '-DLLAMA_SUBPROCESS=OFF', '-DMTMD_VIDEO=OFF', '-DGGML_NATIVE=OFF', '-DGGML_METAL=OFF', '-DGGML_BLAS=OFF', '-DGGML_CUDA=OFF', '-DGGML_OPENMP=OFF', '-DGGML_CPU_KLEIDIAI=OFF')
+    if ($target.arch -eq 'arm64') { $configure += '-DNVSF_REQUIRE_ARM_NEON=ON' }
     if ($IsWindows) {
         $configure += @('-A', $(if ($target.arch -eq 'arm64') { 'ARM64' } else { 'x64' }), '-T', 'ClangCL')
         if ($target.arch -eq 'arm64') { $configure += '-DGGML_CPU_ARM_ARCH=armv8-a' }
     }
     elseif ($IsMacOS) { $configure += @('-DCMAKE_OSX_DEPLOYMENT_TARGET=13.0', $(if ($target.arch -eq 'arm64') { '-DCMAKE_OSX_ARCHITECTURES=arm64' } else { '-DCMAKE_OSX_ARCHITECTURES=x86_64' })) }
     Invoke-NativeCommand -Name 'llama-configure' -Executable 'cmake' -Arguments $configure -Wall 300 -Idle 120
-    Invoke-NativeCommand -Name 'llama-build' -Executable 'cmake' -Arguments @('--build', $llamaBuild, '--config', 'Release', '--target', 'llama-mtmd-cli', '--parallel', '2') -Wall 3600 -Idle 600
+    Invoke-NativeCommand -Name 'llama-build' -Executable 'cmake' -Arguments @('--build', $llamaBuild, '--config', 'Release', '--target', 'llama-mtmd-cli', 'nvsf-llama-bf16', '--parallel', '2') -Wall 3600 -Idle 600
+    $kernelWitness = Join-Path $llamaBuild $(if ($IsWindows) { 'witness-bin/nvsf-llama-bf16.exe' } else { 'witness-bin/nvsf-llama-bf16' })
+    $kernelOutput = Invoke-NativeCommand -Name 'llama-bf16-reference' -Executable $kernelWitness -Arguments @($(if ($target.arch -eq 'arm64') { '--require-arm64' } else { '--native' })) -Wall 15 -Idle 5 -Capture
+    $kernelEvidence = $kernelOutput | ConvertFrom-Json
+    if ($kernelEvidence.passed -ne $true -or $kernelEvidence.tests -ne 312 -or $kernelEvidence.failed -ne 0 -or $kernelEvidence.skipped -ne 0 -or ($target.arch -eq 'arm64' -and ($kernelEvidence.runtime_arch -ne 'aarch64' -or $kernelEvidence.neon -ne 1))) { throw 'Actual native BF16 scalar-reference evidence is incomplete.' }
+    Write-NativeLog 'INFO' "BF16 scalar-reference tests=$($kernelEvidence.tests) failed=0 arch=$($kernelEvidence.runtime_arch) neon=$($kernelEvidence.neon)"
     $llamaName = if ($IsWindows) { 'llama-mtmd-cli.exe' } else { 'llama-mtmd-cli' }
     $llamaBinaries = @(Get-ChildItem -LiteralPath (Join-Path $llamaBuild 'bin') -Recurse -File -Filter $llamaName)
     if ($llamaBinaries.Count -ne 1) { throw 'Native llama.cpp build did not produce one exact helper executable.' }
@@ -502,6 +516,7 @@ foreach (`$name in @('PATH','INCLUDE','LIB','LIBPATH','VCINSTALLDIR','VCToolsIns
     $llamaNotices = Join-Path $notices 'llama.cpp'
     [IO.Directory]::CreateDirectory($llamaNotices) | Out-Null
     Copy-Item -LiteralPath (Join-Path $llamaSource 'LICENSE') -Destination (Join-Path $llamaNotices 'LICENSE') -Force
+    Copy-Item -LiteralPath $llamaPatch -Destination (Join-Path $llamaNotices 'BF16-NEON-backport.txt')
     foreach ($licenseFile in Get-ChildItem -LiteralPath (Join-Path $llamaSource 'vendor') -Recurse -File | Where-Object Name -match '^(LICENSE|COPYING|NOTICE)([._-].*)?$') {
         $relative = [IO.Path]::GetRelativePath($llamaSource, $licenseFile.FullName)
         $destination = Join-Path $llamaNotices $relative
@@ -516,7 +531,7 @@ foreach (`$name in @('PATH','INCLUDE','LIB','LIBPATH','VCINSTALLDIR','VCToolsIns
         Invoke-NativeCommand -Name 'llama-adhoc-sign' -Executable 'codesign' -Arguments @('--force', '--sign', '-', (Join-Path $runtimes $llamaName))
     }
     Invoke-NativeCommand -Name 'llama-help' -Executable (Join-Path $runtimes $llamaName) -Arguments @('--help') -Wall 30 -Idle 10
-    $record = @{ schema = 1; target = $TargetId; source_sha = $env:GITHUB_SHA; rust_target = $target.target; cargo_lock_sha256 = (Get-FileHash -LiteralPath (Join-Path $root 'Cargo.lock') -Algorithm SHA256).Hash.ToLowerInvariant(); vcpkg_commit = $baseline; ort_version = '1.31.0'; ort_source_commit = $(if ($ortSourceBuild) { $ortCommit } else { $null }); overlay_triplet = $target.triplet; linkage = 'dynamic'; build_type = 'release'; llama_tag_object = $llamaTagObject; llama_source_commit = $llamaCommit; llama_cli_status = 'EXPERIMENTAL_MODEL_NOT_LOADED'; media_adapter = $null; runtime_execution = 'NOT_RUN'; final_package_closure = 'PENDING_HOSTED_TEST' }
+    $record = @{ schema = 1; target = $TargetId; source_sha = $env:GITHUB_SHA; rust_target = $target.target; cargo_lock_sha256 = (Get-FileHash -LiteralPath (Join-Path $root 'Cargo.lock') -Algorithm SHA256).Hash.ToLowerInvariant(); vcpkg_commit = $baseline; ort_version = '1.31.0'; ort_source_commit = $(if ($ortSourceBuild) { $ortCommit } else { $null }); overlay_triplet = $target.triplet; linkage = 'dynamic'; build_type = 'release'; llama_tag_object = $llamaTagObject; llama_source_commit = $llamaCommit; llama_patch_sha256 = $llamaPatchHash; llama_bf16_reference = $kernelEvidence; llama_cli_status = 'EXPERIMENTAL_MODEL_NOT_LOADED'; media_adapter = $null; runtime_execution = 'NOT_RUN'; final_package_closure = 'PENDING_HOSTED_TEST' }
     Write-NativeInventory $record
     Write-NativeLog 'INFO' "Provisioning complete target=$TargetId runtime_files=$($record.runtime_files.Count); media adapter staging and actual package/model inference remain later required CI gates."
 } catch {
