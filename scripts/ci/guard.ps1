@@ -122,8 +122,8 @@ public sealed class NvsfCiFileProgress : IDisposable {
     readonly Stopwatch clock = Stopwatch.StartNew();
     System.Collections.Generic.Dictionary<string, (long size, long written)> previous = new(StringComparer.Ordinal);
     System.Collections.Generic.Dictionary<string, (long size, long written)> current = new(StringComparer.Ordinal);
-    System.Collections.Generic.IEnumerator<System.IO.DirectoryInfo> ports;
-    System.Collections.Generic.IEnumerator<System.IO.FileInfo> files;
+    System.Collections.Generic.IEnumerator<System.IO.FileSystemInfo> ports;
+    System.Collections.Generic.IEnumerator<System.IO.FileSystemInfo> files;
     bool baseline = true;
     int directories;
     double lastSample = -250;
@@ -131,54 +131,86 @@ public sealed class NvsfCiFileProgress : IDisposable {
         root = path;
         try { BeginCycle(); } catch { Dispose(); throw; }
     }
+    void CheckOperation(long started, string operation) {
+        double elapsed = (Stopwatch.GetTimestamp() - started) * 1000.0 / Stopwatch.Frequency;
+        if (elapsed >= 1000)
+            throw new InvalidOperationException($"Owned build log metadata operation exceeded maximum_ms=1000 operation={operation} elapsed_ms={elapsed:F0} directories={directories} files={current.Count}.");
+    }
+    bool Advance(System.Collections.Generic.IEnumerator<System.IO.FileSystemInfo> iterator, string operation) {
+        long started = Stopwatch.GetTimestamp();
+        bool available = iterator.MoveNext();
+        CheckOperation(started, operation); // Includes false/EOF, before any break or directory transition.
+        return available;
+    }
+    System.IO.FileAttributes Attributes(System.IO.FileSystemInfo entry) {
+        long started = Stopwatch.GetTimestamp();
+        var attributes = entry.Attributes;
+        CheckOperation(started, "entry-attributes");
+        if ((attributes & System.IO.FileAttributes.ReparsePoint) != 0)
+            throw new InvalidOperationException("Owned build log entry may not be linked.");
+        return attributes;
+    }
     void SelectDirectory(System.IO.DirectoryInfo directory) {
-        if (!directory.Exists || (directory.Attributes & System.IO.FileAttributes.ReparsePoint) != 0)
-            throw new InvalidOperationException("Owned build log directory is missing or linked.");
-        files = directory.EnumerateFiles("*.log").GetEnumerator();
+        long started = Stopwatch.GetTimestamp();
+        bool exists = directory.Exists;
+        CheckOperation(started, "directory-exists");
+        if (!exists || (Attributes(directory) & System.IO.FileAttributes.Directory) == 0)
+            throw new InvalidOperationException("Owned build log directory is missing or invalid.");
+        started = Stopwatch.GetTimestamp();
+        files = directory.EnumerateFileSystemInfos().GetEnumerator();
+        CheckOperation(started, "files-open");
     }
     void BeginCycle() {
         var directory = new System.IO.DirectoryInfo(root);
         directories = 1;
         SelectDirectory(directory);
-        ports = directory.EnumerateDirectories().GetEnumerator();
+        long started = Stopwatch.GetTimestamp();
+        ports = directory.EnumerateFileSystemInfos().GetEnumerator();
+        CheckOperation(started, "ports-open");
     }
     public bool Consume() {
         if (clock.Elapsed.TotalMilliseconds - lastSample < 250) return false;
-        var elapsed = Stopwatch.StartNew();
+        var page = Stopwatch.StartNew();
         bool changed = false;
-        // Advance only a small shallow page; a whole buildtree never blocks one guard tick.
-        for (int entries = 0; entries < 128 && elapsed.ElapsedMilliseconds < 100; entries++) {
-            if (files.MoveNext()) {
-                var file = files.Current;
+        // Unfiltered enumeration makes each raw entry count; MoveNext("*.log") hides non-log scans.
+        for (int entries = 0; entries < 128 && page.ElapsedMilliseconds < 100; entries++) {
+            if (files != null) {
+                if (!Advance(files, "files-next")) {
+                    files.Dispose(); files = null;
+                    continue;
+                }
+                var entry = files.Current;
+                var attributes = Attributes(entry);
+                if ((attributes & System.IO.FileAttributes.Directory) != 0
+                    || !entry.Name.EndsWith(".log", StringComparison.OrdinalIgnoreCase)) continue;
+                if (entry is not System.IO.FileInfo file)
+                    throw new InvalidOperationException("Owned build log entry is not a regular file.");
                 if (current.Count >= 8192)
                     throw new InvalidOperationException("Owned build log file count exceeded maximum=8192.");
-                // EnumerateFiles prepopulates fresh attributes, size and write time; Refresh repeats that I/O.
-                if ((file.Attributes & System.IO.FileAttributes.ReparsePoint) != 0)
-                    throw new InvalidOperationException("Owned build log may not be linked.");
+                // Enumeration supplies cached attributes/size/write time; do not repeat I/O with Refresh.
+                long started = Stopwatch.GetTimestamp();
                 var value = (file.Length, file.LastWriteTimeUtc.Ticks);
+                CheckOperation(started, "log-metadata");
                 current.Add(file.FullName, value);
                 if (!baseline)
                     changed |= previous.TryGetValue(file.FullName, out var old) ? old != value : value.Item1 > 0;
+            } else if (Advance(ports, "ports-next")) {
+                var entry = ports.Current;
+                if ((Attributes(entry) & System.IO.FileAttributes.Directory) == 0) continue;
+                if (entry is not System.IO.DirectoryInfo port)
+                    throw new InvalidOperationException("Owned build log port is not a directory.");
+                if (++directories > 513)
+                    throw new InvalidOperationException("Owned build log directory count exceeded maximum=513.");
+                SelectDirectory(port);
             } else {
-                files.Dispose(); files = null;
-                if (ports.MoveNext()) {
-                    if (++directories > 513)
-                        throw new InvalidOperationException("Owned build log directory count exceeded maximum=513.");
-                    SelectDirectory(ports.Current);
-                } else {
-                    ports.Dispose(); ports = null;
-                    previous = current;
-                    current = new(StringComparer.Ordinal);
-                    baseline = false;
-                    BeginCycle();
-                    break;
-                }
+                ports.Dispose(); ports = null;
+                previous = current;
+                current = new(StringComparer.Ordinal);
+                baseline = false;
+                BeginCycle();
+                break;
             }
-            if (elapsed.ElapsedMilliseconds >= 1000)
-                throw new InvalidOperationException($"Owned build log metadata operation exceeded maximum_ms=1000 elapsed_ms={elapsed.ElapsedMilliseconds} directories={directories} files={current.Count}.");
         }
-        if (elapsed.ElapsedMilliseconds >= 1000)
-            throw new InvalidOperationException($"Owned build log metadata operation exceeded maximum_ms=1000 elapsed_ms={elapsed.ElapsedMilliseconds}.");
         lastSample = clock.Elapsed.TotalMilliseconds;
         return changed;
     }
