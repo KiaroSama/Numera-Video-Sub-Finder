@@ -194,9 +194,13 @@ pub(crate) fn run_proposal(
         if start.elapsed() > Duration::from_secs(120)
             || progress.elapsed() > Duration::from_secs(60)
         {
-            return Err(fail(
-                "Local visual worker wall/idle deadline; original OCR retained",
-            ));
+            diagnostic.seek(SeekFrom::Start(0))?;
+            let mut bytes = Vec::new();
+            diagnostic.take(1024 * 1024 + 1).read_to_end(&mut bytes)?;
+            let phase = diagnostic_phase(&String::from_utf8_lossy(&bytes)).unwrap_or("unknown");
+            return Err(fail(format!(
+                "Local visual worker wall/idle deadline; phase={phase}; original OCR retained"
+            )));
         }
         std::thread::park_timeout(Duration::from_millis(20));
     }
@@ -204,6 +208,18 @@ pub(crate) fn run_proposal(
     let mut text = String::new();
     response.take(65537).read_to_string(&mut text)?;
     validate_proposal(&text)
+}
+
+pub(crate) fn diagnostic_phase(text: &str) -> Option<&'static str> {
+    [
+        ("warmup with image size =", "vision-context-preparation"),
+        ("encoding mtmd batch, n_chunks =", "vision-encoding-started"),
+        ("mtmd batch encoding done in", "vision-encoding-completed"),
+    ]
+    .into_iter()
+    .filter_map(|(marker, phase)| text.rfind(marker).map(|position| (position, phase)))
+    .max_by_key(|(position, _)| *position)
+    .map(|(_, phase)| phase)
 }
 
 fn diagnostic_reason(text: &str) -> &'static str {
@@ -318,6 +334,27 @@ pub fn validate_proposal(text: &str) -> Result<Proposal> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn runtime_phase_reports_only_observed_categories_not_private_suffixes() {
+        assert_eq!(super::diagnostic_phase("private prompt/path"), None);
+        assert_eq!(
+            super::diagnostic_phase("get_dummy_batch: warmup with image size = private"),
+            Some("vision-context-preparation")
+        );
+        assert_eq!(
+            super::diagnostic_phase(
+                "warmup with image size = private\nencoding mtmd batch, n_chunks = private"
+            ),
+            Some("vision-encoding-started")
+        );
+        assert_eq!(
+            super::diagnostic_phase(
+                "encoding mtmd batch, n_chunks = private\nmtmd batch encoding done in private"
+            ),
+            Some("vision-encoding-completed")
+        );
+    }
+
     #[test]
     fn runtime_diagnostic_is_a_fixed_category_never_raw_model_text_or_paths() {
         assert_eq!(

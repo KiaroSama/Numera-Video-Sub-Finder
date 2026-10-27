@@ -1,6 +1,6 @@
 # Validation status
 
-Updated: 2026-10-26. **NOT a release acceptance report.** Hosted observations below refer to the exact named SHA; corrective source is not a passing result.
+Updated: 2026-10-27. **NOT a release acceptance report.** Hosted observations below refer to the exact named SHA; corrective source is not a passing result.
 
 ## Current verified integration
 
@@ -15,6 +15,8 @@ The next authored batch adds actual Japanese-specialist/baseline numeric recogni
 [The replacement on4d3f457](https://github.com/KiaroSama/Numera-Video-Sub-Finder/actions/runs/40344816285) completes with failure: five targets pass model provisioning and reach a later nonzero visual process exit; Intel macOS fails the unchanged instrumented-build wall/idle guard before inference. The invalid argument repair is necessary but insufficient; the later model failure's root is still unknown because stderr was discarded. Pending diagnostic source captures at most1MiB in parent-owned private scratch and returns only a fixed failure category plus native exit status, never raw model output, paths or credentials. Specific tensor/architecture/template/vision categories take precedence over generic loading errors. Existing scratch cleanup,120/60 model bounds and exact`16` assertions remain required. The new diagnostic does not constitute a model repair or passing result; no compiler timeout is increased.
 
 [The diagnostic batch on6501e0a](https://github.com/KiaroSama/Numera-Video-Sub-Finder/actions/runs/40382875743) completes with all six model-provisioning steps successful, including Intel's81.33-second transfer with genuine byte-growth progress. All six visual observations fail. Linux/macOS return the fixed unsupported-chat-template category with SIGABRT; both Windows targets return0xc0000409 with an unclassified category, so their exact internal cause is not inferred. Pinned MTMD defaults to legacy formatting; its supported `--jinja` option selects the model's Jinja template for both initialization and the actual prompt. The pending one-option correction is independently source-reviewed, retaining all models, expected text, CPU policy and deadlines; positive inference remains unverified.
+
+[The template correction oncf1b10d](https://github.com/KiaroSama/Numera-Video-Sub-Finder/actions/runs/40412175826) completes with all three x64 native jobs successful: Windows, Linux and Intel macOS pass their actual visual admission and remaining native gates. All three ARM jobs fail only at the visual-model outer60-second output-idle guard; both aggregate gates therefore fail. Linux x64 records200 suite cases,13 GUI behaviors, five production observations, five process faults,83.58% measured overall coverage and91.26% critical coverage, with full-product qualification still false. The ARM computational phase is unknown, not attributed to warmup or a particular kernel. Pending diagnostics observe the existing bounded private model file from the parent and report only fixed newly observed stage categories; inner deadline errors include the last observed phase. Raw diagnostics remain private and120/60 bounds are unchanged. This is diagnostic source, not a proven ARM repair.
 
 ## Integration diagnostic history
 

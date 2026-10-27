@@ -209,6 +209,8 @@ pub fn supervise(
         60
     };
     let deadline = Instant::now() + Duration::from_secs(wall_seconds);
+    let mut diagnostic_check = Instant::now();
+    let mut observed_phases = Vec::new();
     let observed = (|| -> Result<()> {
         loop {
             if cancel.load(Ordering::Acquire) {
@@ -218,6 +220,31 @@ pub fn supervise(
                 return Err(fail(format!(
                     "Native request exceeded{wall_seconds}s wall deadline"
                 )));
+            }
+            if matches!(request.operation, Operation::Visual { .. })
+                && diagnostic_check.elapsed() >= Duration::from_secs(1)
+            {
+                diagnostic_check = Instant::now();
+                let diagnostic = scratch.path().join("model-diagnostic.txt");
+                match std::fs::File::open(&diagnostic) {
+                    Ok(file) => {
+                        let mut bytes = Vec::new();
+                        file.take(JSON_LIMIT + 1).read_to_end(&mut bytes)?;
+                        if bytes.len() as u64 > JSON_LIMIT {
+                            return Err(fail("Visual diagnostic exceeds1MiB"));
+                        }
+                        if let Some(phase) =
+                            crate::assistant::diagnostic_phase(&String::from_utf8_lossy(&bytes))
+                            && !observed_phases.contains(&phase)
+                        {
+                            observed_phases.push(phase);
+                            log.event("INFO", "VISUAL", phase);
+                            eprintln!("[INFO] [VISUAL] phase={phase}");
+                        }
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(error) => return Err(error.into()),
+                }
             }
             if child.exited()? {
                 return Ok(());
