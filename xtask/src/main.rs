@@ -14,6 +14,8 @@ mod ocr_replay;
 mod package;
 mod process;
 mod production;
+#[cfg(target_os = "macos")]
+mod production_macos;
 #[cfg(any(target_os = "linux", test))]
 mod production_supervisor;
 mod quality;
@@ -96,6 +98,14 @@ enum Cmd {
         gui: PathBuf,
         #[arg(long)]
         state: PathBuf,
+    },
+    #[cfg(target_os = "macos")]
+    #[command(hide = true)]
+    ProductionMac {
+        #[arg(long)]
+        pid: u32,
+        #[arg(long)]
+        close: bool,
     },
     Production {
         #[arg(long)]
@@ -247,6 +257,8 @@ fn run() -> Result<(), Box<dyn Error>> {
         Cmd::GuiFault { output } => gui_failure::finalize(&output),
         #[cfg(target_os = "linux")]
         Cmd::ProductionParent { gui, state } => production_supervisor::run(&gui, &state),
+        #[cfg(target_os = "macos")]
+        Cmd::ProductionMac { pid, close } => production_macos::run(pid, close),
         Cmd::Production {
             gui,
             data_root,

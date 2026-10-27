@@ -17,7 +17,7 @@ mod linux;
 #[path = "production_listener.rs"]
 mod listener;
 
-const TITLE: &str = "Numera Video Sub Finder";
+pub(crate) const TITLE: &str = "Numera Video Sub Finder";
 const WALL: Duration = Duration::from_secs(60);
 const IDLE: Duration = Duration::from_secs(15);
 
@@ -577,27 +577,36 @@ fn native_close(pid: u32, window: &str, root: &Path, index: &mut u64) -> Result<
 }
 
 #[cfg(target_os = "macos")]
-fn native_window(pid: u32, root: &Path, index: &mut u64) -> Result<Option<String>> {
-    let script = format!(
-        "tell application \"System Events\"\nset owned to application processes whose unix id is {pid}\nif (count of owned) is 0 then return \"\"\ntell item 1 of owned\nif visible is false then return \"\"\nrepeat with w in windows\nif name of w is \"{TITLE}\" then return name of w\nend repeat\nend tell\nreturn \"\"\nend tell"
-    );
-    let (success, text) = helper("osascript", &["-e".into(), script], root, index)?;
+fn mac_observe(pid: u32, close: bool, root: &Path, index: &mut u64) -> Result<String> {
+    let executable = std::env::current_exe()?;
+    let executable = executable
+        .to_str()
+        .ok_or("Native observer path is not UTF-8")?;
+    let mut args = vec!["production-mac".into(), "--pid".into(), pid.to_string()];
+    if close {
+        args.push("--close".into());
+    }
+    let (success, text) = helper(executable, &args, root, index)?;
     if !success {
-        return Err(format!("macOS native UI verification blocked; existing Accessibility authorization required: {text}").into());
+        return Err(format!("macOS owned native observer failed: {text}").into());
+    }
+    Ok(text)
+}
+#[cfg(target_os = "macos")]
+fn native_window(pid: u32, root: &Path, index: &mut u64) -> Result<Option<String>> {
+    let text = mac_observe(pid, false, root, index)?;
+    if !text.trim().is_empty() && text.trim() != TITLE {
+        return Err("macOS observer returned an unexpected window identity".into());
     }
     Ok((text.trim() == TITLE).then(|| TITLE.into()))
 }
 #[cfg(target_os = "macos")]
 fn native_close(pid: u32, _window: &str, root: &Path, index: &mut u64) -> Result<()> {
-    let script = format!(
-        "tell application \"System Events\"\nset owned to application processes whose unix id is {pid}\nif (count of owned) is not 1 then error \"Owned process unavailable\"\ntell item 1 of owned\nset w to first window whose name is \"{TITLE}\"\nclick (first button of w whose subrole is \"AXCloseButton\")\nend tell\nend tell"
-    );
-    let (success, text) = helper("osascript", &["-e".into(), script], root, index)?;
-    if success {
-        Ok(())
-    } else {
-        Err(format!("macOS owned-window close blocked: {text}").into())
+    let text = mac_observe(pid, true, root, index)?;
+    if !text.trim().is_empty() {
+        return Err("macOS native close returned an unexpected response".into());
     }
+    Ok(())
 }
 
 #[cfg(windows)]
