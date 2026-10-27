@@ -16,6 +16,16 @@ pub const CONTINUE: i32 = 0;
 pub const STOP: i32 = 1;
 pub const ERROR: i32 = -1;
 
+/// Releases ordinary panic payloads without executing an unknown, possibly panicking destructor.
+/// Unknown payloads are intentionally retained: callers must never unwind through the C ABI.
+pub fn discard_panic_payload(payload: Box<dyn std::any::Any + Send>) {
+    if payload.is::<String>() || payload.is::<&'static str>() {
+        drop(payload);
+    } else {
+        std::mem::forget(payload);
+    }
+}
+
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct MediaFrameV1 {

@@ -24,6 +24,21 @@ fn source_time_and_long_unicode_exports_round_trip() {
 }
 
 #[test]
+fn media_panic_payload_cleanup_does_not_run_unknown_destructors() {
+    use nvsf_core::media_abi::discard_panic_payload;
+    struct Hostile;
+    impl Drop for Hostile {
+        fn drop(&mut self) {
+            panic!("unknown panic payload destructor must not execute");
+        }
+    }
+    discard_panic_payload(Box::new("literal panic"));
+    discard_panic_payload(Box::new(String::from("formatted panic")));
+    // A zero-sized payload exercises containment without retaining a heap allocation.
+    discard_panic_payload(Box::new(Hostile));
+}
+
+#[test]
 fn region_and_normalization_preserve_boundaries() {
     let r = Rect::new(0.1, 0.8, 0.8, 0.2).unwrap();
     assert_eq!(r.pixels(100, 100).unwrap(), (10, 80, 80, 20));
@@ -47,6 +62,49 @@ fn parser_rejects_invalid_intervals_and_structure() {
     }
     let bom = "\u{feff}1\r\n00:00:00,000 --> 00:00:01,000\r\n日本語\r\n\r\n";
     assert_eq!(parse_srt(bom).unwrap()[0].text, "日本語");
+}
+
+#[test]
+fn cue_validation_rejects_block_separators_hidden_by_carriage_returns() {
+    for text in [
+        "a\n\nb",
+        "a\n\r\nb",
+        "a\r\n\r\nb",
+        "a\n\r\r\nb",
+        "\r\na",
+        "a\n\r",
+    ] {
+        assert!(Cue::new(1, 0, 10, 999, text.into()).is_err());
+        let mut edited = Cue::new(1, 0, 10, 999, "original".into()).unwrap();
+        edited.text = text.into();
+        assert!(edited.validate().is_err());
+        assert!(export_srt(&[edited.clone()], false, false).is_err());
+        let next = Cue::new(2, 0, 1000, 2000, "next".into()).unwrap();
+        assert!(export_srt(&[edited, next], false, false).is_err());
+    }
+    for malformed in [
+        "1\n00:00:00,010 --> 00:00:00,999\na\n\r\r\r\nb\n\n",
+        "1\n00:00:00,010 --> 00:00:00,999\n\r\r\r\na\n\n",
+    ] {
+        assert!(parse_srt(malformed).is_err());
+    }
+    let crash = include_str!("../../../fuzz/seeds/parse_srt/carriage-separator.srt");
+    assert_eq!(crash.len(), 294);
+    assert!(parse_srt(crash).is_err());
+}
+
+#[test]
+fn ordinary_carriage_returns_preserve_evidence_and_valid_multiline_exports() {
+    let text = "سلام\r\n日本語\n16 \t\u{a0}\r";
+    let cue = Cue::new(1, 0, 10, 999, text.into()).unwrap();
+    assert_eq!(cue.raw_text, text);
+    cue.validate().unwrap();
+    for (bom, crlf) in [(false, false), (true, true)] {
+        let parsed = parse_srt(&export_srt(&[cue.clone()], bom, crlf).unwrap()).unwrap();
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].text, "سلام\n日本語\n16 \t\u{a0}");
+        assert_eq!((parsed[0].start_ms, parsed[0].end_ms), (10, 999));
+    }
 }
 
 #[test]

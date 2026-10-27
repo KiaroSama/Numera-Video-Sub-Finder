@@ -10,7 +10,7 @@
     {"id":"CT-06","area":"fuzzing","command":"core hostile parser properties; scripts/ci/fuzz.ps1 (Linux x64 actual parse_srt libFuzzer,30-second campaign/default ASan)","state":"PARTIAL","reason":"Bounded SRT parser target authored; exact-source fuzz report required, other hostile/native input fuzz scopes unqualified"},
     {"id":"CT-07","area":"concurrency","command":"core threaded tracker stress; queue ownership","state":"PARTIAL"},
     {"id":"CT-08","area":"Miri","command":null,"state":"NOT_RUN"},
-    {"id":"CT-09","area":"sanitizers/FFI","command":null,"state":"NOT_RUN"},
+    {"id":"CT-09","area":"sanitizers/FFI","command":"scripts/ci/media-sanitizer.ps1 (Linux x64 actual Rust caller/cdylib/std ASan and LSan)","state":"PARTIAL","reason":"Authored isolated real Y4M/ABI/callback admission; runtime NOT_RUN, release FFmpeg/C closure uninstrumented, no UBSan or cross-platform qualification"},
     {"id":"CT-10","area":"real multilingual OCR","command":"xtask multilingual (synthetic integration only)","state":"BLOCKED","reason":"Independent real fa/ja annotations absent; representative synthetic script witnesses do not qualify real quality"},
     {"id":"CT-11","area":"model admission/precision","command":"model metadata/CTC contracts; native model load","state":"PARTIAL"},
     {"id":"CT-12","area":"physical accelerators","command":null,"state":"BLOCKED","reason":"No authorized hardware runner"},

@@ -1,6 +1,9 @@
 use nvsf_app::{Paths, media::MediaRuntime};
 use std::{io::Write, path::Path};
 
+#[path = "support/media_sanitizer_admission.rs"]
+mod sanitizer_admission;
+
 fn runtime(root: &Path) -> MediaRuntime {
     let paths = Paths {
         root: root.into(),
@@ -8,10 +11,14 @@ fn runtime(root: &Path) -> MediaRuntime {
         projects: root.join("projects"),
         logs: root.join("logs"),
         cache: root.join("cache"),
-        runtimes: Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.ci-work/runtimes"),
+        runtimes: sanitizer_admission::selected_root().unwrap_or_else(|| {
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.ci-work/runtimes")
+        }),
     };
-    MediaRuntime::load(&paths)
-        .expect("hosted native media adapter must be staged before contract suites")
+    let runtime = MediaRuntime::load(&paths)
+        .expect("hosted native media adapter must be staged before contract suites");
+    sanitizer_admission::verify_loaded(&paths.runtimes);
+    runtime
 }
 
 fn anamorphic_fixture(path: &Path) {

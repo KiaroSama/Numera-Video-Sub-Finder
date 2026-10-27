@@ -234,7 +234,7 @@ unsafe extern "C" fn receive_bytes(context: *mut c_void, data: *const u8, len: u
         }
         Err(payload) => {
             // A panic payload may itself have a panicking destructor; never unwind through C.
-            std::mem::forget(payload);
+            discard_panic_payload(payload);
             reply.error = Some(fail("Native media response callback panicked"));
             ERROR
         }
@@ -339,7 +339,7 @@ unsafe extern "C" fn receive_frame<F: FnMut(DecodedFrame) -> Result<bool>>(
             ERROR
         }
         Err(payload) => {
-            std::mem::forget(payload);
+            discard_panic_payload(payload);
             state.error = Some(fail("Media frame consumer panicked"));
             ERROR
         }
@@ -419,16 +419,23 @@ mod callback_tests {
             finish_decode(ERROR, state.error, false, &mut native_error),
             Err(AppError::Cancelled)
         ));
-        let mut consume = |_: DecodedFrame| -> Result<bool> { panic!("controlled callback panic") };
-        let mut state = frames(&mut consume);
-        assert_eq!(deliver(&mut state, &descriptor(&rgb)), ERROR);
-        assert!(
-            state
-                .error
-                .unwrap()
-                .to_string()
-                .contains("consumer panicked")
-        );
+        for formatted in [false, true] {
+            let mut consume = |_: DecodedFrame| -> Result<bool> {
+                if formatted {
+                    std::panic::panic_any(String::from("controlled formatted callback panic"));
+                }
+                panic!("controlled callback panic")
+            };
+            let mut state = frames(&mut consume);
+            assert_eq!(deliver(&mut state, &descriptor(&rgb)), ERROR);
+            assert!(
+                state
+                    .error
+                    .unwrap()
+                    .to_string()
+                    .contains("consumer panicked")
+            );
+        }
     }
 
     #[test]

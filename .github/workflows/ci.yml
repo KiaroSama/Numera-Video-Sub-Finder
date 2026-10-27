@@ -177,6 +177,10 @@ jobs:
       - name: All required Rust contract suites and nonzero evidence
         timeout-minutes: 45
         run: ./scripts/ci/tests.ps1 -TargetId '${{ matrix.id }}'
+      - name: Actual Rust media FFI AddressSanitizer admission
+        if: matrix.id == 'linux-x64'
+        timeout-minutes: 19
+        run: ./scripts/ci/media-sanitizer.ps1
       - name: Owned worker process fault contracts
         timeout-minutes: 2
         run: |
@@ -336,6 +340,7 @@ jobs:
             .ci-work/visual-data/logs/
             .ci-work/coverage*.lcov
             .ci-work/packages/reports/coverage.json
+            .ci-work/packages/reports/linux-x64-media-sanitizer.json
             target/cargo-timings/
             .ci-work/multilingual/*-extract.log
             .ci-work/multilingual/*.srt
@@ -376,4 +381,5 @@ jobs:
               jq -e --arg sha "$GITHUB_SHA" --arg id "$id" --argjson minimum "$minimum" '.schema==1 and .source_sha==$sha and .target==$id and .passed==true and .tests>=$minimum and .failed==0 and .skipped==0' ".ci-work/downloaded/packages/reports/$id-$kind.json"
             done
           done
+          jq -e --arg sha "$GITHUB_SHA" '.schema==1 and .source_sha==$sha and .target=="linux-x64" and .profile=="actual-media-rust-ffi-asan" and .sanitizer=="address" and .instrumented_std==true and .passed==true and .tests>=6 and .failed==0 and .skipped==0 and .cleanup_verified==true' .ci-work/downloaded/packages/reports/linux-x64-media-sanitizer.json
           jq -e --arg sha "$GITHUB_SHA" '.source_sha==$sha and .passed==true and .coverage>=0.80 and .critical_coverage>=0.90' .ci-work/downloaded/packages/reports/coverage.json

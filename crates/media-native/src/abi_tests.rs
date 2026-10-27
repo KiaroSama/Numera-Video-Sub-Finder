@@ -91,18 +91,26 @@ fn malformed_json_and_utf8_fail_with_bounded_diagnostics() {
 #[test]
 fn native_panic_is_caught_and_error_text_respects_utf8_byte_bound() {
     let mut error = Vec::<u8>::new();
-    assert_eq!(
-        boundary(
-            Some(collect),
-            (&mut error as *mut Vec<u8>).cast(),
-            || -> Result<i32> { panic!("controlled native boundary panic") }
-        ),
-        ERROR
-    );
-    assert_eq!(
-        std::str::from_utf8(&error).unwrap(),
-        "Native media operation panicked"
-    );
+    for formatted in [false, true] {
+        error.clear();
+        assert_eq!(
+            boundary(
+                Some(collect),
+                (&mut error as *mut Vec<u8>).cast(),
+                || -> Result<i32> {
+                    if formatted {
+                        std::panic::panic_any(String::from("controlled formatted native panic"));
+                    }
+                    panic!("controlled native boundary panic")
+                }
+            ),
+            ERROR
+        );
+        assert_eq!(
+            std::str::from_utf8(&error).unwrap(),
+            "Native media operation panicked"
+        );
+    }
     error.clear();
     let diagnostic = "a".repeat(MAX_ERROR_BYTES - 1) + "日";
     send_error(
