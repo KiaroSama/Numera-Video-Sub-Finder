@@ -114,7 +114,7 @@ jobs:
         run: |
           ./scripts/ci/guard.ps1 -Name native-release -WallSeconds 1800 -IdleSeconds 360 -Executable cargo -Arguments @('build','--locked','--release','-p','nvsf-cli','-p','xtask')
           if ($LASTEXITCODE -ne 0) { throw 'Native CLI build failed' }
-          ./scripts/ci/guard.ps1 -Name trunk-install -WallSeconds 1200 -IdleSeconds 180 -Executable cargo -Arguments @('install','trunk','--version','0.21.14','--locked','--config','profile.release.lto="off"','--config','profile.release.codegen-units=16','--root','.ci-work/tools')
+          ./scripts/ci/guard.ps1 -Name trunk-install -WallSeconds 1200 -IdleSeconds 180 -Executable cargo -Arguments @('install','trunk','--version','0.22.1','--locked','--config','profile.release.lto="off"','--config','profile.release.codegen-units=16','--root','.ci-work/tools')
           if ($LASTEXITCODE -ne 0) { throw 'Trunk installation failed' }
           "$env:GITHUB_WORKSPACE/.ci-work/tools/bin" >> $env:GITHUB_PATH
           $env:PATH = "$env:GITHUB_WORKSPACE/.ci-work/tools/bin$([IO.Path]::PathSeparator)$env:PATH"
