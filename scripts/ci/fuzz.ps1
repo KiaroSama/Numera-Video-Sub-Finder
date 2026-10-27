@@ -12,7 +12,7 @@ if ($env:GITHUB_SHA -notmatch '^[0-9a-f]{40}$') { throw 'Fuzz admission requires
 $nightly = 'nightly-2026-10-27'
 $utf8 = [Text.UTF8Encoding]::new($false)
 $work = Join-Path $root '.ci-work/fuzz'
-if ((Get-Item -LiteralPath (Join-Path $root '.ci-work')).LinkType) { throw 'Fuzz state parent must not be a link.' }
+if ((Get-Item -Force -LiteralPath (Join-Path $root '.ci-work')).LinkType) { throw 'Fuzz state parent must not be a link.' }
 if (Test-Path -LiteralPath $work) { throw 'Fuzz work directory must be new for this run.' }
 [IO.Directory]::CreateDirectory($work) | Out-Null
 foreach ($name in 'corpus','artifacts','logs') { [IO.Directory]::CreateDirectory((Join-Path $work $name)) | Out-Null }
@@ -71,7 +71,7 @@ try {
     }
     $seedDirectory = Join-Path $root 'fuzz/seeds/parse_srt'
     foreach ($directory in @((Join-Path $root 'fuzz'), (Join-Path $root 'fuzz/seeds'), $seedDirectory)) {
-        if ((Get-Item -LiteralPath $directory).LinkType) { throw 'Maintained fuzz seed directory must not be a link.' }
+        if ((Get-Item -Force -LiteralPath $directory).LinkType) { throw 'Maintained fuzz seed directory must not be a link.' }
     }
     $seeds = @(Get-ChildItem -LiteralPath $seedDirectory -File | Sort-Object Name)
     if ($seeds.Count -lt 6 -or $seeds.Count -gt 32) { throw 'Fuzz maintained seed inventory must contain six to32 files.' }
@@ -102,9 +102,9 @@ try {
     if ((Hash-File $lock) -ne $lockBefore) { throw 'Fuzz build changed its committed lockfile.' }
     $binary = Join-Path $targetDir 'x86_64-unknown-linux-gnu/release/parse_srt'
     foreach ($directory in @($targetDir, (Join-Path $targetDir 'x86_64-unknown-linux-gnu'), (Split-Path -Parent $binary))) {
-        if ((Get-Item -LiteralPath $directory).LinkType) { throw 'Fuzz executable directory must not be a link.' }
+        if ((Get-Item -Force -LiteralPath $directory).LinkType) { throw 'Fuzz executable directory must not be a link.' }
     }
-    if (-not (Test-Path -LiteralPath $binary -PathType Leaf) -or (Get-Item -LiteralPath $binary).LinkType) { throw 'Missing actual instrumented SRT fuzz executable.' }
+    if (-not (Test-Path -LiteralPath $binary -PathType Leaf) -or (Get-Item -Force -LiteralPath $binary).LinkType) { throw 'Missing actual instrumented SRT fuzz executable.' }
     $report.binary_sha256 = Hash-File $binary
     Write-FuzzLog 'INFO' 'Instrumented parser built; replaying maintained seeds'
     $common = @('-max_len=4096','-timeout=2','-rss_limit_mb=512','-malloc_limit_mb=64',('-artifact_prefix=' + (Join-Path $work 'artifacts') + '/'),'-print_final_stats=1')

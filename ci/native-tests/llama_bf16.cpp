@@ -14,13 +14,16 @@
 #include <string>
 #include <vector>
 #ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 #include <windows.h>
 #else
 #include <sys/utsname.h>
 #endif
 
-// The internal vec.h declaration has C++ linkage; the definition must resolve in ggml-cpu.
-void ggml_vec_dot_bf16(int n, float * s, size_t bs, ggml_bf16_t * x,
+// Pinned vec.h:53-72 declares this symbol inside extern "C"; vec.cpp inherits that linkage.
+extern "C" void ggml_vec_dot_bf16(int n, float * s, size_t bs, ggml_bf16_t * x,
                       size_t bx, ggml_bf16_t * y, size_t by, int nrc);
 
 static_assert(sizeof(ggml_bf16_t) == sizeof(uint16_t));
