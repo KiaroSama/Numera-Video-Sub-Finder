@@ -7,7 +7,7 @@
     {"id":"CT-03","area":"native FFmpeg","command":"cargo test -p nvsf-media-native; xtask maintenance; xtask smoke; xtask gui","state":"PARTIAL"},
     {"id":"CT-04","area":"timing/tracking","command":"core contracts/stress; actual CLI smoke","state":"PARTIAL"},
     {"id":"CT-05","area":"properties","command":"core contracts/stress proptest","state":"AUTHORED"},
-    {"id":"CT-06","area":"fuzzing","command":"bounded hostile parser properties","state":"PARTIAL"},
+    {"id":"CT-06","area":"fuzzing","command":"core hostile parser properties; scripts/ci/fuzz.ps1 (Linux x64 actual parse_srt libFuzzer,30-second campaign/default ASan)","state":"PARTIAL","reason":"Bounded SRT parser target authored; exact-source fuzz report required, other hostile/native input fuzz scopes unqualified"},
     {"id":"CT-07","area":"concurrency","command":"core threaded tracker stress; queue ownership","state":"PARTIAL"},
     {"id":"CT-08","area":"Miri","command":null,"state":"NOT_RUN"},
     {"id":"CT-09","area":"sanitizers/FFI","command":null,"state":"NOT_RUN"},

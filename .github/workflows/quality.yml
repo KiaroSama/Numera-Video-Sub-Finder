@@ -50,6 +50,45 @@ jobs:
             .ci-work/logs/
           if-no-files-found: error
           retention-days: 7
+  fuzz:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      CARGO_BUILD_JOBS: 2
+      RUST_TEST_THREADS: 1
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249
+        with:
+          toolchain: nightly-2026-10-27
+          components: rust-src
+      - name: Project-owned fuzz state
+        run: |
+          foreach ($dir in 'temp','logs','captures','cargo','tools') { New-Item -ItemType Directory -Force -Path ".ci-work/$dir" | Out-Null }
+          "CARGO_HOME=$env:GITHUB_WORKSPACE/.ci-work/cargo" >> $env:GITHUB_ENV
+          foreach ($name in 'TMP','TEMP','TMPDIR') { "$name=$env:GITHUB_WORKSPACE/.ci-work/temp" >> $env:GITHUB_ENV }
+      - name: Pinned coverage-guided runner
+        run: |
+          ./scripts/ci/guard.ps1 -Name fuzz-install -WallSeconds 900 -IdleSeconds 180 -Executable cargo -Arguments @('+nightly-2026-10-27','install','cargo-fuzz','--version','0.13.2','--locked','--root','.ci-work/tools')
+          if ($LASTEXITCODE -ne 0) { throw 'Pinned cargo-fuzz installation failed' }
+          "$env:GITHUB_WORKSPACE/.ci-work/tools/bin" >> $env:GITHUB_PATH
+      - name: Bounded actual SRT parser fuzz admission
+        timeout-minutes: 15
+        run: ./scripts/ci/fuzz.ps1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
+        with:
+          name: fuzz-evidence-${{ github.sha }}
+          path: |
+            .ci-work/fuzz/fuzz-report.json
+            .ci-work/fuzz/artifacts/
+            .ci-work/fuzz/logs/
+            .ci-work/logs/
+          if-no-files-found: error
+          retention-days: 7
   miri:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
