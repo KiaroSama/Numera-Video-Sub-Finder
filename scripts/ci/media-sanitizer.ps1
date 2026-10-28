@@ -62,12 +62,18 @@ function Invoke-Build([string]$Name,[string]$Executable,[string[]]$ArgumentList,
 }
 function Read-Artifacts([string]$Path) {
     $rows = @()
+    $completed = 0
     foreach ($line in [IO.File]::ReadAllLines($Path,$utf8)) {
-        if (-not $line.Trim()) { continue }
+        # Cargo's JSON mode does not control arbitrary output from other build tools.
+        if (-not $line.StartsWith('{', [StringComparison]::Ordinal)) { continue }
         $message = $line | ConvertFrom-Json -AsHashtable
         if ($message.reason -eq 'compiler-artifact') { $rows += $message }
+        if ($message.reason -eq 'build-finished') {
+            if ($message.success -ne $true) { throw 'Cargo reported an unsuccessful sanitizer build.' }
+            $completed++
+        }
     }
-    if (-not $rows.Count) { throw 'Cargo emitted no actual compiler artifact records.' }
+    if (-not $rows.Count -or $completed -ne 1) { throw 'Cargo requires actual compiler artifacts and one successful completion record.' }
     return $rows
 }
 function Run-Tests([string]$Name,[string]$Executable,[string[]]$ArgumentList,[int]$Expected = 0) {
@@ -104,6 +110,24 @@ try {
     if ($LASTEXITCODE -ne 0 -or $head.Trim() -ne $env:GITHUB_SHA) { throw 'Sanitizer checkout SHA mismatch.' }
     $inputs = @('Cargo.toml','Cargo.lock','crates/app/Cargo.toml','crates/media-native/Cargo.toml','crates/app/src/media.rs','crates/core/src/media_abi.rs','crates/media-native/src/lib.rs','crates/app/tests/media_display_geometry.rs','crates/app/tests/support/media_sanitizer_admission.rs','scripts/ci/media-sanitizer.ps1')
     $report.inputs = @($inputs | ForEach-Object { & git -C $root diff --quiet HEAD -- $_; if ($LASTEXITCODE -ne 0) { throw 'Sanitizer input differs from checked-out source.' }; @{file=$_;sha256=(Hash-File (Join-Path $root $_))} })
+    $readerFixture = Join-Path $work 'cargo-records-regression.jsonl'
+    $artifactRecord = '{"reason":"compiler-artifact","target":{"name":"literal"}}'
+    $finishedRecord = '{"reason":"build-finished","success":true}'
+    [IO.File]::WriteAllText($readerFixture, ("[compiler_builtins 0.1.160] cargo:rerun-if-env-changed=LIBM_BUILD_VERBOSE`n" + $artifactRecord + "`n" + $finishedRecord), $utf8)
+    if (@(Read-Artifacts $readerFixture).Count -ne 1) { throw 'Mixed Cargo stdout regression failed.' }
+    foreach ($invalid in @(
+        ('{' + "`n" + $artifactRecord + "`n" + $finishedRecord),
+        $finishedRecord,
+        $artifactRecord,
+        ($artifactRecord + "`n" + '{"reason":"build-finished","success":false}'),
+        ($artifactRecord + "`n" + $finishedRecord + "`n" + $finishedRecord)
+    )) {
+        [IO.File]::WriteAllText($readerFixture, $invalid, $utf8)
+        $rejected = $false
+        try { $null = Read-Artifacts $readerFixture } catch { $rejected = $true }
+        if (-not $rejected) { throw 'Invalid Cargo record regression was accepted.' }
+    }
+    Write-Log 'INFO' 'Cargo record reader mixed-output and five rejection regressions passed'
     $ordinary = Join-Path $root '.ci-work/runtimes'
     $inventory = [IO.File]::ReadAllText((Join-Path $root '.ci-work/native-notices/native-inventory.json'),$utf8) | ConvertFrom-Json -AsHashtable
     if ($inventory.schema -ne 1 -or $inventory.source_sha -ne $env:GITHUB_SHA -or $inventory.target -ne 'linux-x64' -or $inventory.rust_target -ne $target -or $inventory.linkage -ne 'dynamic' -or $inventory.cargo_lock_sha256 -ne (Hash-File (Join-Path $root 'Cargo.lock')) -or -not $inventory.media_adapter) { throw 'Sanitizer requires the current same-source staged native closure.' }
