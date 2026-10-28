@@ -201,8 +201,36 @@ try {
     $caller = @($testArtifacts | Where-Object { $_.profile.test -and $_.target.name -eq 'nvsf_app' -and $_.executable })
     $geometry = @($testArtifacts | Where-Object { $_.profile.test -and $_.target.name -eq 'media_display_geometry' -and $_.executable })
     if ($callee.Count -ne 1 -or $caller.Count -ne 1 -or $geometry.Count -ne 1) { throw 'Missing or ambiguous actual native/caller/geometry libtest executables.' }
-    $symbols = Invoke-Guard 'caller-symbols' 15 5 'nm' @('-D','--defined-only',$geometry[0].executable)
-    if ($symbols -notmatch '(?m)\b__asan_init\s*$') { throw 'Actual caller executable does not export its Rust ASan runtime.' }
+    # Keep the full Rust symbol table out of the guarded logger without truncating admission evidence.
+    $symbolCheck = @'
+import io, os, resource, subprocess, sys, tempfile
+
+def matches(stream):
+    return sum(line.rstrip(b'\n') == b'__asan_init' for line in stream)
+
+for text, expected in [(b'__asan_init\n', 1), (b'other\n__asan_init\n', 1), (b'', 0), (b'prefix__asan_init\n__asan_init_suffix\n', 0), (b'__asan_init\n__asan_init\n', 2)]:
+    assert matches(io.BytesIO(text)) == expected, 'Exact symbol reader regression failed'
+limit = 32 * 1024 * 1024
+resource.setrlimit(resource.RLIMIT_FSIZE, (limit, limit))
+with tempfile.TemporaryFile(dir=sys.argv[2]) as output, tempfile.TemporaryFile(dir=sys.argv[2]) as error:
+    child = subprocess.Popen(['nm', '-D', '--defined-only', '--no-sort', '--format=just-symbols', sys.argv[1]], stdin=subprocess.DEVNULL, stdout=output, stderr=error)
+    print(f'Inspecting defined dynamic symbols pid={child.pid}', flush=True)
+    try:
+        code = child.wait(timeout=3)
+    finally:
+        if child.poll() is None:
+            child.kill()
+            child.wait(timeout=2)
+    if code != 0 or os.fstat(output.fileno()).st_size >= limit or os.fstat(error.fileno()).st_size >= limit:
+        raise RuntimeError('Actual caller symbol inspection failed or exceeded its output bound')
+    output.seek(0)
+    count = matches(output)
+    if count != 1:
+        raise RuntimeError(f'Actual caller requires one defined dynamic ASan runtime symbol; matches={count}')
+print('defined_dynamic_symbol=__asan_init matches=1', flush=True)
+'@
+    $symbols = Invoke-Guard 'caller-symbols' 15 5 'python3' @('-I','-c',$symbolCheck,$geometry[0].executable,$work)
+    if ($symbols -notmatch '(?m)^.*defined_dynamic_symbol=__asan_init matches=1\s*$') { throw 'Actual caller executable does not export its Rust ASan runtime.' }
     $null = Run-Tests 'native-abi-geometry' $callee[0].executable @()
     $null = Run-Tests 'callbacks' $caller[0].executable @('media::callback_tests::') 3
     $geometryOutput = Run-Tests 'display-geometry' $geometry[0].executable @() 2

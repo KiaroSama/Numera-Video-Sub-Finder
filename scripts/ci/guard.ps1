@@ -8,7 +8,8 @@ param(
     [string[]]$Arguments = @(),
     [string]$WorkingDirectory = (Get-Location).Path,
     [string]$CaptureStdoutPath,
-    [string]$ProgressDirectory
+    [string]$ProgressDirectory,
+    [ValidateSet('none','stall')][string]$ProgressContract = 'none'
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -117,107 +118,9 @@ public sealed class NvsfCiOwnership : IDisposable {
     public void Terminate() { if (job != IntPtr.Zero && !TerminateJobObject(job, 124)) throw new Win32Exception(); }
     public void Dispose() { if (job != IntPtr.Zero) { CloseHandle(job); job = IntPtr.Zero; } }
 }
-public sealed class NvsfCiFileProgress : IDisposable {
-    readonly string root;
-    readonly Stopwatch clock = Stopwatch.StartNew();
-    System.Collections.Generic.Dictionary<string, (long size, long written)> previous = new(StringComparer.Ordinal);
-    System.Collections.Generic.Dictionary<string, (long size, long written)> current = new(StringComparer.Ordinal);
-    System.Collections.Generic.IEnumerator<System.IO.FileSystemInfo> ports;
-    System.Collections.Generic.IEnumerator<System.IO.FileSystemInfo> files;
-    bool baseline = true;
-    int directories;
-    double lastSample = -250;
-    public NvsfCiFileProgress(string path) {
-        root = path;
-        try { BeginCycle(); } catch { Dispose(); throw; }
-    }
-    void CheckOperation(long started, string operation) {
-        double elapsed = (Stopwatch.GetTimestamp() - started) * 1000.0 / Stopwatch.Frequency;
-        if (elapsed >= 1000)
-            throw new InvalidOperationException($"Owned build log metadata operation exceeded maximum_ms=1000 operation={operation} elapsed_ms={elapsed:F0} directories={directories} files={current.Count}.");
-    }
-    bool Advance(System.Collections.Generic.IEnumerator<System.IO.FileSystemInfo> iterator, string operation) {
-        long started = Stopwatch.GetTimestamp();
-        bool available = iterator.MoveNext();
-        CheckOperation(started, operation); // Includes false/EOF, before any break or directory transition.
-        return available;
-    }
-    System.IO.FileAttributes Attributes(System.IO.FileSystemInfo entry) {
-        long started = Stopwatch.GetTimestamp();
-        var attributes = entry.Attributes;
-        CheckOperation(started, "entry-attributes");
-        if ((attributes & System.IO.FileAttributes.ReparsePoint) != 0)
-            throw new InvalidOperationException("Owned build log entry may not be linked.");
-        return attributes;
-    }
-    void SelectDirectory(System.IO.DirectoryInfo directory) {
-        long started = Stopwatch.GetTimestamp();
-        bool exists = directory.Exists;
-        CheckOperation(started, "directory-exists");
-        if (!exists || (Attributes(directory) & System.IO.FileAttributes.Directory) == 0)
-            throw new InvalidOperationException("Owned build log directory is missing or invalid.");
-        started = Stopwatch.GetTimestamp();
-        files = directory.EnumerateFileSystemInfos().GetEnumerator();
-        CheckOperation(started, "files-open");
-    }
-    void BeginCycle() {
-        var directory = new System.IO.DirectoryInfo(root);
-        directories = 1;
-        SelectDirectory(directory);
-        long started = Stopwatch.GetTimestamp();
-        ports = directory.EnumerateFileSystemInfos().GetEnumerator();
-        CheckOperation(started, "ports-open");
-    }
-    public bool Consume() {
-        if (clock.Elapsed.TotalMilliseconds - lastSample < 250) return false;
-        var page = Stopwatch.StartNew();
-        bool changed = false;
-        // Unfiltered enumeration makes each raw entry count; MoveNext("*.log") hides non-log scans.
-        for (int entries = 0; entries < 128 && page.ElapsedMilliseconds < 100; entries++) {
-            if (files != null) {
-                if (!Advance(files, "files-next")) {
-                    files.Dispose(); files = null;
-                    continue;
-                }
-                var entry = files.Current;
-                var attributes = Attributes(entry);
-                if ((attributes & System.IO.FileAttributes.Directory) != 0
-                    || !entry.Name.EndsWith(".log", StringComparison.OrdinalIgnoreCase)) continue;
-                if (entry is not System.IO.FileInfo file)
-                    throw new InvalidOperationException("Owned build log entry is not a regular file.");
-                if (current.Count >= 8192)
-                    throw new InvalidOperationException("Owned build log file count exceeded maximum=8192.");
-                // Enumeration supplies cached attributes/size/write time; do not repeat I/O with Refresh.
-                long started = Stopwatch.GetTimestamp();
-                var value = (file.Length, file.LastWriteTimeUtc.Ticks);
-                CheckOperation(started, "log-metadata");
-                current.Add(file.FullName, value);
-                if (!baseline)
-                    changed |= previous.TryGetValue(file.FullName, out var old) ? old != value : value.Item1 > 0;
-            } else if (Advance(ports, "ports-next")) {
-                var entry = ports.Current;
-                if ((Attributes(entry) & System.IO.FileAttributes.Directory) == 0) continue;
-                if (entry is not System.IO.DirectoryInfo port)
-                    throw new InvalidOperationException("Owned build log port is not a directory.");
-                if (++directories > 513)
-                    throw new InvalidOperationException("Owned build log directory count exceeded maximum=513.");
-                SelectDirectory(port);
-            } else {
-                ports.Dispose(); ports = null;
-                previous = current;
-                current = new(StringComparer.Ordinal);
-                baseline = false;
-                BeginCycle();
-                break;
-            }
-        }
-        lastSample = clock.Elapsed.TotalMilliseconds;
-        return changed;
-    }
-    public void Dispose() { files?.Dispose(); ports?.Dispose(); }
-}
 '@
 }
+. (Join-Path $PSScriptRoot 'build-log-client.ps1')
 $process = [Diagnostics.Process]::new()
 $stdoutWriter = $null
 if ($CaptureStdoutPath) {
@@ -245,13 +148,8 @@ try {
     if ($ProgressDirectory) {
         $progressRoot = [IO.Path]::GetFullPath($ProgressDirectory, $root)
         if (-not $progressRoot.StartsWith($root + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) { throw 'Build progress directory must remain inside this project.' }
-        $cursor = $progressRoot
-        while ($cursor.Length -gt $root.Length) {
-            if ((Test-Path -LiteralPath $cursor) -and ((Get-Item -LiteralPath $cursor -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Build progress directory ancestors may not be links.' }
-            $cursor = [IO.Path]::GetDirectoryName($cursor)
-        }
-        [IO.Directory]::CreateDirectory($progressRoot) | Out-Null
-        $fileProgress = [NvsfCiFileProgress]::new($progressRoot)
+        if ($ProgressContract -ne 'none' -and ($Name -notlike 'contract-*' -or -not $progressRoot.StartsWith((Join-Path $root '.ci-work/guard-contract-'),[StringComparison]::Ordinal))) { throw 'Observer fault injection requires an owned hosted contract.' }
+        $fileProgress = Start-BuildLogObserver $progressRoot $ProgressContract
     }
     $command = Get-Command $FilePath -CommandType Application -ErrorAction Stop | Select-Object -First 1
     $info = [Diagnostics.ProcessStartInfo]::new()
@@ -322,7 +220,7 @@ os.execv(exe, [exe, *argv])
     $reads = @($readers[0].ReadAsync($buffers[0], 0, 4096), $readers[1].ReadAsync($buffers[1], 0, 4096))
     $lastProgress = $stopwatch.Elapsed.TotalSeconds
     while ($true) {
-        if ($fileProgress -and $fileProgress.Consume()) {
+        if ($fileProgress -and (Read-BuildLogObserver $fileProgress)) {
             $lastProgress = $stopwatch.Elapsed.TotalSeconds
             if (($lastProgress - $lastFileNotice) -ge 30) {
                 Write-GuardLog 'INFO' 'Owned native build log changed; file content remains in the build diagnostics.'
@@ -407,7 +305,10 @@ os.execv(exe, [exe, *argv])
             Write-GuardLog 'INFO' "Cleanup verified pid=$ownedPid"
         }
     } catch { $code = 1; [Console]::Error.WriteLine("Cleanup failure: $($_.Exception.Message)") }
-    if ($fileProgress) { $fileProgress.Dispose() }
+    if ($fileProgress) {
+        try { Stop-BuildLogObserver $fileProgress }
+        catch { $code = 1; Write-GuardLog 'ERROR' "Observer cleanup failed: $($_.Exception.Message)" }
+    }
     if ($job) { $job.Dispose() }
     $process.Dispose()
     foreach ($path in @($gate, $ready)) { if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Force } }

@@ -14,10 +14,10 @@ $guard = Join-Path $PSScriptRoot 'guard.ps1'
 $pwsh = (Get-Command pwsh -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
 $originalPath = $env:PATH
 $ownedChild = $null
-function Invoke-Contract([string]$Name, [string]$Code, [string]$Capture, [string]$Progress) {
+function Invoke-Contract([string]$Name, [string]$Code, [string]$Capture, [string]$Progress, [string]$ProgressContract = 'none') {
     $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($Code))
     $parameters = @{ Name = "contract-$Name"; WallSeconds = 15; IdleSeconds = 5; FilePath = $pwsh; Arguments = @('-NoLogo','-NoProfile','-NonInteractive','-EncodedCommand',$encoded); WorkingDirectory = $work; CaptureStdoutPath = $Capture }
-    if ($Progress) { $parameters.ProgressDirectory = $Progress }
+    if ($Progress) { $parameters.ProgressDirectory = $Progress; $parameters.ProgressContract = $ProgressContract }
     & $guard @parameters
 }
 try {
@@ -189,7 +189,33 @@ exit 0
         if ($record.schema -ne 1 -or $record.owned_group -le 1 -or @($record.processes).Count -eq 0) { throw 'Actual macOS timeout snapshot is missing or empty.' }
         if (@($record.processes | Where-Object { $_.pgid -ne $record.owned_group }).Count -ne 0 -or @($record.processes | Where-Object { $_.pid -eq $record.owned_group -and $_.executable -eq 'pwsh' }).Count -ne 1) { throw 'Actual macOS snapshot did not identify the owned root/group.' }
     }
-    [Console]::WriteLine("Guard contracts passed: tests=$cases failed=0 skipped=0; Unicode, exit status, child cleanup, quiet log progress, frozen log timeout and platform process-handle semantics.")
+    $stalledCode = @'
+for($i=0;$i -lt 12;$i++) {
+    [Console]::WriteLine("stream-progress=$i")
+    [Threading.Thread]::Sleep(500)
+}
+[Threading.Thread]::Sleep(60000)
+'@
+    $stalledCapture = Join-Path $work 'stalled.stdout'
+    $rejected = $false
+    $elapsed = [Diagnostics.Stopwatch]::StartNew()
+    try { Invoke-Contract 'stalled-observer' $stalledCode $stalledCapture $progress 'stall' }
+    catch { $rejected = $_.Exception.Message -match 'exit_code=124' }
+    if (-not $rejected -or $elapsed.Elapsed.TotalSeconds -ge 20 -or [IO.File]::ReadAllLines($stalledCapture,$utf8).Count -ne 12) { throw 'Stalled observer blocked stream progress, deadlines or bounded cleanup.' }
+    $rejected = $false
+    $invalidProgress = Join-Path $work 'invalid-buildlogs'
+    [IO.File]::WriteAllText($invalidProgress,'a regular file cannot be a log directory',$utf8)
+    try { Invoke-Contract 'observer-error' '[Threading.Thread]::Sleep(60000)' (Join-Path $work 'observer-error.stdout') $invalidProgress }
+    catch { $rejected = $_.Exception.Message -match 'exit_code=1' }
+    if (-not $rejected) { throw 'Observer failure was accepted or misreported as a timeout.' }
+    foreach ($name in 'file-progress','frozen-progress','stalled-observer','observer-error') {
+        $logs = @(Get-ChildItem -LiteralPath (Join-Path $root '.ci-work/logs') -File -Filter "guard-contract-$name`_*_UTC.log")
+        if ($logs.Count -ne 1) { throw 'Missing unique observer regression evidence.' }
+        $text = [IO.File]::ReadAllText($logs[0].FullName,$utf8)
+        if ($text -notmatch 'Observer cleanup verified pid=\d+' -or ($name -ne 'observer-error' -and $text -notmatch 'Cleanup verified pid=\d+')) { throw 'Observer or started payload cleanup was not verified.' }
+    }
+    $cases += 2
+    [Console]::WriteLine("Guard contracts passed: tests=$cases failed=0 skipped=0; Unicode, exit status, child cleanup, quiet/frozen/noisy logs, stalled/error observer ownership and platform process-handle semantics.")
     $global:LASTEXITCODE = 0
 } finally {
     $env:PATH = $originalPath
