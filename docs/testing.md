@@ -2,7 +2,15 @@
 
 All application compilation and execution checks run in GitHub Actions on the exact commit. The six native target rows are required, with maximum three concurrently hosted jobs, two build/test/native threads per runner, command/HTTP/job bounds and owned process cleanup. Missing jobs, wrong source SHA and missing reports fail the aggregate; no broad continue-on-error or fake passing badges.
 
-## Latest verified batch and pending production model
+## Current model-admission work
+
+The next T010 slice validates each embedded YAML's pinned SHA256, model family, ordered inference transforms, declared normalization/resize/postprocessor and exact CTC vocabulary before native session initialization. It preserves dictionary order and duplicate tokens, including the specialist's existing space. Actual ORT sessions must have one Float32 input/output with compatible ranks, batch/channel/height/vocabulary declarations and variable spatial/time axes matching the existing tensor producer. The detector's pinned ONNX output channel is symbolic: admission permits that declaration, while the actual output still must have one channel. Ordinary initialization and diagnostic replay use the same gates.
+
+Tiny metadata mutation tests and tensor-type/shape tests reuse the existing app library/integration suites, with no native initialization, downloads, sleeps or new dependencies. Existing six-target native OCR/specialist/replay witnesses exercise real session admission. This source is **NOT_RUN** until its exact-source Actions batch. It changes no pixels, resizing, DB regions, CTC ordering or provider policy; declaration compatibility is not PaddleOCR/PaddleX preprocessing parity, real-language accuracy or physical precision qualification.
+
+## Latest verified batch and production model
+
+[Exact19176f8/run40866103538](https://github.com/KiaroSama/Numera-Video-Sub-Finder/actions/runs/40866103538) passes all16 jobs, all six native targets and both aggregates. The actual CAS-based close-admission model explores191 executions with one passing test; hostile inherited exploration settings do not skip it. Linux reports206 ordinary cases,13 GUI behaviors,22 Rust ASan/LSan cases and6736/8054 measured lines (83.64%), critical91.38%, with full-product qualification false. That exact source is merged into main and its fully merged temporary branch deleted. The pending descriptions in the historical checkpoints below refer only to those earlier sources; this green result does not verify the new T010 candidate.
 
 [Exact `a029d4973637dae32cad88c25ffadf957dc5f69e`](https://github.com/KiaroSama/Numera-Video-Sub-Finder/actions/runs/40798353437) passes all15 jobs, all six native targets and both aggregates. The source is merged into main. Intel's sampler assembly initialization takes184ms, initial baselines526/438ms, all eight Unix guard contracts pass, the admitted Trunk version check takes0.78seconds, and actual GUI/production checks complete in14.84/5.94seconds. The actual Linux Rust caller/cdylib/std ASan/LSan tier also passes; uninstrumented C and full-product qualification remain separate. Older authored/pending descriptions below are historical checkpoints, superseded only within this verified scope.
 

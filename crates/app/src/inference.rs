@@ -3,7 +3,6 @@ use image::RgbImage;
 use ndarray::{Array4, ArrayViewD};
 use nvsf_core::Recognition;
 use ort::{environment::Environment, session::Session, value::TensorRef};
-use serde::Deserialize;
 
 pub type InferenceObserver<'a> = dyn FnMut(&str, &[usize], &[f32]) -> Result<()> + 'a;
 
@@ -18,16 +17,6 @@ pub struct Ocr {
     _runtime: libloading::Library,
 }
 
-#[derive(Deserialize)]
-struct Meta {
-    #[serde(rename = "PostProcess")]
-    post: Post,
-}
-#[derive(Deserialize)]
-struct Post {
-    character_dict: Vec<String>,
-}
-
 impl Ocr {
     pub fn new(
         paths: &Paths,
@@ -36,6 +25,24 @@ impl Ocr {
         threads: usize,
         required: bool,
     ) -> Result<Self> {
+        let detector_metadata =
+            crate::model_contract::validate_metadata("det", models::metadata("det")?)?;
+        let id = if language == "ja-specialist" {
+            Some("ja-specialist")
+        } else {
+            nvsf_core::languages::find(language)
+                .ok_or_else(|| fail("Choose a language from the official catalog"))?;
+            nvsf_core::languages::paddle_model(language)
+        };
+        let recognizer_metadata = id
+            .map(|id| crate::model_contract::validate_metadata(id, models::metadata(id)?))
+            .transpose()?;
+        if id.is_none() && required {
+            return Err(crate::AppError::Provider(
+                "This language uses Tesseract CPU recognition; required acceleration cannot be met"
+                    .into(),
+            ));
+        }
         let runtime = paths.runtime(if cfg!(windows) {
             "onnxruntime.dll"
         } else if cfg!(target_os = "macos") {
@@ -63,21 +70,9 @@ impl Ocr {
             env
         };
         drop(guard);
-        let id = if language == "ja-specialist" {
-            Some("ja-specialist")
-        } else {
-            nvsf_core::languages::find(language)
-                .ok_or_else(|| fail("Choose a language from the official catalog"))?;
-            nvsf_core::languages::paddle_model(language)
-        };
-        if id.is_none() && required {
-            return Err(crate::AppError::Provider(
-                "This language uses Tesseract CPU recognition; required acceleration cannot be met"
-                    .into(),
-            ));
-        }
         let det = models::verify(paths, "det")?;
         let (detector, provider) = providers::session(&env, &det, device, threads, required)?;
+        crate::session_contract::validate(&detector, detector_metadata.classes)?;
         let mut dictionary = Vec::new();
         let (recognizer, tesseract) = if let Some(id) = id {
             let rec = models::verify(paths, id)?;
@@ -86,11 +81,10 @@ impl Ocr {
             if actual != provider {
                 return Err(fail("Detection and recognition provider mismatch"));
             }
-            let meta: Meta = serde_yaml_ng::from_str(models::metadata(id)?)
-                .map_err(|e| fail(format!("Invalid model dictionary: {e}")))?;
-            dictionary.push(String::new());
-            dictionary.extend(meta.post.character_dict);
-            dictionary.push(" ".into());
+            let metadata =
+                recognizer_metadata.ok_or_else(|| fail("Missing recognition metadata contract"))?;
+            crate::session_contract::validate(&recognizer, metadata.classes)?;
+            dictionary = metadata.dictionary;
             (Some(recognizer), None)
         } else {
             (
@@ -139,6 +133,7 @@ impl Ocr {
         {
             return Err(fail("Invalid bounded replay tensor/model"));
         }
+        let metadata = crate::model_contract::validate_metadata(model, models::metadata(model)?)?;
         let mut builder =
             providers::cpu(Session::builder(&self._environment).map_err(|e| fail(e.to_string()))?)?
                 .with_intra_threads(2)
@@ -153,6 +148,7 @@ impl Ocr {
         let mut session = builder
             .commit_from_file(models::verify(paths, model)?)
             .map_err(|e| fail(e.to_string()))?;
+        crate::session_contract::validate(&session, metadata.classes)?;
         {
             let outputs = session
                 .run(ort::inputs![
