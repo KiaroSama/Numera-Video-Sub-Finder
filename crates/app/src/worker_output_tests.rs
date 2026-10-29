@@ -3,27 +3,33 @@ use super::*;
 #[test]
 fn output_frames_partial_unicode_and_multiple_events_without_waiting_for_eof() {
     let mut messages = Messages::default();
-    assert!(messages.next(false).unwrap().is_none());
+    assert!(messages.next(false, "job-17").unwrap().is_none());
     messages
-        .append(b"{\"type\":\"Failed\",\"data\":\"")
+        .append(b"{\"schema\":1,\"job_id\":\"job-17\",\"payload\":{\"type\":\"Failed\",\"data\":\"")
         .unwrap();
     messages.append(&[0xd8]).unwrap();
-    assert!(messages.next(false).unwrap().is_none());
+    assert!(messages.next(false, "job-17").unwrap().is_none());
     messages.append(&[0xb3]).unwrap();
     messages
-        .append(b"\"}\n{\"type\":\"Failed\",\"data\":\"second\"}\n")
+        .append(b"\"}}\n{\"schema\":1,\"job_id\":\"job-17\",\"payload\":{\"type\":\"Failed\",\"data\":\"second\"}}\n")
         .unwrap();
-    assert!(matches!(messages.next(false).unwrap(), Some(Event::Failed(text)) if text == "س"));
-    assert!(matches!(messages.next(false).unwrap(), Some(Event::Failed(text)) if text == "second"));
-    assert!(messages.next(false).unwrap().is_none());
+    assert!(
+        matches!(messages.next(false, "job-17").unwrap(), Some(Event::Failed(text)) if text == "س")
+    );
+    assert!(
+        matches!(messages.next(false, "job-17").unwrap(), Some(Event::Failed(text)) if text == "second")
+    );
+    assert!(messages.next(false, "job-17").unwrap().is_none());
     messages
-        .append(b"{\"type\":\"Failed\",\"data\":\"final\"}")
+        .append(b"{\"schema\":1,\"job_id\":\"job-17\",\"payload\":{\"type\":\"Failed\",\"data\":\"final\"}}")
         .unwrap();
-    assert!(messages.next(false).unwrap().is_none());
-    assert!(matches!(messages.next(true).unwrap(), Some(Event::Failed(text)) if text == "final"));
+    assert!(messages.next(false, "job-17").unwrap().is_none());
+    assert!(
+        matches!(messages.next(true, "job-17").unwrap(), Some(Event::Failed(text)) if text == "final")
+    );
     assert!(messages.empty());
     messages.append(b"not-json\n").unwrap();
-    assert!(messages.next(false).is_err());
+    assert!(messages.next(false, "job-17").is_err());
 }
 
 #[test]
@@ -38,7 +44,7 @@ fn native_output_remains_nonblocking_until_real_child_data_and_eof() {
         let mut command = Command::new("/bin/sh");
         command.args([
             "-c",
-            "read token; printf '%s\\n' '{\"type\":\"Failed\",\"data\":\"ready\"}'; read release",
+            "read token; printf '%s\\n' '{\"schema\":1,\"job_id\":\"job-17\",\"payload\":{\"type\":\"Failed\",\"data\":\"ready\"}}'; read release",
         ]);
         command
     };
@@ -47,7 +53,7 @@ fn native_output_remains_nonblocking_until_real_child_data_and_eof() {
         use std::os::windows::process::CommandExt;
         let mut command = Command::new("cmd.exe");
         command.args(["/D", "/Q", "/C"]).raw_arg(
-            r#"set /p NVSF_INPUT=&echo {"type":"Failed","data":"ready"}&set /p NVSF_RELEASE="#,
+            r#"set /p NVSF_INPUT=&echo {"schema":1,"job_id":"job-17","payload":{"type":"Failed","data":"ready"}}&set /p NVSF_RELEASE="#,
         );
         command.creation_flags(0x08000000);
         command
@@ -73,7 +79,7 @@ fn native_output_remains_nonblocking_until_real_child_data_and_eof() {
         }
     }
     let mut child = Cleanup(child);
-    let mut output = Output::new(child.0.stdout.take().unwrap()).unwrap();
+    let mut output = Output::new(child.0.stdout.take().unwrap(), "job-17").unwrap();
     assert!(matches!(output.poll().unwrap(), Poll::Pending));
     let mut input = child.0.stdin.take().unwrap();
     input.write_all(b"go\r\n").unwrap();
@@ -111,7 +117,7 @@ fn native_output_remains_nonblocking_until_real_child_data_and_eof() {
 fn output_rejects_unterminated_and_oversized_frames() {
     let mut messages = Messages::default();
     messages.append(b"{\"type\":").unwrap();
-    assert!(messages.next(true).is_err());
+    assert!(messages.next(true, "job-17").is_err());
     let mut messages = Messages::default();
     let page = [b'x'; 8192];
     for _ in 0..LIMIT / page.len() {

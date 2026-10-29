@@ -2,6 +2,10 @@
 
 Updated: 2026-10-29. **NOT a release acceptance report.** Hosted observations below refer to the exact named SHA; corrective source is not a passing result.
 
+## Pending worker/download completion
+
+New source implements the originally specified version1/job-correlated extraction-worker envelopes and bounded request/event/control codecs, updating existing native pipe/fault/parent-lease witnesses. Wrong schema, foreign job IDs, malformed controls and event-write failures fail closed. Cooperative cancellation/deadline checks additionally cover download hash loops and the cached-success path without changing integrity, partial preservation, atomic activation or600/20 transfer budgets. These changes are **NOT_RUN**, separate from the published T010 candidate. No full process-tree/native-hang, hard filesystem-preemption or whole-product qualification is inferred.
+
 ## Current model-admission candidate
 
 The next T010 source adds pinned YAML hash/profile/transform/dictionary admission before native initialization and validates actual ORT input/output contracts before an OCR engine or replay session can be used. Ordered vocabulary and intentional duplicate spaces are preserved. Static hash-verified inspection of all four exact ONNX artifacts confirms dynamic detector spatial axes and dynamic recognizer width/time with fixed vocabularies749/18385/4401. The detector output channel is symbolic, so static admission accepts it while retaining the existing actual-output channel-one assertion. Incompatible fixed spatial declarations are rejected rather than accepted until a later inference failure.

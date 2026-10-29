@@ -2,6 +2,12 @@
 
 All application compilation and execution checks run in GitHub Actions on the exact commit. The six native target rows are required, with maximum three concurrently hosted jobs, two build/test/native threads per runner, command/HTTP/job bounds and owned process cleanup. Missing jobs, wrong source SHA and missing reports fail the aggregate; no broad continue-on-error or fake passing badges.
 
+## Current worker and download contracts
+
+The next original-scope slice wraps extraction requests, events and pause/cancel flags in schema1 messages bound to the private invocation's job ID. Request serialization/read is bounded1MiB; events retain64MiB framing and include the newline within that limit. The supervisor rejects wrong versions/job IDs before callbacks. Malformed controls or failed event writes cancel the worker rather than silently continuing. Existing partial-Unicode pipe, five process-fault and parent-lease scenarios use the same envelope; no extra process tier or larger deadline is introduced. Small literal codec/control tests cover malformed, legacy, cross-job and oversized messages.
+
+Model download verification now hashes in bounded64KiB chunks with cancellation/deadline checks before and after each read, including cached destinations and final EOF. Partial verification, copy, temporary rehash and pre-persist checks retain existing bytes on failure. The600-second total/20-second response budgets are unchanged. Filesystem calls remain cooperatively checked, not hard-preempted. New cached-cancellation and hash-reader cases reuse existing suites. These worker/download changes are **NOT_RUN** until their own exact-source Actions batch; the prior T010 run does not verify them.
+
 ## Current model-admission work
 
 The next T010 slice validates each embedded YAML's pinned SHA256, model family, ordered inference transforms, declared normalization/resize/postprocessor and exact CTC vocabulary before native session initialization. It preserves dictionary order and duplicate tokens, including the specialist's existing space. Actual ORT sessions must have one Float32 input/output with compatible ranks, batch/channel/height/vocabulary declarations and variable spatial/time axes matching the existing tensor producer. The detector's pinned ONNX output channel is symbolic: admission permits that declaration, while the actual output still must have one channel. Ordinary initialization and diagnostic replay use the same gates.

@@ -255,7 +255,12 @@ fn parent_lease_loss(cli: &Path, paths: &Paths, root: &Path) -> Result<()> {
     use std::process::Stdio;
     let control = root.join("parent-lease");
     std::fs::create_dir(&control)?;
-    storage::write_atomic(&control.join("pause"), b"pause", false)?;
+    let job_id = nvsf_app::worker::protocol::job_id(&control)?;
+    storage::write_atomic(
+        &control.join("pause"),
+        &nvsf_app::worker::protocol::encode(job_id, &"pause", 1024)?,
+        false,
+    )?;
     let checkpoint = control.join("paused.nvsf.json");
     let config = nvsf_core::ExtractConfig {
         input: root
@@ -274,7 +279,15 @@ fn parent_lease_loss(cli: &Path, paths: &Paths, root: &Path) -> Result<()> {
         ..Default::default()
     };
     let request = control.join("request.json");
-    storage::write_atomic(&request, &serde_json::to_vec(&config)?, false)?;
+    storage::write_atomic(
+        &request,
+        &nvsf_app::worker::protocol::encode(
+            job_id,
+            &config,
+            nvsf_app::worker::protocol::CONTROL_LIMIT,
+        )?,
+        false,
+    )?;
     let capture = control.join("worker.log");
     let log = std::fs::File::create(&capture)?;
     let mut command = Command::new(cli);

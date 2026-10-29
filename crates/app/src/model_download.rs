@@ -1,7 +1,4 @@
-use crate::{
-    Result, fail,
-    storage::{JobLock, hash_file},
-};
+use crate::{Result, fail, storage::JobLock};
 use std::{
     io::{Read, Write},
     path::Path,
@@ -25,15 +22,18 @@ pub fn install(
     {
         return Err(fail("Invalid immutable model download contract"));
     }
+    check_transfer(cancel, deadline)?;
     let _lock = JobLock::acquire(&destination.with_extension("download.lock"))?;
+    check_transfer(cancel, deadline)?;
     let partial = destination.with_extension("partial");
     if partial.is_symlink() || destination.is_symlink() {
         return Err(fail("Model destination must not be a symlink"));
     }
     if destination.is_file()
         && destination.metadata()?.len() == bytes
-        && hash_file(destination)? == sha256
+        && hash_path(destination, bytes, cancel, deadline)? == sha256
     {
+        check_transfer(cancel, deadline)?;
         return Ok(());
     }
     let offset = if partial.is_file() {
@@ -190,6 +190,49 @@ fn check_transfer(cancel: &AtomicBool, deadline: Instant) -> Result<()> {
     Ok(())
 }
 
+fn hash_path(path: &Path, bytes: u64, cancel: &AtomicBool, deadline: Instant) -> Result<String> {
+    check_transfer(cancel, deadline)?;
+    let file = std::fs::File::open(path)?;
+    hash_reader(file, bytes, cancel, deadline)
+}
+
+fn hash_reader(
+    mut reader: impl Read,
+    bytes: u64,
+    cancel: &AtomicBool,
+    deadline: Instant,
+) -> Result<String> {
+    use sha2::{Digest, Sha256};
+    let mut hash = Sha256::new();
+    let mut buffer = [0u8; 65536];
+    let mut received = 0u64;
+    loop {
+        check_transfer(cancel, deadline)?;
+        let read = reader.read(&mut buffer);
+        check_transfer(cancel, deadline)?;
+        let count = read?;
+        if count == 0 {
+            break;
+        }
+        received = received
+            .checked_add(count as u64)
+            .ok_or_else(|| fail("Model hash size overflow"))?;
+        if received > bytes {
+            return Err(fail("Model hash exceeds declared size"));
+        }
+        hash.update(&buffer[..count]);
+    }
+    if received != bytes {
+        return Err(fail("Model hash length differs from declared size"));
+    }
+    check_transfer(cancel, deadline)?;
+    Ok(hash
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect())
+}
+
 fn activate(
     partial: &Path,
     destination: &Path,
@@ -199,7 +242,8 @@ fn activate(
     deadline: Instant,
 ) -> Result<()> {
     check_transfer(cancel, deadline)?;
-    if partial.metadata()?.len() != bytes || hash_file(partial)? != sha256 {
+    if partial.metadata()?.len() != bytes || hash_path(partial, bytes, cancel, deadline)? != sha256
+    {
         return Err(fail(
             "Model integrity failed; partial bytes retained, existing model unchanged",
         ));
@@ -213,7 +257,9 @@ fn activate(
     let mut buffer = [0u8; 65536];
     loop {
         check_transfer(cancel, deadline)?;
-        let count = source.read(&mut buffer)?;
+        let read = source.read(&mut buffer);
+        check_transfer(cancel, deadline)?;
+        let count = read?;
         if count == 0 {
             break;
         }
@@ -221,7 +267,9 @@ fn activate(
     }
     drop(source);
     tmp.as_file().sync_all()?;
-    if tmp.as_file().metadata()?.len() != bytes || hash_file(tmp.path())? != sha256 {
+    if tmp.as_file().metadata()?.len() != bytes
+        || hash_path(tmp.path(), bytes, cancel, deadline)? != sha256
+    {
         return Err(fail(
             "Model changed during activation; existing model preserved",
         ));
