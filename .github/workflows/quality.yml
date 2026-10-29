@@ -50,6 +50,42 @@ jobs:
             .ci-work/logs/
           if-no-files-found: error
           retention-days: 7
+  loom:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249
+        with:
+          toolchain: 1.99.1
+      - name: Project-owned model state
+        run: |
+          foreach ($dir in 'temp','logs','cargo') { New-Item -ItemType Directory -Force -Path ".ci-work/$dir" | Out-Null }
+          "CARGO_HOME=$env:GITHUB_WORKSPACE/.ci-work/cargo" >> $env:GITHUB_ENV
+          foreach ($name in 'TMP','TEMP','TMPDIR') { "$name=$env:GITHUB_WORKSPACE/.ci-work/temp" >> $env:GITHUB_ENV }
+      - name: Actual production close-admission Loom model
+        env:
+          # These would otherwise admit zero or partial model exploration.
+          LOOM_CHECKPOINT_INTERVAL: '1'
+          LOOM_MAX_PERMUTATIONS: '1'
+          LOOM_MAX_DURATION: '0'
+          LOOM_MAX_PREEMPTIONS: '0'
+          LOOM_CHECKPOINT_FILE: '.ci-work/loom/untrusted-checkpoint'
+        run: ./scripts/ci/loom.ps1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
+        with:
+          name: loom-evidence-${{ github.sha }}
+          path: |
+            .ci-work/loom/loom-report.json
+            .ci-work/loom/model.stdout
+            .ci-work/loom/loom_*.log
+            .ci-work/logs/
+          if-no-files-found: error
+          retention-days: 7
   fuzz:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
