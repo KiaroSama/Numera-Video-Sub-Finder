@@ -121,6 +121,12 @@ public sealed class NvsfCiOwnership : IDisposable {
 '@
 }
 . (Join-Path $PSScriptRoot 'build-log-client.ps1')
+. (Join-Path $PSScriptRoot 'build-log-assembly.ps1')
+$observerAssembly = $null
+if ($ProgressDirectory) {
+    try { $observerAssembly = Get-BuildLogAssembly }
+    catch { $writer.Dispose(); throw }
+}
 $process = [Diagnostics.Process]::new()
 $stdoutWriter = $null
 if ($CaptureStdoutPath) {
@@ -149,7 +155,7 @@ try {
         $progressRoot = [IO.Path]::GetFullPath($ProgressDirectory, $root)
         if (-not $progressRoot.StartsWith($root + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) { throw 'Build progress directory must remain inside this project.' }
         if ($ProgressContract -ne 'none' -and ($Name -notlike 'contract-*' -or -not $progressRoot.StartsWith((Join-Path $root '.ci-work/guard-contract-'),[StringComparison]::Ordinal))) { throw 'Observer fault injection requires an owned hosted contract.' }
-        $fileProgress = Start-BuildLogObserver $progressRoot $ProgressContract
+        $fileProgress = Start-BuildLogObserver $progressRoot $ProgressContract $observerAssembly
     }
     $command = Get-Command $FilePath -CommandType Application -ErrorAction Stop | Select-Object -First 1
     $info = [Diagnostics.ProcessStartInfo]::new()

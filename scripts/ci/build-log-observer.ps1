@@ -1,6 +1,6 @@
 #requires -Version 7.4
 [CmdletBinding()]
-param([Parameter(Mandatory)][string]$Directory,[Parameter(Mandatory)][string]$Checkout,[ValidateSet('none','stall')][string]$Contract='none')
+param([Parameter(Mandatory)][string]$Directory,[Parameter(Mandatory)][string]$Checkout,[Parameter(Mandatory)][string]$Assembly,[ValidateSet('none','stall')][string]$Contract='none')
 $ErrorActionPreference='Stop'
 Set-StrictMode -Version Latest
 if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_ENVIRONMENT -ne 'github-hosted') { throw 'Build log observation is hosted-only.' }
@@ -10,14 +10,17 @@ if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_ENVIRONMENT -ne 'github-hoste
 if ([Console]::ReadLine() -cne 'GO') { exit 2 }
 try {
     if ($Contract -ne 'none' -and -not $Directory.StartsWith((Join-Path $Checkout '.ci-work/guard-contract-'),[StringComparison]::Ordinal)) { throw 'Invalid observer contract scope.' }
-    Add-Type -Path (Join-Path $PSScriptRoot 'build-log-progress.cs')
+    $phase=[Diagnostics.Stopwatch]::StartNew()
+    if (-not $Assembly.StartsWith((Join-Path $Checkout '.ci-work/observer-assembly-'),[StringComparison]::Ordinal) -or (Get-Item -LiteralPath $Assembly -Force).LinkType) { throw 'Invalid observer assembly path.' }
+    Add-Type -LiteralPath $Assembly
+    [Console]::WriteLine("PHASE loaded_ms=$($phase.ElapsedMilliseconds)")
     if ($Contract -eq 'stall') { [Threading.Thread]::Sleep(60000); exit 3 }
     $sampler=[NvsfCiFileProgress]::new($Directory,$Checkout)
     try {
         $initialized=$false
         while ($true) {
             $changed=$sampler.Consume()
-            if (-not $initialized -and $sampler.Initialized) { [Console]::WriteLine('BASELINE'); $initialized=$true }
+            if (-not $initialized -and $sampler.Initialized) { [Console]::WriteLine("PHASE baseline_ms=$($phase.ElapsedMilliseconds)"); [Console]::WriteLine('BASELINE'); $initialized=$true }
             if ($changed) { [Console]::WriteLine('CHANGE') }
             # Cooperative scheduling only: never a heartbeat or parent deadline reset.
             [Threading.Thread]::Sleep(20)

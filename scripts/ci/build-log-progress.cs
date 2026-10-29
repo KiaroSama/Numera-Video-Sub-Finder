@@ -44,7 +44,8 @@ public sealed class NvsfCiFileProgress : IDisposable {
     }
     public bool Initialized => !baseline;
     public bool Consume() {
-        if (clock.Elapsed.TotalMilliseconds - lastSample < 250) return false;
+        // The first snapshot reports no progress: page/yield it without steady-state polling delays.
+        if (!baseline && clock.Elapsed.TotalMilliseconds - lastSample < 250) return false;
         var page = Stopwatch.StartNew();
         bool changed = false;
         // Raw entries count, including source noise; do not hide scans behind a glob.
