@@ -1,3 +1,4 @@
+pub mod close_admission;
 mod edit;
 mod export;
 mod geometry;

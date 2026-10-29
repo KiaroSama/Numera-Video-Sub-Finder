@@ -70,7 +70,7 @@ pub struct Inner {
     pub unsaved: std::sync::atomic::AtomicBool,
     pub closing: std::sync::atomic::AtomicBool,
     pub exit_approved: std::sync::atomic::AtomicBool,
-    close_pending: std::sync::atomic::AtomicBool,
+    close_pending: nvsf_core::close_admission::CloseAdmission,
     pub maintenance: crate::updates::Maintenance,
 }
 
@@ -106,7 +106,7 @@ impl Host {
             unsaved: std::sync::atomic::AtomicBool::new(false),
             closing: std::sync::atomic::AtomicBool::new(false),
             exit_approved: std::sync::atomic::AtomicBool::new(false),
-            close_pending: std::sync::atomic::AtomicBool::new(false),
+            close_pending: nvsf_core::close_admission::CloseAdmission::default(),
             maintenance: crate::updates::Maintenance::default(),
         }))
     }
@@ -166,16 +166,9 @@ impl Host {
         Ok(())
     }
     pub async fn wait_to_close(&self, budget: std::time::Duration) -> Result<bool> {
-        if self.0.close_pending.swap(true, Ordering::AcqRel) {
+        let Some(_pending) = self.0.close_pending.try_begin() else {
             return Ok(false);
-        }
-        struct Pending<'a>(&'a std::sync::atomic::AtomicBool);
-        impl Drop for Pending<'_> {
-            fn drop(&mut self) {
-                self.0.store(false, Ordering::Release);
-            }
-        }
-        let _pending = Pending(&self.0.close_pending);
+        };
         self.0.source_cancel.store(true, Ordering::Release);
         let deadline = tokio::time::Instant::now() + budget;
         loop {

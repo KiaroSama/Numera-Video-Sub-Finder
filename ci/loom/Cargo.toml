@@ -1,0 +1,15 @@
+[package]
+name = "nvsf-close-loom"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99"
+license = "GPL-3.0-or-later"
+publish = false
+
+[workspace]
+
+[dev-dependencies]
+loom = "=0.7.2"
+
+[lints.rust]
+unexpected_cfgs = { level = "deny", check-cfg = ['cfg(loom)'] }

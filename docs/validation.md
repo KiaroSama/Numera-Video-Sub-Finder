@@ -1,6 +1,12 @@
 # Validation status
 
-Updated: 2026-10-27. **NOT a release acceptance report.** Hosted observations below refer to the exact named SHA; corrective source is not a passing result.
+Updated: 2026-10-29. **NOT a release acceptance report.** Hosted observations below refer to the exact named SHA; corrective source is not a passing result.
+
+## Latest verified development source
+
+[Exact `a029d4973637dae32cad88c25ffadf957dc5f69e`](https://github.com/KiaroSama/Numera-Video-Sub-Finder/actions/runs/40798353437) completes all15 jobs successfully, including all six native targets and both aggregates. That exact source was fast-forwarded into main, with the fully merged temporary branch deleted locally and remotely. Actual Rust caller/cdylib/std ASan/LSan execution, parser fuzzing, optional numeric model admission, direct native macOS observation and the Intel official Trunk route pass within their declared scopes. Intel records184ms sampler initialization,526/438ms initial baselines, eight passing guard contracts and actual GUI/production checks in14.84/5.94seconds. This is not independently annotated real-language quality, physical acceleration, full native-C instrumentation, platform signing or release acceptance.
+
+The pending production-close concurrency slice shares the actual RAII atomic admission source between the desktop and one test-only Loom model. Explicit exploration settings prevent inherited environment limits/checkpoints from silently admitting partial or empty exploration; a hostile-environment hosted invocation and actual multi-execution count make that regression load-bearing. The runner retains source/hash/count/cleanup checks and180/60 limits. This new source is **NOT_RUN**, so the green parent batch does not verify it. Full operation/install/job concurrency, real-model cancellation/tree-absence and deterministic timeout qualification remain open. Historical pending descriptions below are superseded only by the exact evidence stated here.
 
 ## Current verified integration
 
