@@ -10,10 +10,15 @@ pub struct CloseAdmission {
 
 impl CloseAdmission {
     pub fn try_begin(&self) -> Option<PendingClose<'_>> {
-        if self.pending.swap(true, Ordering::AcqRel) {
-            None
-        } else {
+        // Rejected requests must not add a write to the admission flag.
+        if self
+            .pending
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_ok()
+        {
             Some(PendingClose { admission: self })
+        } else {
+            None
         }
     }
 }
