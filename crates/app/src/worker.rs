@@ -6,6 +6,8 @@ use serde::{Deserialize, Serialize};
 mod output;
 #[path = "worker_process.rs"]
 pub(crate) mod process;
+#[path = "worker_protocol.rs"]
+pub mod protocol;
 #[cfg(windows)]
 #[path = "worker_windows.rs"]
 mod windows;
@@ -34,7 +36,12 @@ pub fn supervise(
     let paths = Paths::new(config.data_root.as_deref().map(Path::new))?;
     let scratch = tempfile::tempdir_in(&paths.cache)?;
     let request = scratch.path().join("request.json");
-    write_atomic(&request, &serde_json::to_vec(&config)?, false)?;
+    let job_id = protocol::job_id(scratch.path())?;
+    write_atomic(
+        &request,
+        &protocol::encode(job_id, &config, protocol::CONTROL_LIMIT)?,
+        false,
+    )?;
     let mut command = Command::new(process::executable()?);
     command
         .arg("worker")
@@ -55,7 +62,7 @@ pub fn supervise(
     let pid = child.id();
     log.event("INFO", "WORKER", &format!("Spawned pid={pid}"));
     let stdout = child.stdout()?;
-    let mut reader = output::Output::new(stdout)?;
+    let mut reader = output::Output::new(stdout, job_id)?;
     let deadline = Instant::now() + Duration::from_secs(24 * 3600);
     let mut heartbeat = Instant::now();
     let mut output = None;
@@ -67,7 +74,7 @@ pub fn supervise(
             let pause = control.pause.load(Ordering::Relaxed);
             let flag = scratch.path().join("pause");
             if pause && !flag.exists() {
-                write_atomic(&flag, b"pause", false)?;
+                write_atomic(&flag, &protocol::encode(job_id, &"pause", 1024)?, false)?;
             } else if !pause && flag.exists() {
                 std::fs::remove_file(&flag)?;
             }
@@ -75,7 +82,11 @@ pub fn supervise(
                 || Instant::now() >= deadline
                 || (!pause && heartbeat.elapsed() > Duration::from_secs(300))
             {
-                let _ = write_atomic(&scratch.path().join("cancel"), b"cancel", false);
+                let _ = write_atomic(
+                    &scratch.path().join("cancel"),
+                    &protocol::encode(job_id, &"cancel", 1024)?,
+                    false,
+                );
                 let grace = Instant::now() + Duration::from_secs(2);
                 while Instant::now() < grace {
                     if child.exited()? {

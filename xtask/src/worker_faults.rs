@@ -129,7 +129,18 @@ pub fn dispatch_fixture() -> Result<bool> {
                         message: String::new(),
                     });
                     let mut stdout = std::io::stdout().lock();
-                    serde_json::to_writer(&mut stdout, &event)?;
+                    let args: Vec<_> = std::env::args_os().collect();
+                    let control = args
+                        .windows(2)
+                        .find(|pair| pair[0] == "--control")
+                        .map(|pair| Path::new(&pair[1]))
+                        .ok_or("Missing fixture worker control directory")?;
+                    let job_id = worker::protocol::job_id(control)?;
+                    stdout.write_all(&worker::protocol::encode(
+                        job_id,
+                        &event,
+                        worker::protocol::EVENT_LIMIT - 1,
+                    )?)?;
                     stdout.write_all(b"\n")?;
                     stdout.flush()?;
                 }

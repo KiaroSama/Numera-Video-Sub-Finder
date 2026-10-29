@@ -1,8 +1,8 @@
-use super::Event;
+use super::{Event, protocol};
 use crate::{Result, fail};
 use std::{io::Read, process::ChildStdout};
 
-const LIMIT: usize = 64 * 1024 * 1024;
+const LIMIT: usize = protocol::EVENT_LIMIT;
 
 #[derive(Default)]
 struct Messages {
@@ -24,7 +24,7 @@ impl Messages {
         self.bytes.is_empty()
     }
 
-    fn next(&mut self, eof: bool) -> Result<Option<Event>> {
+    fn next(&mut self, eof: bool, job_id: &str) -> Result<Option<Event>> {
         let end = self.bytes[self.scanned..]
             .iter()
             .position(|byte| *byte == b'\n')
@@ -37,7 +37,7 @@ impl Messages {
                 return Ok(None);
             }
         };
-        let event = serde_json::from_slice(&self.bytes[..count])?;
+        let event = protocol::decode(&self.bytes[..count], job_id, LIMIT)?;
         self.bytes.drain(..count);
         self.scanned = 0;
         Ok(Some(event))
@@ -55,22 +55,24 @@ pub(super) enum Poll {
 pub(super) struct Output {
     pipe: ChildStdout,
     messages: Messages,
+    job_id: String,
     eof: bool,
 }
 
 impl Output {
-    pub(super) fn new(pipe: ChildStdout) -> Result<Self> {
+    pub(super) fn new(pipe: ChildStdout, job_id: &str) -> Result<Self> {
         #[cfg(unix)]
         nonblocking(&pipe)?;
         Ok(Self {
             pipe,
             messages: Messages::default(),
+            job_id: job_id.into(),
             eof: false,
         })
     }
 
     pub(super) fn poll(&mut self) -> Result<Poll> {
-        if let Some(event) = self.messages.next(self.eof)? {
+        if let Some(event) = self.messages.next(self.eof, &self.job_id)? {
             return Ok(Poll::Event(event));
         }
         if self.eof {
