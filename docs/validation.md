@@ -2,7 +2,15 @@
 
 Updated: 2026-10-29. **NOT a release acceptance report.** Hosted observations below refer to the exact named SHA; corrective source is not a passing result.
 
+## Current model-admission candidate
+
+The next T010 source adds pinned YAML hash/profile/transform/dictionary admission before native initialization and validates actual ORT input/output contracts before an OCR engine or replay session can be used. Ordered vocabulary and intentional duplicate spaces are preserved. Static hash-verified inspection of all four exact ONNX artifacts confirms dynamic detector spatial axes and dynamic recognizer width/time with fixed vocabularies749/18385/4401. The detector output channel is symbolic, so static admission accepts it while retaining the existing actual-output channel-one assertion. Incompatible fixed spatial declarations are rejected rather than accepted until a later inference failure.
+
+This candidate's pure negative/positive contracts and real six-target session paths are **NOT_RUN**. The previously green source does not verify these edits. No pixel-processing algorithm or provider selection changes; metadata/session compatibility does not certify upstream preprocessing equivalence, independent real en/fa/ja quality or physical acceleration.
+
 ## Latest verified development source
+
+[Exact19176f8/run40866103538](https://github.com/KiaroSama/Numera-Video-Sub-Finder/actions/runs/40866103538) completes all16 jobs, all six native targets and both aggregates successfully. The CAS-based production-close model records191 actual executions/one passing test; actual Linux suites record206 cases,13 GUI behaviors,22 Rust ASan/LSan cases and6736/8054 measured lines (83.64%), critical91.38%. That exact source is merged into main and its merged temporary branch deleted. Full-product qualification remains false. Earlier pending model descriptions below are historical; the new T010 candidate is not verified by this parent result.
 
 [Exact `a029d4973637dae32cad88c25ffadf957dc5f69e`](https://github.com/KiaroSama/Numera-Video-Sub-Finder/actions/runs/40798353437) completes all15 jobs successfully, including all six native targets and both aggregates. That exact source was fast-forwarded into main, with the fully merged temporary branch deleted locally and remotely. Actual Rust caller/cdylib/std ASan/LSan execution, parser fuzzing, optional numeric model admission, direct native macOS observation and the Intel official Trunk route pass within their declared scopes. Intel records184ms sampler initialization,526/438ms initial baselines, eight passing guard contracts and actual GUI/production checks in14.84/5.94seconds. This is not independently annotated real-language quality, physical acceleration, full native-C instrumentation, platform signing or release acceptance.
 
