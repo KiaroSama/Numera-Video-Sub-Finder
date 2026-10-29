@@ -163,6 +163,8 @@ exit 0
 '@
     Invoke-Contract 'file-progress' $quietCode (Join-Path $work 'quiet.stdout') $progress
     if ([IO.File]::ReadAllLines((Join-Path $progress 'ffmpeg/build.log'), $utf8).Count -ne 12) { throw 'Quiet build did not complete every actual log write.' }
+    $assemblyBefore = $global:NvsfBuildLogAssembly.path
+    $assemblyHashBefore = $global:NvsfBuildLogAssembly.hash
     $rejected = $false
     $frozenCode = @'
 $deadline=[DateTime]::UtcNow.AddSeconds(12)
@@ -182,6 +184,7 @@ exit 0
         if ($_.Exception.Message -match ' log=(.+)$') { $failureLog = $Matches[1] }
     }
     if (-not $rejected) { throw 'Existing unchanged build logs incorrectly reset the idle deadline.' }
+    if ($global:NvsfBuildLogAssembly.path -cne $assemblyBefore -or $global:NvsfBuildLogAssembly.hash -cne $assemblyHashBefore) { throw 'Guard recompiled or replaced its source-bound observer assembly.' }
     if ($IsMacOS) {
         if (-not $failureLog) { throw 'Frozen timeout did not retain its exact log identity.' }
         $snapshotPath = $failureLog + '.processes.json'

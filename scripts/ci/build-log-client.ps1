@@ -1,11 +1,11 @@
 # Dot-sourced by guard.ps1 after its shared OS ownership type is loaded.
-function Start-BuildLogObserver([string]$Directory,[string]$Contract) {
+function Start-BuildLogObserver([string]$Directory,[string]$Contract,[string]$Assembly) {
     $process=[Diagnostics.Process]::new()
-    $state=@{process=$process;job=$null;group=$null;started=$false;assigned=$false;read=$null;error=$null;ready=$false;baseline=$false;pid=0}
+    $state=@{process=$process;job=$null;group=$null;started=$false;assigned=$false;read=$null;error=$null;ready=$false;baseline=$false;phase='starting';pid=0}
     try {
         $info=[Diagnostics.ProcessStartInfo]::new()
         $pwsh=(Get-Command pwsh -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
-        $args=@('-NoLogo','-NoProfile','-NonInteractive','-File',(Join-Path $PSScriptRoot 'build-log-observer.ps1'),'-Directory',$Directory,'-Checkout',$root,'-Contract',$Contract)
+        $args=@('-NoLogo','-NoProfile','-NonInteractive','-File',(Join-Path $PSScriptRoot 'build-log-observer.ps1'),'-Directory',$Directory,'-Checkout',$root,'-Assembly',$Assembly,'-Contract',$Contract)
         $info.WorkingDirectory=$root
         $info.UseShellExecute=$false
         $info.CreateNoWindow=$true
@@ -37,7 +37,8 @@ function Start-BuildLogObserver([string]$Directory,[string]$Contract) {
         }
         if ($state.read.GetAwaiter().GetResult() -cne 'READY') { throw 'Invalid observer ownership readiness.' }
         if (-not $IsWindows) { $state.group=$process.Id }
-        Write-GuardLog 'INFO' "Owned build log observer pid=$($state.pid)"
+        $state.phase="ready_ms=$($startup.ElapsedMilliseconds)"
+        Write-GuardLog 'INFO' "Owned build log observer pid=$($state.pid) $($state.phase)"
         $process.StandardInput.WriteLine('GO')
         $process.StandardInput.Close()
         $state.ready=$true
@@ -45,7 +46,7 @@ function Start-BuildLogObserver([string]$Directory,[string]$Contract) {
         if ($Contract -ne 'stall') {
             while (-not $state.baseline) {
                 $null=Read-BuildLogObserver $state
-                if ($startup.Elapsed.TotalSeconds -ge [Math]::Min(20,[Math]::Min($WallSeconds,$IdleSeconds))) { throw 'Observer baseline exceeded startup deadline.' }
+                if ($startup.Elapsed.TotalSeconds -ge [Math]::Min(20,[Math]::Min($WallSeconds,$IdleSeconds))) { throw "Observer baseline exceeded startup deadline elapsed_ms=$($startup.ElapsedMilliseconds) last_phase=$($state.phase)." }
                 [Threading.Thread]::Sleep(20)
             }
         }
@@ -64,7 +65,11 @@ function Read-BuildLogObserver($State) {
     # Bounded in-memory pipe work; never filesystem I/O or a wait on the deadline owner.
     for ($i=0;$i -lt 8 -and $State.read.IsCompleted;$i++) {
         $line=$State.read.GetAwaiter().GetResult()
-        if ($line -ceq 'BASELINE' -and -not $State.baseline) { $State.baseline=$true }
+        if ($line -cmatch '^PHASE (loaded_ms|baseline_ms)=([0-9]{1,10})$' -and -not $State.baseline) {
+            $State.phase=$line.Substring(6)
+            Write-GuardLog 'INFO' "Observer phase $($State.phase)"
+        }
+        elseif ($line -ceq 'BASELINE' -and -not $State.baseline) { $State.baseline=$true }
         elseif ($line -ceq 'CHANGE' -and $State.baseline) { $changed=$true }
         else { throw 'Build log observer failed or its control pipe closed.' }
         $State.read=$State.process.StandardOutput.ReadLineAsync()
