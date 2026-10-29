@@ -2,6 +2,10 @@
 
 All application compilation and execution checks run in GitHub Actions on the exact commit. The six native target rows are required, with maximum three concurrently hosted jobs, two build/test/native threads per runner, command/HTTP/job bounds and owned process cleanup. Missing jobs, wrong source SHA and missing reports fail the aggregate; no broad continue-on-error or fake passing badges.
 
+## Model-admission batch outcome
+
+[Exactcb81c52/run40916835180](https://github.com/KiaroSama/Numera-Video-Sub-Finder/actions/runs/40916835180) completes with five native targets and all eight shared jobs successful. Linux executes all seven new metadata/session contracts successfully, alongside the existing actual OCR/model/replay paths. Intel macOS fails before application compilation when GitHub DNS resolution prevents downloading curl8.22.0 source (curl exit6); native command and observer cleanup are verified. Both aggregate gates therefore fail. All six outcomes were collected before the next integrated publication; no deadline, signature check or model assertion was weakened.
+
 ## Current worker and download contracts
 
 The next original-scope slice wraps extraction requests, events and pause/cancel flags in schema1 messages bound to the private invocation's job ID. Request serialization/read is bounded1MiB; events retain64MiB framing and include the newline within that limit. The supervisor rejects wrong versions/job IDs before callbacks. Malformed controls or failed event writes cancel the worker rather than silently continuing. Existing partial-Unicode pipe, five process-fault and parent-lease scenarios use the same envelope; no extra process tier or larger deadline is introduced. Small literal codec/control tests cover malformed, legacy, cross-job and oversized messages.

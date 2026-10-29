@@ -2,6 +2,10 @@
 
 Updated: 2026-10-29. **NOT a release acceptance report.** Hosted observations below refer to the exact named SHA; corrective source is not a passing result.
 
+## Model-admission candidate outcome
+
+[Exactcb81c52/run40916835180](https://github.com/KiaroSama/Numera-Video-Sub-Finder/actions/runs/40916835180) completes with five native targets and all eight shared jobs successful. Linux's seven new metadata/session tests and actual OCR/replay/model paths pass. Intel macOS stops before application compilation because curl cannot resolve GitHub while fetching curl8.22.0 source (exit6); command and observer cleanup succeed. This is an external acquisition failure, not evidence of an application/model-contract defect. Both aggregates fail, so no current-source all-green or merge is claimed. All target outcomes were collected before the next worker/download publication.
+
 ## Pending worker/download completion
 
 New source implements the originally specified version1/job-correlated extraction-worker envelopes and bounded request/event/control codecs, updating existing native pipe/fault/parent-lease witnesses. Wrong schema, foreign job IDs, malformed controls and event-write failures fail closed. Cooperative cancellation/deadline checks additionally cover download hash loops and the cached-success path without changing integrity, partial preservation, atomic activation or600/20 transfer budgets. These changes are **NOT_RUN**, separate from the published T010 candidate. No full process-tree/native-hang, hard filesystem-preemption or whole-product qualification is inferred.
