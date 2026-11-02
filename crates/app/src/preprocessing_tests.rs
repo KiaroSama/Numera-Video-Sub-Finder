@@ -2,14 +2,14 @@ use super::*;
 use image::{Rgb, RgbImage};
 
 #[test]
-fn detector_limits_without_upscaling_and_rounds_ties_even() {
+fn detector_retains_deployed_scale_and_validates_dimensions() {
     for (source, expected) in [
-        ((320, 160), (320, 160)),
+        ((320, 160), (960, 480)),
         ((1920, 1080), (960, 544)),
-        ((80, 112), (64, 128)),
-        ((112, 80), (128, 64)),
+        ((80, 112), (672, 960)),
+        ((112, 80), (960, 672)),
         ((4000, 1), (960, 32)),
-        ((1, 1), (32, 32)),
+        ((1, 1), (960, 960)),
     ] {
         assert_eq!(detector_size(source.0, source.1).unwrap(), expected);
     }
@@ -33,11 +33,11 @@ fn recognition_uses_floor_padding_ceil_content_and_no_minimum_eight() {
 }
 
 #[test]
-fn padded_detection_coordinates_preserve_clip_and_drop_original_image_edges() {
+fn detection_coordinates_follow_source_axes() {
     for (left, right, expected) in [
         (1, 3, vec![(0, 2, 6, 10)]),
-        (7, 10, vec![(5, 2, 5, 10)]),
-        (20, 23, vec![]),
+        (7, 10, vec![(5, 2, 8, 10)]),
+        (20, 23, vec![(18, 2, 8, 10)]),
     ] {
         let mut map = Array4::<f32>::zeros((1, 1, 32, 32));
         for y in 4..8 {
@@ -46,7 +46,7 @@ fn padded_detection_coordinates_preserve_clip_and_drop_original_image_edges() {
             }
         }
         assert_eq!(
-            detected_regions(map.view().into_dyn(), 32, 32, 10, 40).unwrap(),
+            detected_regions(map.view().into_dyn(), 32, 32, 32, 40).unwrap(),
             expected
         );
     }
@@ -63,10 +63,10 @@ fn asymmetric_resize_preserves_spatial_channels_without_modifying_source() {
     });
     let original = source.clone();
     let tensor = detector(&source).unwrap();
-    assert_eq!(tensor.shape(), [1, 3, 96, 64]);
+    assert_eq!(tensor.shape(), [1, 3, 960, 800]);
     assert!((tensor[[0, 2, 0, 0]] - 2.64).abs() < 0.001);
-    assert!((tensor[[0, 0, 95, 63]] - 2.2489083).abs() < 0.001);
-    assert!((tensor[[0, 2, 95, 63]] + 1.8044444).abs() < 0.001);
+    assert!((tensor[[0, 0, 959, 799]] - 2.2489083).abs() < 0.001);
+    assert!((tensor[[0, 2, 959, 799]] + 1.8044444).abs() < 0.001);
     let tensor = recognition(&source).unwrap();
     assert_eq!(tensor.shape(), [1, 3, 48, 320]);
     assert_eq!(tensor[[0, 2, 0, 0]], 1.0);
@@ -89,8 +89,8 @@ fn tensors_preserve_bgr_channel_order_and_zero_normalized_padding() {
     }
     let tiny = RgbImage::from_pixel(1, 1, Rgb([255, 0, 0]));
     let tensor = detector(&tiny).unwrap();
-    assert_eq!(tensor.shape(), [1, 3, 32, 32]);
+    assert_eq!(tensor.shape(), [1, 3, 960, 960]);
     assert!((tensor[[0, 2, 0, 0]] - 2.64).abs() < 0.001);
-    assert!((tensor[[0, 2, 31, 31]] + 1.8044444).abs() < 0.001);
+    assert!((tensor[[0, 2, 959, 959]] - 2.64).abs() < 0.001);
     assert_eq!(tiny.get_pixel(0, 0).0, [255, 0, 0]);
 }
