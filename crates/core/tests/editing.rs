@@ -118,7 +118,7 @@ fn exports_have_known_independent_wire_format() {
         "WEBVTT\n\n00:00:01.234 --> 00:00:05.678\nA ۱۵\n日本\n\n"
     );
     let ass = nvsf_core::export_ass(&[c]).unwrap();
-    assert!(ass.contains("Dialogue: 0,00:00:01.23,00:00:05.67,Default,,0,0,0,,A ۱۵\\N日本"));
+    assert!(ass.contains("Dialogue: 0,00:00:01.23,00:00:05.68,Default,,0,0,0,,A ۱۵\\N日本"));
     assert_eq!(nvsf_core::parse_time("01:02:03,004").unwrap(), 3_723_004);
     assert!(nvsf_core::parse_time("18446744073709551615:00:00,000").is_err());
 }

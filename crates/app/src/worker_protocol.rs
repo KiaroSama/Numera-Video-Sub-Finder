@@ -9,6 +9,49 @@ pub const CONTROL_LIMIT: usize = 1024 * 1024;
 pub const EVENT_LIMIT: usize = 64 * 1024 * 1024;
 
 #[derive(Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FailureKind {
+    InvalidConfig,
+    Cancelled,
+    Provider,
+    Operation,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Failure {
+    kind: FailureKind,
+    message: String,
+}
+
+impl Failure {
+    pub fn from_error(error: &crate::AppError) -> Self {
+        use crate::AppError;
+        let kind = match error {
+            AppError::InvalidConfig(_) => FailureKind::InvalidConfig,
+            AppError::Cancelled => FailureKind::Cancelled,
+            AppError::Provider(_) => FailureKind::Provider,
+            _ => FailureKind::Operation,
+        };
+        let message = match error {
+            AppError::InvalidConfig(message) | AppError::Provider(message) => message.clone(),
+            _ => error.to_string(),
+        };
+        Self { kind, message }
+    }
+
+    pub fn into_error(self) -> crate::AppError {
+        use crate::AppError;
+        match self.kind {
+            FailureKind::InvalidConfig => AppError::InvalidConfig(self.message),
+            FailureKind::Cancelled => AppError::Cancelled,
+            FailureKind::Provider => AppError::Provider(self.message),
+            FailureKind::Operation => fail(self.message),
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Envelope<T> {
     schema: u32,

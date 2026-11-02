@@ -83,6 +83,10 @@ Choose a local video with visible burned-in subtitles and a different `.srt` out
 ./nvsf extract --input "video with subtitles.mp4" --output "subtitles.srt" --language fra --quality accurate --device auto
 ```
 
+CLI extraction, benchmark, resume and batch return **2** when completed output contains any cue still marked unreviewed, matching the workspace's **Needs review** filter. This is a usable completed result, not an extraction failure: the subtitles and checkpoint are preserved. An empty or fully reviewed result returns **0**. Other statuses are **3** invalid arguments/configuration, **4** operational/extraction failure, **5** cancellation and **6** unavailable required provider; help/version return **0**. Batch continues past completed review-needed items but stops on an actual failure. Diagnostic messages stay on stderr; extraction summaries on stdout are JSON.
+
+SRT, VTT and ASS keep distinct tracks separate. For multiple tracks, the chosen output contains the lowest-numbered primary track, with `.track-<id>.<format>` files for every track; it does not silently combine bilingual tracks. JSON retains the complete project. ASS represents time in centiseconds, enclosing millisecond intervals with at most 9 ms expansion at each edge so a short cue is never silently erased.
+
 Review source frames and uncertain cues before exporting. Save a review project before changing source, starting another job, repairing resources or installing an update. Checkpoints require matching source/configuration/selected-resource identities; installing unrelated language packs does not change that fingerprint. A checkpoint from an incompatible older fingerprint scheme may be refused rather than silently resumed.
 
 ## Updates, data and troubleshooting

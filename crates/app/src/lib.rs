@@ -36,6 +36,8 @@ pub enum AppError {
     Json(#[from] serde_json::Error),
     #[error("Operation failed: {0}")]
     Message(String),
+    #[error("Invalid configuration: {0}")]
+    InvalidConfig(String),
     #[error("Job cancelled; completed checkpoint preserved")]
     Cancelled,
     #[error("Required provider unavailable: {0}")]

@@ -19,6 +19,27 @@ fn worker_messages_require_the_expected_version_and_job_identity() {
 }
 
 #[test]
+fn typed_failures_preserve_categories_without_parsing_messages() {
+    use nvsf_app::AppError;
+    for error in [
+        AppError::Provider("provider detail".into()),
+        AppError::Cancelled,
+        AppError::InvalidConfig("configuration detail".into()),
+        nvsf_app::fail("Required provider unavailable: not a category"),
+    ] {
+        let expected = std::mem::discriminant(&error);
+        let event = Event::Failure(protocol::Failure::from_error(&error));
+        let bytes = protocol::encode("job-17", &event, 4096).unwrap();
+        let Event::Failure(decoded) = protocol::decode(&bytes, "job-17", 4096).unwrap() else {
+            panic!("Typed failure was lost");
+        };
+        assert_eq!(std::mem::discriminant(&decoded.into_error()), expected);
+    }
+    let unknown = br#"{"schema":1,"job_id":"job-17","payload":{"type":"Failure","data":{"kind":"unknown","message":"x"}}}"#;
+    assert!(protocol::decode::<Event>(unknown, "job-17", 4096).is_err());
+}
+
+#[test]
 fn bounded_codec_rejects_oversized_serialization_and_reads() {
     let bytes = protocol::encode("job-17", &"literal", 1024).unwrap();
     assert!(protocol::encode("job-17", &"literal", bytes.len()).is_ok());

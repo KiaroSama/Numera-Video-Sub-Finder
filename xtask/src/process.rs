@@ -49,6 +49,16 @@ impl OwnedProcess {
         wall: Duration,
         idle: Duration,
     ) -> Result<(), Box<dyn Error>> {
+        self.wait_code(capture, wall, idle, 0)
+    }
+
+    pub fn wait_code(
+        &mut self,
+        capture: &Path,
+        wall: Duration,
+        idle: Duration,
+        expected: i32,
+    ) -> Result<(), Box<dyn Error>> {
         let mut length = 0;
         let mut last_output = Instant::now();
         loop {
@@ -57,7 +67,7 @@ impl OwnedProcess {
                 if text.len() <= 1024 * 1024 {
                     eprintln!("{text}");
                 }
-                return if status.success() {
+                return if status.code() == Some(expected) {
                     Ok(())
                 } else {
                     Err(format!("Owned process failed: {status}").into())
