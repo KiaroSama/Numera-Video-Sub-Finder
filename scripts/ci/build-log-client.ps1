@@ -89,22 +89,25 @@ function Stop-BuildLogObserver($State) {
             if ($IsWindows -and $State.assigned) {
                 $State.job.Terminate()
             } elseif ($State.group) {
+                $cleanup=[Diagnostics.Stopwatch]::StartNew()
+                [int[]]$pendingErrors=if ($IsMacOS) { @(0,1) } else { @(0) }
                 $groupError=[NvsfCiOwnership]::SignalGroup($State.group,0)
                 if ($groupError -eq 0) {
                     $groupError=[NvsfCiOwnership]::SignalGroup($State.group,9)
-                    if ($groupError -notin @(0,3)) { throw "Observer group termination failed error=$groupError." }
-                } elseif ($groupError -ne 3) { throw "Observer group state unavailable error=$groupError." }
+                    if ($groupError -notin ($pendingErrors + @(3))) { throw "Observer group termination failed error=$groupError." }
+                } elseif ($groupError -notin ($pendingErrors + @(3))) { throw "Observer group state unavailable error=$groupError." }
             } elseif (-not $p.HasExited) { $p.Kill($true) }
-            if (-not $p.WaitForExit(3000)) { throw 'Observer root was not reaped within three seconds.' }
+            $remainingMs=if ($State.group) { [int][Math]::Max(0,3000-$cleanup.ElapsedMilliseconds) } else { 3000 }
+            if (-not $p.WaitForExit($remainingMs)) { throw 'Observer root was not reaped within three seconds.' }
             $p.Close()
-            $cleanup=[Diagnostics.Stopwatch]::StartNew()
+            if (-not $State.group) { $cleanup=[Diagnostics.Stopwatch]::StartNew() }
             if ($IsWindows -and $State.assigned) {
                 while ($State.job.Active() -gt 0 -and $cleanup.Elapsed.TotalSeconds -lt 3) { [Threading.Thread]::Sleep(20) }
                 if ($State.job.Active() -gt 0) { throw 'Observer job still has live processes.' }
             } elseif ($State.group) {
                 do {
                     $groupError=[NvsfCiOwnership]::SignalGroup($State.group,0)
-                    if ($groupError -ne 0) { break }
+                    if ($groupError -notin $pendingErrors) { break }
                     if ($cleanup.Elapsed.TotalSeconds -ge 3) { break }
                     [Threading.Thread]::Sleep(20)
                 } while ($true)

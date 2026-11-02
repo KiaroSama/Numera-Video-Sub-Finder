@@ -37,10 +37,26 @@ fn artifacts() -> Result<Vec<Artifact>> {
     Ok(pack.artifacts)
 }
 pub fn install(paths: &Paths, cancel: &AtomicBool) -> Result<()> {
+    install_with_progress(paths, cancel, &|_, _, _, _| {})
+}
+
+/// Reports artifact ordinal and synchronous downloader progress without paths or URLs.
+pub fn install_with_progress(
+    paths: &Paths,
+    cancel: &AtomicBool,
+    progress: &dyn Fn(usize, &'static str, u64, u64),
+) -> Result<()> {
     let root = paths.models.join("assistant");
     std::fs::create_dir_all(&root)?;
-    for a in artifacts()? {
-        crate::model_download::install(&a.url, a.bytes, &a.sha256, &root.join(a.file), cancel)?;
+    for (index, a) in artifacts()?.into_iter().enumerate() {
+        crate::model_download::install_with_progress(
+            &a.url,
+            a.bytes,
+            &a.sha256,
+            &root.join(a.file),
+            cancel,
+            &|stage, done, total| progress(index, stage, done, total),
+        )?;
     }
     Ok(())
 }

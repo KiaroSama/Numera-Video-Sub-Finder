@@ -309,14 +309,22 @@ os.execv(exe, [exe, *argv])
                     if ($code -eq 0) { $code = 1; Write-GuardLog 'ERROR' 'Successful command left owned descendants; terminated and rejected.' }
                 }
             } elseif ($group) {
+                $cleanup = [Diagnostics.Stopwatch]::StartNew()
+                [int[]]$pendingErrors = if ($IsMacOS) { @(0,1) } else { @(0) }
                 $groupError = [NvsfCiOwnership]::SignalGroup($group, 0)
-                if ($groupError -eq 0) {
-                    $groupError = [NvsfCiOwnership]::SignalGroup($group, 9)
-                    if ($groupError -notin @(0,3)) { throw "Owned Unix process group termination failed error=$groupError." }
-                    $cleanup = [Diagnostics.Stopwatch]::StartNew()
+                if ($groupError -in $pendingErrors) {
+                    if ($groupError -eq 0) {
+                        $groupError = [NvsfCiOwnership]::SignalGroup($group, 9)
+                        if ($groupError -notin ($pendingErrors + @(3))) { throw "Owned Unix process group termination failed error=$groupError." }
+                    }
+                    if (-not $rootExited) {
+                        $remainingMs = [int][Math]::Max(0, 10000 - $cleanup.ElapsedMilliseconds)
+                        if (-not $process.WaitForExit($remainingMs)) { throw 'Owned Unix root did not exit within cleanup deadline.' }
+                        $process.Close(); $rootExited = $true
+                    }
                     do {
                         $groupError = [NvsfCiOwnership]::SignalGroup($group, 0)
-                        if ($groupError -ne 0 -or $cleanup.Elapsed.TotalSeconds -ge 10) { break }
+                        if ($groupError -notin $pendingErrors -or $cleanup.Elapsed.TotalSeconds -ge 10) { break }
                         [Threading.Thread]::Sleep(20)
                     } while ($true)
                     if ($groupError -ne 3) { throw "Owned Unix process group cleanup could not be verified error=$groupError." }

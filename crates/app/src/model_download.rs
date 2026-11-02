@@ -13,6 +13,20 @@ pub fn install(
     destination: &Path,
     cancel: &AtomicBool,
 ) -> Result<()> {
+    install_with_progress(url, bytes, sha256, destination, cancel, &|_, _, _| {})
+}
+
+/// Synchronous stage entry (zero bytes) or completed bytes; callbacks must not block.
+pub type Progress<'a> = dyn Fn(&'static str, u64, u64) + 'a;
+
+pub fn install_with_progress(
+    url: &str,
+    bytes: u64,
+    sha256: &str,
+    destination: &Path,
+    cancel: &AtomicBool,
+    progress: &Progress<'_>,
+) -> Result<()> {
     let deadline = Instant::now() + Duration::from_secs(600);
     if !url.starts_with("https://")
         || bytes == 0
@@ -31,7 +45,14 @@ pub fn install(
     }
     if destination.is_file()
         && destination.metadata()?.len() == bytes
-        && hash_path(destination, bytes, cancel, deadline)? == sha256
+        && hash_path(
+            destination,
+            bytes,
+            cancel,
+            deadline,
+            progress,
+            "verify-installed",
+        )? == sha256
     {
         check_transfer(cancel, deadline)?;
         return Ok(());
@@ -48,7 +69,15 @@ pub fn install(
     }
     check_transfer(cancel, deadline)?;
     if offset == bytes {
-        return activate(&partial, destination, bytes, sha256, cancel, deadline);
+        return activate(
+            &partial,
+            destination,
+            bytes,
+            sha256,
+            cancel,
+            deadline,
+            progress,
+        );
     }
     let client = reqwest::blocking::Client::builder()
         .https_only(true)
@@ -67,6 +96,7 @@ pub fn install(
             destination,
             cancel,
             deadline,
+            progress,
         },
     )
 }
@@ -111,6 +141,7 @@ struct Transfer<'a> {
     destination: &'a Path,
     cancel: &'a AtomicBool,
     deadline: Instant,
+    progress: &'a Progress<'a>,
 }
 
 impl Transfer<'_> {
@@ -127,6 +158,7 @@ impl Transfer<'_> {
             destination,
             cancel,
             deadline,
+            progress,
         } = *self;
         let partial = destination.with_extension("partial");
         if offset > 0 && !partial_content {
@@ -147,6 +179,7 @@ impl Transfer<'_> {
         file.seek(std::io::SeekFrom::Start(offset))?;
         let mut buffer = [0u8; 65536];
         let mut received = offset;
+        progress("download", received, bytes);
         loop {
             check_transfer(cancel, deadline)?;
             let n = match response.read(&mut buffer) {
@@ -167,14 +200,25 @@ impl Transfer<'_> {
                 return Err(fail("Model download exceeds declared size"));
             }
             file.write_all(&buffer[..n])?;
+            progress("download", received, bytes);
         }
+        progress("sync-download", 0, bytes);
+        check_transfer(cancel, deadline)?;
         file.flush()?;
         file.sync_all()?;
         drop(file);
         if received != bytes {
             return Err(fail("Incomplete model download; partial bytes retained"));
         }
-        activate(&partial, destination, bytes, sha256, cancel, deadline)
+        activate(
+            &partial,
+            destination,
+            bytes,
+            sha256,
+            cancel,
+            deadline,
+            progress,
+        )
     }
 }
 
@@ -190,10 +234,17 @@ fn check_transfer(cancel: &AtomicBool, deadline: Instant) -> Result<()> {
     Ok(())
 }
 
-fn hash_path(path: &Path, bytes: u64, cancel: &AtomicBool, deadline: Instant) -> Result<String> {
+fn hash_path(
+    path: &Path,
+    bytes: u64,
+    cancel: &AtomicBool,
+    deadline: Instant,
+    progress: &Progress<'_>,
+    stage: &'static str,
+) -> Result<String> {
     check_transfer(cancel, deadline)?;
     let file = std::fs::File::open(path)?;
-    hash_reader(file, bytes, cancel, deadline)
+    hash_reader(file, bytes, cancel, deadline, progress, stage)
 }
 
 fn hash_reader(
@@ -201,11 +252,14 @@ fn hash_reader(
     bytes: u64,
     cancel: &AtomicBool,
     deadline: Instant,
+    progress: &Progress<'_>,
+    stage: &'static str,
 ) -> Result<String> {
     use sha2::{Digest, Sha256};
     let mut hash = Sha256::new();
     let mut buffer = [0u8; 65536];
     let mut received = 0u64;
+    progress(stage, 0, bytes);
     loop {
         check_transfer(cancel, deadline)?;
         let read = reader.read(&mut buffer);
@@ -221,6 +275,7 @@ fn hash_reader(
             return Err(fail("Model hash exceeds declared size"));
         }
         hash.update(&buffer[..count]);
+        progress(stage, received, bytes);
     }
     if received != bytes {
         return Err(fail("Model hash length differs from declared size"));
@@ -240,9 +295,11 @@ fn activate(
     sha256: &str,
     cancel: &AtomicBool,
     deadline: Instant,
+    progress: &Progress<'_>,
 ) -> Result<()> {
     check_transfer(cancel, deadline)?;
-    if partial.metadata()?.len() != bytes || hash_path(partial, bytes, cancel, deadline)? != sha256
+    if partial.metadata()?.len() != bytes
+        || hash_path(partial, bytes, cancel, deadline, progress, "verify-partial")? != sha256
     {
         return Err(fail(
             "Model integrity failed; partial bytes retained, existing model unchanged",
@@ -255,6 +312,8 @@ fn activate(
     let mut tmp = tempfile::NamedTempFile::new_in(parent)?;
     let mut source = std::fs::File::open(partial)?.take(bytes + 1);
     let mut buffer = [0u8; 65536];
+    let mut copied = 0u64;
+    progress("copy", 0, bytes);
     loop {
         check_transfer(cancel, deadline)?;
         let read = source.read(&mut buffer);
@@ -264,16 +323,21 @@ fn activate(
             break;
         }
         tmp.write_all(&buffer[..count])?;
+        copied += count as u64;
+        progress("copy", copied, bytes);
     }
     drop(source);
+    progress("sync-copy", 0, bytes);
+    check_transfer(cancel, deadline)?;
     tmp.as_file().sync_all()?;
     if tmp.as_file().metadata()?.len() != bytes
-        || hash_path(tmp.path(), bytes, cancel, deadline)? != sha256
+        || hash_path(tmp.path(), bytes, cancel, deadline, progress, "verify-copy")? != sha256
     {
         return Err(fail(
             "Model changed during activation; existing model preserved",
         ));
     }
+    progress("activate", 0, bytes);
     check_transfer(cancel, deadline)?;
     tmp.persist(destination).map_err(|e| e.error)?;
     std::fs::remove_file(partial)?;

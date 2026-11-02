@@ -15,6 +15,7 @@ fn resumed_and_restarted_streams_activate_only_the_declared_bytes() {
         destination: &destination,
         cancel: &cancel,
         deadline: Instant::now() + Duration::from_secs(2),
+        progress: &|_, _, _| {},
     };
     std::fs::write(&destination, b"old model").unwrap();
     std::fs::write(&partial, b"hello ").unwrap();
@@ -44,6 +45,7 @@ fn invalid_ranges_short_oversized_and_corrupt_streams_preserve_installed_model()
         destination: &destination,
         cancel: &cancel,
         deadline: Instant::now() + Duration::from_secs(2),
+        progress: &|_, _, _| {},
     };
     std::fs::write(&destination, b"old model").unwrap();
     for range in ["", "bytes 5-10/11", "bytes 6-10/12"] {
@@ -95,11 +97,26 @@ fn bounded_hash_checks_cancellation_after_data_eof_and_failed_reads() {
     let cancel = AtomicBool::new(false);
     let deadline = Instant::now() + Duration::from_secs(2);
     assert_eq!(
-        hash_reader(Cursor::new(b"hello world"), 11, &cancel, deadline).unwrap(),
+        hash_reader(
+            Cursor::new(b"hello world"),
+            11,
+            &cancel,
+            deadline,
+            &|_, _, _| {},
+            "test"
+        )
+        .unwrap(),
         HASH
     );
     assert!(matches!(
-        hash_reader(CancelOnRead(&cancel), 11, &cancel, deadline),
+        hash_reader(
+            CancelOnRead(&cancel),
+            11,
+            &cancel,
+            deadline,
+            &|_, _, _| {},
+            "test"
+        ),
         Err(crate::AppError::Cancelled)
     ));
     cancel.store(false, Ordering::Release);
@@ -117,21 +134,112 @@ fn bounded_hash_checks_cancellation_after_data_eof_and_failed_reads() {
         }
     }
     assert!(matches!(
-        hash_reader(CancelAtEnd(&cancel, false), 11, &cancel, deadline),
+        hash_reader(
+            CancelAtEnd(&cancel, false),
+            11,
+            &cancel,
+            deadline,
+            &|_, _, _| {},
+            "test"
+        ),
         Err(crate::AppError::Cancelled)
     ));
     cancel.store(false, Ordering::Release);
-    assert!(hash_reader(Cursor::new(b"hello world!"), 11, &cancel, deadline).is_err());
-    assert!(hash_reader(Cursor::new(b"hello"), 11, &cancel, deadline).is_err());
     assert!(
-        hash_reader(Cursor::new(b"hello world"), 11, &cancel, Instant::now())
-            .unwrap_err()
-            .to_string()
-            .contains("600-second deadline")
+        hash_reader(
+            Cursor::new(b"hello world!"),
+            11,
+            &cancel,
+            deadline,
+            &|_, _, _| {},
+            "test"
+        )
+        .is_err()
     );
     assert!(
-        matches!(hash_reader(FailedRead, 11, &cancel, deadline), Err(crate::AppError::Io(ref e)) if e.kind() == io::ErrorKind::TimedOut)
+        hash_reader(
+            Cursor::new(b"hello"),
+            11,
+            &cancel,
+            deadline,
+            &|_, _, _| {},
+            "test"
+        )
+        .is_err()
     );
+    assert!(
+        hash_reader(
+            Cursor::new(b"hello world"),
+            11,
+            &cancel,
+            Instant::now(),
+            &|_, _, _| {},
+            "test"
+        )
+        .unwrap_err()
+        .to_string()
+        .contains("600-second deadline")
+    );
+    assert!(
+        matches!(hash_reader(FailedRead, 11, &cancel, deadline, &|_, _, _| {}, "test"), Err(crate::AppError::Io(ref e)) if e.kind() == io::ErrorKind::TimedOut)
+    );
+}
+
+#[test]
+fn activation_reports_real_hash_copy_bytes_and_preserves_data_on_progress_cancellation() {
+    let root = tempfile::tempdir().unwrap();
+    let destination = root.path().join("model.onnx");
+    let partial = destination.with_extension("partial");
+    let cancel = AtomicBool::new(false);
+    let events = std::cell::RefCell::new(Vec::new());
+    std::fs::write(&destination, b"old model").unwrap();
+    std::fs::write(&partial, b"hello world").unwrap();
+    install_with_progress(
+        "https://example.com/model",
+        11,
+        HASH,
+        &destination,
+        &cancel,
+        &|stage, done, total| events.borrow_mut().push((stage, done, total)),
+    )
+    .unwrap();
+    let events = events.into_inner();
+    assert_eq!(
+        events,
+        vec![
+            ("verify-partial", 0, 11),
+            ("verify-partial", 11, 11),
+            ("copy", 0, 11),
+            ("copy", 11, 11),
+            ("sync-copy", 0, 11),
+            ("verify-copy", 0, 11),
+            ("verify-copy", 11, 11),
+            ("activate", 0, 11),
+        ]
+    );
+    assert_eq!(std::fs::read(&destination).unwrap(), b"hello world");
+    assert!(!partial.exists());
+    std::fs::write(&destination, b"old model").unwrap();
+    std::fs::write(&partial, b"hello world").unwrap();
+    let result = install_with_progress(
+        "https://example.com/model",
+        11,
+        HASH,
+        &destination,
+        &cancel,
+        &|stage, done, _| {
+            if stage == "copy" && done == 11 {
+                cancel.store(true, Ordering::Release);
+            }
+        },
+    );
+    assert!(matches!(result, Err(crate::AppError::Cancelled)));
+    assert_eq!(std::fs::read(&destination).unwrap(), b"old model");
+    assert_eq!(std::fs::read(&partial).unwrap(), b"hello world");
+    assert!(std::fs::read_dir(root.path()).unwrap().all(|entry| {
+        let name = entry.unwrap().file_name();
+        name == "model.onnx" || name == "model.partial" || name == "model.download.lock"
+    }));
 }
 
 struct CancelOnRead<'a>(&'a AtomicBool);
@@ -165,6 +273,7 @@ fn late_read_cancel_timeout_and_expired_deadline_never_activate_payload() {
         destination: &destination,
         cancel: &cancel,
         deadline: Instant::now() + Duration::from_secs(2),
+        progress: &|_, _, _| {},
     };
     assert!(matches!(
         transfer.receive(0, false, "", CancelOnRead(&cancel)),

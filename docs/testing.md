@@ -2,7 +2,15 @@
 
 All application compilation and execution checks run in GitHub Actions on the exact commit. The six native target rows are required, with maximum three concurrently hosted jobs, two build/test/native threads per runner, command/HTTP/job bounds and owned process cleanup. Missing jobs, wrong source SHA and missing reports fail the aggregate; no broad continue-on-error or fake passing badges.
 
-## Native observer error preservation (authored, not yet run)
+## Native cleanup and model progress correction (authored, not yet run)
+
+[Exact612055e/run41468630843](https://github.com/KiaroSama/Numera-Video-Sub-Finder/actions/runs/41468630843) completes with both Linux and Windows targets plus all eight shared jobs successful. Apple Silicon fails the stalled-observer cleanup contract with captured EPERM; Intel reaches the projector's full881770560 bytes, then exceeds the unchanged60-second provisioning idle limit and also records cleanup EPERM. Both aggregates fail. The process snapshot does not identify the exact silent activation stage.
+
+The correction treats Darwin EPERM as unresolved only during known-owned cleanup, waits for root exit before group census and requires final ESRCH within the existing total ten/three-second cleanup windows. EPERM is never successful absence; persistent permission errors and other unknown failures remain fatal. Ordinary live-tree monitoring stays strict. Existing stalled/error/leak contracts and their assertions remain unchanged.
+
+The production downloader exposes an optional synchronous stage/byte callback while preserving its existing install API. The hosted provisioner reports actual completed download/hash/copy bytes, stage transitions and completion edges, throttling intermediate byte output to once per second. It removes the polling thread and duplicated file-size inventory. No periodic heartbeat, extra network call, dependency or longer deadline is introduced. An eleven-byte cached-partial regression checks literal hash/copy stages and cancellation preserving the old model/partial with no temporary residue; existing HTTP faults retain their assertions. The600/20 artifact/response and1200/60 outer limits remain. A blocked filesystem sync is still idle-fatal. Replacement execution is **NOT_RUN**, not an established fix for the exact Intel internal stall.
+
+## Native observer error preservation (historical candidate)
 
 On exact aa1eaec/run41448752291, Intel fails the hosted observer-error cleanup contract before native provisioning. The expected observer error is rejected, but startup cleanup does not emit its required verified marker; the recorded failure occurs immediately, not at the three-second cleanup limit. The original native error was not recorded, so its precise cause remains unknown. The corrective source captures `kill`'s result and native error together inside the existing C# ownership adapter, rather than retrieving thread-local last-error state in a later PowerShell call. Every caller accepts only success or ESRCH for absence; other errors remain fatal. The existing hosted contract adds absent-group and invalid-group checks, retains all cleanup assertions and three/ten-second bounds, and does not launch another process. New execution is **NOT_RUN**; no local compilation or native test substitutes for Actions.
 
