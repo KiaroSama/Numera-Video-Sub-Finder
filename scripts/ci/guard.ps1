@@ -63,8 +63,14 @@ public sealed class NvsfCiOwnership : IDisposable {
     [DllImport("kernel32.dll", SetLastError=true)] static extern bool TerminateJobObject(IntPtr h, uint code);
     [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr h);
     [DllImport("libc", SetLastError=true)] static extern int kill(int pid, int sig);
-    public static int SignalGroup(int pid, int signal) { return kill(-pid, signal); }
-    public static int LastError() { return Marshal.GetLastWin32Error(); }
+    public static int SignalGroup(int pid, int signal) {
+        if (pid <= 1) throw new ArgumentOutOfRangeException(nameof(pid));
+        int result = kill(-pid, signal);
+        int error = Marshal.GetLastWin32Error();
+        if (result == 0) return 0;
+        if (error == 0) throw new InvalidOperationException("Group signal failed without an error code.");
+        return error;
+    }
     public NvsfCiOwnership() {
         job = CreateJobObject(IntPtr.Zero, null);
         if (job == IntPtr.Zero) throw new Win32Exception();
@@ -257,7 +263,11 @@ os.execv(exe, [exe, *argv])
             $process.Close()
         }
         if ($rootExited) {
-            $descendants = if ($IsWindows) { $job.Active() } else { [int]([NvsfCiOwnership]::SignalGroup($group, 0) -eq 0) }
+            $descendants = if ($IsWindows) { $job.Active() } else {
+                $groupError = [NvsfCiOwnership]::SignalGroup($group, 0)
+                if ($groupError -notin @(0,3)) { throw "Owned Unix process group state unavailable error=$groupError." }
+                [int]($groupError -eq 0)
+            }
             if ($descendants -eq 0 -and -not $reads[0] -and -not $reads[1]) { $code = $exitCode; break }
             if (($stopwatch.Elapsed.TotalSeconds - $exitObserved) -ge 2) {
                 if ($IsWindows) { $job.Active($true) | Out-Null }
@@ -299,13 +309,19 @@ os.execv(exe, [exe, *argv])
                     if ($code -eq 0) { $code = 1; Write-GuardLog 'ERROR' 'Successful command left owned descendants; terminated and rejected.' }
                 }
             } elseif ($group) {
-                if ([NvsfCiOwnership]::SignalGroup($group, 0) -eq 0) {
-                    [NvsfCiOwnership]::SignalGroup($group, 9) | Out-Null
+                $groupError = [NvsfCiOwnership]::SignalGroup($group, 0)
+                if ($groupError -eq 0) {
+                    $groupError = [NvsfCiOwnership]::SignalGroup($group, 9)
+                    if ($groupError -notin @(0,3)) { throw "Owned Unix process group termination failed error=$groupError." }
                     $cleanup = [Diagnostics.Stopwatch]::StartNew()
-                    while ([NvsfCiOwnership]::SignalGroup($group, 0) -eq 0 -and $cleanup.Elapsed.TotalSeconds -lt 10) { [Threading.Thread]::Sleep(20) }
-                    if ([NvsfCiOwnership]::SignalGroup($group, 0) -eq 0) { throw 'Owned Unix process group still exists after cleanup.' }
+                    do {
+                        $groupError = [NvsfCiOwnership]::SignalGroup($group, 0)
+                        if ($groupError -ne 0 -or $cleanup.Elapsed.TotalSeconds -ge 10) { break }
+                        [Threading.Thread]::Sleep(20)
+                    } while ($true)
+                    if ($groupError -ne 3) { throw "Owned Unix process group cleanup could not be verified error=$groupError." }
                     if ($code -eq 0) { $code = 1; Write-GuardLog 'ERROR' 'Successful command left owned descendants; terminated and rejected.' }
-                } elseif ([NvsfCiOwnership]::LastError() -ne 3) { throw 'Could not verify owned Unix process group cleanup.' }
+                } elseif ($groupError -ne 3) { throw "Could not verify owned Unix process group cleanup error=$groupError." }
             } elseif (-not $rootExited -and -not $process.HasExited) { $process.Kill($true) }
             if (-not $rootExited -and -not $process.WaitForExit(10000)) { throw 'Owned process did not exit after cleanup.' }
             Write-GuardLog 'INFO' "Cleanup verified pid=$ownedPid"

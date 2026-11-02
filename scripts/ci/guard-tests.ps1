@@ -38,6 +38,14 @@ try {
     $capture = Join-Path $work 'unicode.stdout'
     Invoke-Contract 'unicode' '[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false); [Console]::WriteLine("guard 日本 فارسی"); exit 0' $capture
     if ([IO.File]::ReadAllText($capture, $utf8).Trim() -cne 'guard 日本 فارسی') { throw 'Guard did not preserve exact Unicode stdout.' }
+    if (-not $IsWindows) {
+        $absent = [NvsfCiOwnership]::SignalGroup([int]::MaxValue,0)
+        [Runtime.InteropServices.Marshal]::SetLastPInvokeError(1)
+        if ($absent -ne 3) { throw 'Absent Unix group did not preserve its exact native error.' }
+        $rejected = $false
+        try { $null = [NvsfCiOwnership]::SignalGroup(0,0) } catch { $rejected = $true }
+        if (-not $rejected) { throw 'Group signalling admitted an unowned group identifier.' }
+    }
     $rejected = $false
     try { Invoke-Contract 'failure' 'exit 7' (Join-Path $work 'failure.stdout') }
     catch { $rejected = $_.Exception.Message -match 'exit_code=7' }
