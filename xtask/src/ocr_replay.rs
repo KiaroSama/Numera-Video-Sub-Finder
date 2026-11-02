@@ -20,6 +20,19 @@ fn cpu_profile(bytes: &[u8]) -> Result<usize> {
     Ok(nodes)
 }
 
+fn detector_shape(summary: &Value) -> Result<Vec<usize>> {
+    let shape: Vec<usize> = serde_json::from_value(summary["shape"].clone())?;
+    if summary["stage"] != "detector-input"
+        || shape.len() != 4
+        || shape[0] != 1
+        || shape[1] != 3
+        || shape[2..].iter().any(|&d| d == 0 || d > 960 || d % 32 != 0)
+    {
+        return Err("Captured detector input shape is invalid".into());
+    }
+    Ok(shape)
+}
+
 fn read_tensor(path: &Path, shape: &[usize]) -> Result<Vec<f32>> {
     let count = shape
         .iter()
@@ -70,8 +83,16 @@ pub fn capture(
     })?;
     let (rec_shape, rec_values) =
         fixed_input.ok_or("Missing actual fixed-crop recognizer input")?;
-    let det_shape = [1, 3, 160, 960];
+    let summary_path = output.join("native-0-detector-input.f32le.json");
+    if std::fs::metadata(&summary_path)?.len() > 4096 {
+        return Err("Detector tensor summary exceeds budget".into());
+    }
+    let summary: Value = serde_json::from_slice(&std::fs::read(&summary_path)?)?;
+    let det_shape = detector_shape(&summary)?;
     let det_values = read_tensor(&output.join("native-0-detector-input.f32le"), &det_shape)?;
+    if tensor_summary("detector-input", &det_shape, &det_values)? != summary {
+        return Err("Captured detector tensor differs from its summary".into());
+    }
     let mut bytes_written = prior_tensor_bytes;
     for (model, shape, values) in [
         ("det", det_shape.as_slice(), det_values.as_slice()),
@@ -185,6 +206,25 @@ mod tests {
         ] {
             assert!(cpu_profile(bytes).is_err());
         }
+    }
+
+    #[test]
+    fn detector_replay_uses_captured_shape_not_the_previous_upscaled_fixture() {
+        assert_eq!(
+            detector_shape(&json!({"stage":"detector-input","shape":[1,3,96,640]})).unwrap(),
+            vec![1, 3, 96, 640]
+        );
+        for shape in [
+            json!([1, 3, 96, 639]),
+            json!([1, 3, 0, 640]),
+            json!([1, 3, 96, 992]),
+            json!([1, 1, 96, 640]),
+            json!([2, 3, 96, 640]),
+            json!([1, 3, 96]),
+        ] {
+            assert!(detector_shape(&json!({"stage":"detector-input","shape":shape})).is_err());
+        }
+        assert!(detector_shape(&json!({"stage":"recognizer-input","shape":[1,3,96,640]})).is_err());
     }
 
     #[test]

@@ -2,6 +2,12 @@
 
 Updated: 2026-11-02. **NOT a release acceptance report.** Hosted observations below refer to the exact named SHA; corrective source is not a passing result.
 
+## Verified CLI/export source and pending preprocessing
+
+[Exacte3d8d3a/run41371353072, attempt2](https://github.com/KiaroSama/Numera-Video-Sub-Finder/actions/runs/41371353072/attempts/2) completes all16 jobs, all six native targets and both aggregates successfully. Linux reports225 ordinary cases,13 GUI behaviors,22 Rust ASan/LSan cases,7439/8798 measured lines (84.55%) and91.48% critical coverage; full-product qualification remains false. The actual independent FFmpeg subtitle decoder, typed worker errors, CLI status/preflight and separate-track exports pass within this source. Fresh independent review classifies all130 executable mutations critical/non-equivalent and confirms130 caught, six build-unviable, no misses/timeouts and no equivalent exclusions. The generated review-qualified flag is not rewritten; the independent review is separate evidence scoped to that actual inventory.
+
+The next T011 continuation corrects detector/recognizer dimension and padding policy against the provenance-supported PaddleX 3.7.0 consumer. Five source-authored pure regressions cover boundaries, actual resizing and inverse tiny-image geometry; their runtime status is **NOT_RUN** until the next exact-source Actions batch. OpenCV resampling parity, full DB geometry, independent corpus, native accessibility/IME, model cancellation/tree absence, signing/install lifecycle and physical hardware remain open. A green earlier SHA does not verify these new edits.
+
 ## Verified model/worker/download integration
 
 [Exact7a8a2d7/run40946208616, attempt2](https://github.com/KiaroSama/Numera-Video-Sub-Finder/actions/runs/40946208616/attempts/2) completed successfully on2026-10-30: all16 jobs, six native targets and both aggregate gates. The exact tested commit was fast-forwarded/pushed to main; its fully merged integration branch was removed. All six native jobs actually ran in attempt2, superseding earlier assumptions about retained successful rows. The first attempt's Intel source-acquisition stall is historical, not the confirmation result. No local compilation or inference substituted for Actions.

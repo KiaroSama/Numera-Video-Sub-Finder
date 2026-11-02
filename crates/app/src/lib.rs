@@ -10,6 +10,7 @@ pub mod model_download;
 pub mod models;
 pub mod native_request;
 pub mod paths;
+mod preprocessing;
 pub mod providers;
 pub mod regions;
 mod runtime_health;

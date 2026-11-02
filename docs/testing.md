@@ -2,6 +2,14 @@
 
 All application compilation and execution checks run in GitHub Actions on the exact commit. The six native target rows are required, with maximum three concurrently hosted jobs, two build/test/native threads per runner, command/HTTP/job bounds and owned process cleanup. Missing jobs, wrong source SHA and missing reports fail the aggregate; no broad continue-on-error or fake passing badges.
 
+## Preprocessing continuation (authored, not yet run)
+
+Original T011 now uses a shared pure tensor producer for ordinary and observed inference. The provenance-bound PaddleX 3.7.0 consumer supplies detector downscale-only sizing, truncated/ties-even 32-pixel dimensions, tiny-image padding, and recognition floor-canvas/ceil-content widths without the old eight-pixel minimum. Five small source-first library tests cover size boundaries, BGR/zero-padding values, actual asymmetric resizing, unchanged input pixels and tiny-image detection projection/clipping. The existing six-target app suites and native OCR/specialist/visual witnesses are their execution route; no extra runner, dependency, local compilation or longer timeout is introduced. These edits are **NOT_RUN**. Triangle resampling is not OpenCV sampling parity, and upstream DB contour/unclip/rotated-crop and real-corpus acceptance remain open.
+
+## Verified CLI/export batch
+
+[Exacte3d8d3a/run41371353072, attempt2](https://github.com/KiaroSama/Numera-Video-Sub-Finder/actions/runs/41371353072/attempts/2) passes all16 latest jobs, all six native targets and both aggregates. Linux records225 ordinary cases,13 GUI behaviors and22 Rust ASan/LSan cases,7439/8798 measured lines (84.55%) and91.48% critical coverage. Independent FFmpeg VTT/ASS decoding and the new CLI/worker/status/track-export tests pass in that source. Fresh independent review admits130 caught/130 executable critical portable mutations, with six build-unviable candidates, no misses/timeouts or equivalent exclusions; this is only the actual136-candidate inventory, not full-product qualification. Attempt1's Windows ARM64 pre-provisioning guard failure was followed by one unchanged-source confirmation; all six native jobs actually reran. Full-product qualification remains false.
+
 ## Model-admission batch outcome
 
 [Exactcb81c52/run40916835180](https://github.com/KiaroSama/Numera-Video-Sub-Finder/actions/runs/40916835180) completes with five native targets and all eight shared jobs successful. Linux executes all seven new metadata/session contracts successfully, alongside the existing actual OCR/model/replay paths. Intel macOS fails before application compilation when GitHub DNS resolution prevents downloading curl8.22.0 source (curl exit6); native command and observer cleanup are verified. Both aggregate gates therefore fail. All six outcomes were collected before the next integrated publication; no deadline, signature check or model assertion was weakened.
