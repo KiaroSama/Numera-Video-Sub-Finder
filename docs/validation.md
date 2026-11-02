@@ -2,6 +2,12 @@
 
 Updated: 2026-11-02. **NOT a release acceptance report.** Hosted observations below refer to the exact named SHA; corrective source is not a passing result.
 
+## Latest failed batch and corrective source
+
+[Exact612055e/run41468630843](https://github.com/KiaroSama/Numera-Video-Sub-Finder/actions/runs/41468630843) completes with four native targets (both Linux and Windows) and all eight shared jobs successful. Apple Silicon fails the stalled-observer cleanup contract with captured EPERM1. Intel reaches the full projector byte count, then fails the unchanged provisioning idle deadline and records cleanup EPERM1. All six outcomes were collected; both aggregates fail. No current-source all-green or merge is claimed.
+
+The unverified correction retains ESRCH-only cleanup success, bounds Darwin's unresolved EPERM observations within the original total cleanup windows, and synchronizes root exit before the group census. Model provisioning now uses actual production download/hash/copy progress instead of file-size-only observation; no timer heartbeat or deadline increase hides a stall. A tiny activation/cancellation regression joins the existing suites. Source review and formatting do not establish runtime success: replacement execution is **NOT_RUN**. Full-product corpus, native accessibility/IME, cancellation/tree qualification, physical hardware and signing/install acceptance remain open.
+
 ## Detector rollback outcome and observer correction
 
 [Exactaa1eaec/run41448752291](https://github.com/KiaroSama/Numera-Video-Sub-Finder/actions/runs/41448752291) completes with five native targets and all eight shared jobs successful. Both Windows targets now pass the unchanged Korean literal witness. Intel fails before native provisioning in the observer-error cleanup regression: the expected observer error is rejected, but the cleanup-verification marker is missing. Both aggregates fail. All six outcomes were collected before corrective publication.

@@ -32,52 +32,23 @@ fn hosted() -> Result<()> {
 pub fn provision(data_root: &Path) -> Result<()> {
     hosted()?;
     let paths = Paths::new(Some(data_root))?;
-    let pack: serde_json::Value =
-        serde_json::from_str(include_str!("../../ci/assistant-models.json"))?;
-    let files: Vec<_> = pack["artifacts"]
-        .as_array()
-        .ok_or("Missing visual model inventory")?
-        .iter()
-        .map(|artifact| {
-            let file = paths.models.join("assistant").join(
-                artifact["file"]
-                    .as_str()
-                    .ok_or("Missing visual model filename")?,
-            );
-            Ok([file.with_extension("partial"), file])
-        })
-        .collect::<Result<Vec<_>>>()?
-        .into_iter()
-        .flatten()
-        .collect();
-    let mut previous = vec![0; files.len()];
-    std::thread::scope(|scope| -> Result<()> {
-        let (send, receive) = std::sync::mpsc::sync_channel(1);
-        scope.spawn(move || {
-            let result = assistant::install(&paths, &AtomicBool::new(false));
-            let _ = send.send(result);
-        });
-        loop {
-            match receive.recv_timeout(std::time::Duration::from_secs(1)) {
-                Ok(result) => return result.map_err(Into::into),
-                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
-                    return Err("Visual model provisioning thread stopped without a result".into());
-                }
-                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+    let previous = std::cell::RefCell::new((usize::MAX, "", 0, Instant::now()));
+    assistant::install_with_progress(
+        &paths,
+        &AtomicBool::new(false),
+        &|file, stage, bytes, total| {
+            let mut last = previous.borrow_mut();
+            if (file, stage) != (last.0, last.1)
+                || (bytes > last.2 && (bytes == total || last.3.elapsed().as_secs() >= 1))
+            {
+                println!(
+                    "Visual model progress file={file} stage={stage} bytes={bytes} total={total}"
+                );
+                *last = (file, stage, bytes, Instant::now());
             }
-            for (index, file) in files.iter().enumerate() {
-                let bytes = match file.metadata() {
-                    Ok(metadata) => metadata.len(),
-                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => 0,
-                    Err(error) => return Err(error.into()),
-                };
-                if bytes > previous[index] {
-                    println!("Visual model transfer file={index} bytes={bytes}");
-                }
-                previous[index] = bytes;
-            }
-        }
-    })
+        },
+    )?;
+    Ok(())
 }
 
 pub fn verify(fixture_dir: &Path, data_root: &Path, output: &Path) -> Result<()> {

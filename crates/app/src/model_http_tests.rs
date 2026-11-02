@@ -18,6 +18,7 @@ fn actual_http_range_resume_and_ignored_range_restart_activate_verified_bytes() 
         destination: &destination,
         cancel: &cancel,
         deadline: Instant::now() + BOUND,
+        progress: &|_, _, _| {},
     };
     let client = client();
     for reply in [
@@ -54,6 +55,7 @@ fn actual_http_rejects_malformed_partial_headers_and_non_payload_status_before_m
         let transfer = Transfer {
             bytes: 11, sha256: HASH, destination: &destination, cancel: &cancel,
             deadline: Instant::now() + BOUND,
+            progress: &|_, _, _| {},
         };
         let server = Server::start(reply, false, None);
         assert!(acquire(&client, &server.url(), offset, &transfer).is_err());
@@ -82,6 +84,7 @@ fn actual_http_stalled_headers_body_disconnect_and_cancel_are_bounded_and_preser
         let transfer = Transfer {
             bytes: 11, sha256: HASH, destination: &destination, cancel: &cancel,
             deadline: Instant::now() + BOUND,
+            progress: &|_, _, _| {},
         };
         let start = Instant::now();
         let error = acquire(&client, &server.url(), 6, &transfer).unwrap_err();
@@ -125,6 +128,7 @@ fn cancellation_during_actual_stalled_body_read_wins_over_transport_error() {
         destination: &destination,
         cancel: &cancel,
         deadline: Instant::now() + BOUND,
+        progress: &|_, _, _| {},
     };
     let start = Instant::now();
     assert!(matches!(
@@ -175,6 +179,7 @@ fn eof_after_deadline_cannot_activate_and_production_still_refuses_http() {
         destination: &destination,
         cancel: &cancel,
         deadline: Instant::now() + Duration::from_millis(10),
+        progress: &|_, _, _| {},
     };
     let error = transfer
         .receive(
