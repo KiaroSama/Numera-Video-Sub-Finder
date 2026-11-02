@@ -1,6 +1,6 @@
 use crate::{Paths, Result, fail, models, providers};
 use image::RgbImage;
-use ndarray::{Array4, ArrayViewD};
+use ndarray::ArrayViewD;
 use nvsf_core::Recognition;
 use ort::{environment::Environment, session::Session, value::TensorRef};
 
@@ -196,21 +196,7 @@ impl Ocr {
         image: &RgbImage,
         mut observer: Option<&mut InferenceObserver<'_>>,
     ) -> Result<Vec<(u32, u32, u32, u32)>> {
-        let longest = image.width().max(image.height()).max(1) as f32;
-        let ratio = 960.0 / longest;
-        let width = ((image.width() as f32 * ratio / 32.0).round().max(1.0) as u32) * 32;
-        let height = ((image.height() as f32 * ratio / 32.0).round().max(1.0) as u32) * 32;
-        let resized =
-            image::imageops::resize(image, width, height, image::imageops::FilterType::Triangle);
-        let mut input = Array4::<f32>::zeros((1, 3, height as usize, width as usize));
-        let mean = [0.485, 0.456, 0.406];
-        let std = [0.229, 0.224, 0.225];
-        for (x, y, p) in resized.enumerate_pixels() {
-            for c in 0..3 {
-                input[[0, c, y as usize, x as usize]] =
-                    (f32::from(p[2 - c]) / 255.0 - mean[c]) / std[c];
-            }
-        }
+        let input = crate::preprocessing::detector(image)?;
         if let Some(observe) = observer.as_deref_mut() {
             observe(
                 "detector-input",
@@ -243,7 +229,7 @@ impl Ocr {
             )?;
         }
         let (width, height) = (shape[3], shape[2]);
-        crate::vision::db_regions(output, width, height, image.width(), image.height())
+        crate::preprocessing::detected_regions(output, width, height, image.width(), image.height())
     }
 
     pub fn recognize(&mut self, crop: &RgbImage) -> Result<Recognition> {
@@ -270,17 +256,7 @@ impl Ocr {
             let vertical = nvsf_core::languages::find(&self.language).is_some_and(|l| l.vertical);
             return tesseract.recognize(crop, vertical);
         }
-        let width =
-            ((48.0 * crop.width() as f64 / crop.height() as f64).ceil() as u32).clamp(8, 3200);
-        let padded = width.max(320);
-        let resized =
-            image::imageops::resize(crop, width, 48, image::imageops::FilterType::CatmullRom);
-        let mut input = Array4::<f32>::zeros((1, 3, 48, padded as usize));
-        for (x, y, p) in resized.enumerate_pixels() {
-            for c in 0..3 {
-                input[[0, c, y as usize, x as usize]] = f32::from(p[2 - c]) / 127.5 - 1.0;
-            }
-        }
+        let input = crate::preprocessing::recognition(crop)?;
         if let Some(observe) = observer.as_deref_mut() {
             observe(
                 "recognizer-input",
