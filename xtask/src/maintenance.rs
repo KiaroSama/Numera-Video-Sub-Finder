@@ -103,6 +103,42 @@ pub fn verify(cli: &Path, runtimes: &Path, output: &Path) -> Result<()> {
             observed.push(json!({"id":id,"exit_code":expected,"passed":true}));
             Ok(text)
         };
+        let help = invoke("cli-help", &["--help"], 0)?;
+        if !help.contains("Usage:") {
+            return Err("CLI help output is missing".into());
+        }
+        let version = invoke("cli-version", &["--version"], 0)?;
+        if !version.contains(env!("CARGO_PKG_VERSION")) {
+            return Err("CLI version output is missing".into());
+        }
+        let usage = invoke("cli-invalid-arguments", &["not-a-command"], 3)?;
+        if !usage.contains("unrecognized subcommand") {
+            return Err("Invalid CLI syntax did not retain parser diagnostics".into());
+        }
+        let config = invoke(
+            "cli-invalid-config",
+            &[
+                "extract",
+                "--input",
+                "missing.mp4",
+                "--output",
+                "out.srt",
+                "--threads",
+                "0",
+            ],
+            3,
+        )?;
+        if !config.contains("Invalid configuration") {
+            return Err("Invalid extraction settings did not fail before native work".into());
+        }
+        let missing = invoke(
+            "cli-missing-input",
+            &["extract", "--input", "missing.mp4", "--output", "out.srt"],
+            4,
+        )?;
+        if !missing.contains("Filesystem operation failed") || root.join("out.srt").exists() {
+            return Err("Missing input did not preserve the operational failure category".into());
+        }
         let doctor: Value =
             serde_json::from_str(&invoke("doctor-empty", &["doctor", "--format", "json"], 0)?)?;
         if doctor["source_sha"] != source
@@ -153,7 +189,7 @@ pub fn verify(cli: &Path, runtimes: &Path, output: &Path) -> Result<()> {
         let invalid = invoke(
             "language-invalid",
             &["languages", "install", "../invalid-language"],
-            4,
+            3,
         )?;
         if !invalid.contains("Select a language from the official catalog") {
             return Err("Invalid language failed somewhere other than catalog validation".into());

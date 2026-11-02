@@ -21,6 +21,7 @@ mod production_supervisor;
 mod quality;
 mod runtime_pack;
 mod specialist_witness;
+mod subtitle_interop;
 mod update_assets;
 mod visual_witness;
 mod worker_faults;

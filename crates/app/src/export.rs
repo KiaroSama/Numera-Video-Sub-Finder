@@ -19,7 +19,7 @@ pub fn export_project(
         _ => return Err(fail("Choose srt, vtt, ass or json")),
     };
     let mut outputs = vec![(path.to_path_buf(), text)];
-    if format == "srt" {
+    if format != "json" {
         let tracks: std::collections::BTreeSet<_> = project.cues.iter().map(|c| c.track).collect();
         if tracks.len() > 1 {
             let stem = path
@@ -34,13 +34,20 @@ pub fn export_project(
                     .cloned()
                     .collect();
                 outputs.push((
-                    path.with_file_name(format!("{stem}.track-{track}.srt")),
-                    export_srt(&cues, bom, crlf)?,
+                    path.with_file_name(format!("{stem}.track-{track}.{format}")),
+                    match format {
+                        "srt" => export_srt(&cues, bom, crlf)?,
+                        "vtt" => export_vtt(&cues)?,
+                        "ass" => export_ass(&cues)?,
+                        _ => unreachable!(),
+                    },
                 ));
             }
+            // The selected path remains usable, but never silently combines distinct tracks.
+            outputs[0].1 = outputs[1].1.clone();
         }
     }
-    // Preflight the complete set before the combined export can replace an existing file.
+    // Preflight the complete set before any export can replace an existing file.
     for (destination, _) in &outputs {
         if destination.is_symlink() || destination.is_dir() || (!overwrite && destination.exists())
         {
@@ -57,7 +64,7 @@ pub fn export_project(
         }
     }
     // Each file is atomic; filesystems cannot atomically rename several separate track files.
-    // Write separated tracks first and publish the combined output last as the completion marker.
+    // Write separated tracks first and publish the selected primary track last.
     for (destination, text) in outputs.iter().skip(1).chain(outputs.iter().take(1)) {
         write_atomic(destination, text.as_bytes(), overwrite)?;
     }

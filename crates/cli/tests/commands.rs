@@ -238,15 +238,15 @@ fn listings_come_from_the_committed_manifests() {
 fn unknown_or_missing_resources_fail_with_precise_messages() {
     let root = root();
     let output = nvsf(&root, &["models", "import", "unknown", "x.onnx"]);
-    assert_eq!(output.status.code(), Some(4));
-    assert!(stderr(&output).contains("Unknown model identifier"));
+    assert_eq!(output.status.code(), Some(3));
+    assert!(stderr(&output).contains("Unknown official model identifier"));
 
     let output = nvsf(&root, &["languages", "verify", "fra"]);
     assert_eq!(output.status.code(), Some(4));
     assert!(stderr(&output).contains("explicitly install or import"));
 
     let output = nvsf(&root, &["languages", "verify", "../eng"]);
-    assert_eq!(output.status.code(), Some(4));
+    assert_eq!(output.status.code(), Some(3));
     assert!(stderr(&output).contains("official catalog"));
 
     let output = nvsf(&root, &["export", "missing.nvsf.json", "out.srt"]);
@@ -258,7 +258,7 @@ fn unknown_or_missing_resources_fail_with_precise_messages() {
 fn batch_rejects_a_missing_output_directory_before_extraction() {
     let root = root();
     let output = nvsf(&root, &["batch", "a.mp4", "--output-dir", "missing"]);
-    assert_eq!(output.status.code(), Some(4));
+    assert_eq!(output.status.code(), Some(3));
     assert!(stderr(&output).contains("Batch output directory must exist"));
     std::fs::remove_dir_all(root).unwrap();
 }
@@ -300,7 +300,7 @@ fn resume_rejects_identical_source_and_output_paths() {
     let root = root();
     let checkpoint = project(&root, root.join("video.srt").to_str().unwrap(), false);
     let output = nvsf(&root, &["resume", checkpoint.to_str().unwrap()]);
-    assert_eq!(output.status.code(), Some(3));
+    assert_eq!(output.status.code(), Some(4));
     assert!(stderr(&output).contains("distinct input/output paths required"));
     std::fs::remove_dir_all(root).unwrap();
 }

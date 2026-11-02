@@ -47,6 +47,7 @@ pub fn provision_models(root: &Path) -> Result<(), Box<dyn Error>> {
 
 pub fn generate(ffmpeg: &Path, output: &Path) -> Result<(), Box<dyn Error>> {
     std::fs::create_dir_all(output)?;
+    crate::subtitle_interop::verify(ffmpeg, output)?;
     let font = crate::multilingual::provision_font(output, "latin")?;
     let cues = vec![
         Cue::new(1, 0, 0, 2000, "Hello world".into())?,
@@ -130,7 +131,18 @@ pub fn smoke(cli: &Path, fixture_dir: &Path, data_root: &Path) -> Result<(), Box
             "accurate",
             "--overwrite",
         ]);
-    bounded(&mut c, Duration::from_secs(180))?;
+    let capture = fixture_dir.join(format!("{label}.cli.log"));
+    let mut child = crate::process::OwnedProcess::spawn(&mut c, &capture)?;
+    child.wait_code(
+        &capture,
+        Duration::from_secs(180),
+        Duration::from_secs(60),
+        2,
+    )?;
+    let completed = nvsf_app::storage::load_project(&output.with_extension("nvsf.json"))?;
+    if !completed.completed || !completed.cues.iter().any(|cue| !cue.reviewed) {
+        return Err("CLI review-needed exit must accompany a completed unreviewed project".into());
+    }
     let actual = parse_srt(&std::fs::read_to_string(&output)?)?;
     if actual.is_empty() {
         return Err("Real ONNX extraction produced no fixture cues".into());

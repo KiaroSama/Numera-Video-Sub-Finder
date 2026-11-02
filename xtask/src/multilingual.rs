@@ -486,7 +486,12 @@ pub fn verify(cli: &Path, ffmpeg: &Path, data_root: &Path, output: &Path) -> Res
             ]);
         let capture = root.join(format!("{}-extract.log", case.code));
         let mut child = OwnedProcess::spawn(&mut extract, &capture)?;
-        child.wait(&capture, Duration::from_secs(45), Duration::from_secs(20))?;
+        child.wait_code(
+            &capture,
+            Duration::from_secs(45),
+            Duration::from_secs(20),
+            2,
+        )?;
         let cues = parse_srt(&std::fs::read_to_string(&subtitle)?)?;
         let project = storage::load_project(&subtitle.with_extension("nvsf.json"))?;
         let diagnostic = std::fs::read_to_string(&capture)?;
@@ -495,6 +500,7 @@ pub fn verify(cli: &Path, ffmpeg: &Path, data_root: &Path, output: &Path) -> Res
                 .iter()
                 .any(|cue| cue.end_ms <= cue.start_ms || cue.end_ms > 2000)
             || !project.completed
+            || !project.cues.iter().any(|cue| !cue.reviewed)
             || project.config.language != case.code
             || project.source_hash != sha(&input)?
             || project.model_hash != languages::fingerprint(&paths, case.code)?
@@ -507,6 +513,32 @@ pub fn verify(cli: &Path, ffmpeg: &Path, data_root: &Path, output: &Path) -> Res
             .into());
         }
         rows.push(json!({"language":case.code,"expected":case.text,"actual":cues.iter().map(|cue|&cue.text).collect::<Vec<_>>(),"provider":case.provider,"synthetic":true}));
+    }
+    let mut required = Command::new(&cli);
+    clean_runtime_environment(&mut required);
+    required
+        .arg("--data-root")
+        .arg(&paths.root)
+        .args(["extract", "--input"])
+        .arg(root.join("rus.mp4"))
+        .arg("--output")
+        .arg(root.join("required-provider.srt"))
+        .args([
+            "--language",
+            "rus",
+            "--device",
+            "auto",
+            "--accelerator-required",
+        ]);
+    let capture = root.join("required-provider.log");
+    let mut child = OwnedProcess::spawn(&mut required, &capture)?;
+    child.wait_code(&capture, Duration::from_secs(10), Duration::from_secs(5), 6)?;
+    if root.join("required-provider.srt").exists()
+        || !std::fs::read_to_string(&capture)?.contains("required acceleration cannot be met")
+    {
+        return Err(
+            "Required provider failure lost its typed category or published subtitles".into(),
+        );
     }
     eprintln!(
         "[INFO] [LANGUAGE-WITNESS] Re-recognizing Russian cue through the application service"

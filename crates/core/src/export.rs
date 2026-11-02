@@ -32,6 +32,10 @@ pub fn export_vtt(cues: &[Cue]) -> Result<String> {
             format_time(c.start_ms).replace(',', "."),
             format_time(c.end_ms).replace(',', "."),
             c.text
+                .replace('\r', "")
+                .replace('&', "&amp;")
+                .replace('<', "&lt;")
+                .replace('>', "&gt;")
         )
         .map_err(|_| Error::Invalid("subtitle formatting failed".into()))?;
     }
@@ -42,15 +46,21 @@ pub fn export_ass(cues: &[Cue]) -> Result<String> {
     let mut out = "[Script Info]\nScriptType: v4.00+\nPlayResX: 1920\nPlayResY: 1080\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: Default,Arial,48,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,0,2,20,20,40,1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n".to_string();
     for c in cues {
         c.validate()?;
-        let stamp = |ms| {
-            format_time(ms)
-                .replace(',', ".")
-                .chars()
-                .take(format_time(ms).len() - 1)
-                .collect::<String>()
+        let stamp = |centiseconds: u64| {
+            format!(
+                "{:02}:{:02}:{:02}.{:02}",
+                centiseconds / 360_000,
+                centiseconds / 6000 % 60,
+                centiseconds / 100 % 60,
+                centiseconds % 100
+            )
         };
+        // ASS stores centiseconds: enclose positive millisecond intervals, expanding each edge <=9ms.
+        let start = c.start_ms / 10;
+        let end = c.end_ms / 10 + u64::from(c.end_ms % 10 != 0);
         let text = c
             .text
+            .replace('\r', "")
             .replace('\\', "\\\\")
             .replace('{', "\\{")
             .replace('}', "\\}")
@@ -59,8 +69,8 @@ pub fn export_ass(cues: &[Cue]) -> Result<String> {
             out,
             "Dialogue: {},{},{},Default,,0,0,0,,{}",
             c.track,
-            stamp(c.start_ms),
-            stamp(c.end_ms),
+            stamp(start),
+            stamp(end),
             text
         )
         .map_err(|_| Error::Invalid("subtitle formatting failed".into()))?;

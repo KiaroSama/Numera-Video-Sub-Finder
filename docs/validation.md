@@ -1,6 +1,12 @@
 # Validation status
 
-Updated: 2026-10-29. **NOT a release acceptance report.** Hosted observations below refer to the exact named SHA; corrective source is not a passing result.
+Updated: 2026-11-02. **NOT a release acceptance report.** Hosted observations below refer to the exact named SHA; corrective source is not a passing result.
+
+## Verified model/worker/download integration
+
+[Exact7a8a2d7/run40946208616, attempt2](https://github.com/KiaroSama/Numera-Video-Sub-Finder/actions/runs/40946208616/attempts/2) completed successfully on2026-10-30: all16 jobs, six native targets and both aggregate gates. The exact tested commit was fast-forwarded/pushed to main; its fully merged integration branch was removed. All six native jobs actually ran in attempt2, superseding earlier assumptions about retained successful rows. The first attempt's Intel source-acquisition stall is historical, not the confirmation result. No local compilation or inference substituted for Actions.
+
+The current unverified continuation addresses CLI status/preflight/typed worker failures and VTT/ASS/default track interoperability. Source-authored regressions and independent native-decoder witnesses remain **NOT_RUN** until the replacement batch. Full real-corpus, native accessibility/IME, actual model cancellation/tree proof, platform signing/installer lifecycle, physical accelerators and full release qualification remain open. Older pending sections below describe their historical source, not current CI status.
 
 ## Model-admission candidate outcome
 

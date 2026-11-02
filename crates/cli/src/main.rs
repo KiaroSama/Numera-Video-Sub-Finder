@@ -1,3 +1,6 @@
+mod preflight;
+mod status;
+
 use clap::{Parser, Subcommand};
 use nvsf_app::{AppError, Control, Paths, Result, logging::Log, media, models, storage, worker};
 use nvsf_core::{ExtractConfig, Rect};
@@ -102,7 +105,7 @@ enum LanguageCommand {
     Import { code: String, path: PathBuf },
     Export { code: String, path: PathBuf },
 }
-#[derive(clap::Args)]
+#[derive(Clone, clap::Args)]
 struct ExtractArgs {
     #[arg(long)]
     input: PathBuf,
@@ -134,10 +137,10 @@ struct ExtractArgs {
     accelerator_required: bool,
 }
 fn utf8_path(path: &Path) -> Result<String> {
-    path.to_str().map(str::to_owned).ok_or_else(||nvsf_app::fail("This operation requires a valid UTF-8 path; rename the input or select another destination"))
+    path.to_str().map(str::to_owned).ok_or_else(||AppError::InvalidConfig("This operation requires a valid UTF-8 path; rename the input or select another destination".into()))
 }
 fn config(args: ExtractArgs, root: Option<&Path>) -> Result<ExtractConfig> {
-    Ok(ExtractConfig {
+    let config = ExtractConfig {
         input: utf8_path(&args.input)?,
         output: utf8_path(&args.output)?,
         data_root: root.map(utf8_path).transpose()?,
@@ -158,30 +161,44 @@ fn config(args: ExtractArgs, root: Option<&Path>) -> Result<ExtractConfig> {
         gpu_required: args.gpu_required,
         accelerator_required: args.accelerator_required,
         ..Default::default()
-    })
+    };
+    config
+        .validate()
+        .map_err(|error| AppError::InvalidConfig(error.to_string()))?;
+    Ok(config)
 }
 fn main() {
-    let cli = Cli::parse();
-    let result = run(cli);
-    if let Err(e) = result {
-        eprintln!("ERROR: {e}");
-        std::process::exit(match e {
-            AppError::Core(_) => 3,
-            AppError::Cancelled => 5,
-            AppError::Provider(_) => 6,
-            _ => 4,
-        });
-    }
+    let cli = match Cli::try_parse() {
+        Ok(cli) => cli,
+        Err(error) => {
+            let code = if error.print().is_ok() {
+                status::parse(&error)
+            } else {
+                4
+            };
+            std::process::exit(code);
+        }
+    };
+    let code = match run(cli) {
+        Ok(code) => code,
+        Err(error) => {
+            eprintln!("ERROR: {error}");
+            status::failure(&error)
+        }
+    };
+    std::process::exit(code);
 }
-fn run(cli: Cli) -> Result<()> {
+fn run(cli: Cli) -> Result<i32> {
     if let Commands::NativeRequest { request } = &cli.command {
-        return nvsf_app::native_request::run(request);
+        return nvsf_app::native_request::run(request).map(|()| 0);
     }
     if let Commands::Worker { request, control } = &cli.command {
-        return run_worker(request, control);
+        return run_worker(request, control).map(|()| 0);
     }
+    preflight::validate(&cli)?;
     let paths = Paths::new(cli.data_root.as_deref())?;
     let log = Log::new(&paths, "nvsf");
+    let mut exit_code = 0;
     let control = Control::default();
     let cancelled = control.cancel.clone();
     ctrlc::set_handler(move || cancelled.store(true, Ordering::Relaxed))
@@ -196,9 +213,10 @@ fn run(cli: Cli) -> Result<()> {
                         p.stage, p.position_ms, p.cues, p.provider
                     );
                 })?;
+            exit_code = status::project(&project);
             println!(
                 "{}",
-                serde_json::json!({"cues":project.cues.len(),"completed":project.completed,"elapsed_ms":started.elapsed().as_millis(),"warnings":project.warnings})
+                serde_json::json!({"cues":project.cues.len(),"completed":project.completed,"review_needed":exit_code == 2,"elapsed_ms":started.elapsed().as_millis(),"warnings":project.warnings})
             );
         }
         Commands::Probe { input } => {
@@ -291,9 +309,14 @@ fn run(cli: Cli) -> Result<()> {
         },
         Commands::Resume { project } => {
             let p = storage::load_project(&project)?;
-            nvsf_app::extract(p.config, &control, |p| {
+            let project = nvsf_app::extract(p.config, &control, |p| {
                 eprintln!("{} {}ms", p.stage, p.position_ms)
             })?;
+            exit_code = status::project(&project);
+            println!(
+                "{}",
+                serde_json::json!({"completed":project.completed,"cues":project.cues.len(),"review_needed":exit_code == 2})
+            );
         }
         Commands::Export {
             project,
@@ -316,7 +339,9 @@ fn run(cli: Cli) -> Result<()> {
             language,
         } => {
             if !output_dir.is_dir() {
-                return Err(nvsf_app::fail("Batch output directory must exist"));
+                return Err(AppError::InvalidConfig(
+                    "Batch output directory must exist".into(),
+                ));
             }
             for (i, input) in inputs.iter().enumerate() {
                 let stem = input
@@ -332,17 +357,26 @@ fn run(cli: Cli) -> Result<()> {
                     data_root: cli.data_root.as_ref().map(|p| utf8_path(p)).transpose()?,
                     ..Default::default()
                 };
-                nvsf_app::extract(c, &control, |p| {
+                let project = nvsf_app::extract(c, &control, |p| {
                     eprintln!("Batch{} {}ms", i + 1, p.position_ms)
                 })?;
+                exit_code = exit_code.max(status::project(&project));
+                println!(
+                    "{}",
+                    serde_json::json!({"item":i + 1,"completed":project.completed,"cues":project.cues.len(),"review_needed":status::project(&project) == 2})
+                );
             }
         }
         Commands::Worker { .. } | Commands::NativeRequest { .. } => {
             return Err(nvsf_app::fail("Invalid worker invocation"));
         }
     }
-    log.event("INFO", "CLI", "Command completed");
-    Ok(())
+    log.event(
+        "INFO",
+        "CLI",
+        &format!("Command completed exit_code={exit_code}"),
+    );
+    Ok(exit_code)
 }
 
 fn run_worker(request: &Path, control_dir: &Path) -> Result<()> {
@@ -408,7 +442,10 @@ fn run_worker(request: &Path, control_dir: &Path) -> Result<()> {
             Ok(())
         }
         Err(e) => {
-            emit(job_id, &worker::Event::Failed(e.to_string()))?;
+            emit(
+                job_id,
+                &worker::Event::Failure(protocol::Failure::from_error(&e)),
+            )?;
             Err(e)
         }
     }

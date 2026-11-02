@@ -25,6 +25,7 @@ pub enum Event {
     Progress(Progress),
     Completed(Box<Project>),
     Failed(String),
+    Failure(protocol::Failure),
 }
 
 pub fn supervise(
@@ -109,6 +110,7 @@ pub fn supervise(
                 }
                 output::Poll::Event(Event::Completed(project)) => output = Some(*project),
                 output::Poll::Event(Event::Failed(message)) => failure = Some(fail(message)),
+                output::Poll::Event(Event::Failure(error)) => failure = Some(error.into_error()),
                 output::Poll::Progress => {}
                 output::Poll::Pending => {
                     output_progress = false;

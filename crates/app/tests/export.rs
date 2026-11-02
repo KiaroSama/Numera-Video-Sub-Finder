@@ -81,20 +81,25 @@ fn alternate_formats_keep_expected_headers_and_unknown_formats_fail() {
 }
 
 #[test]
-fn simultaneous_tracks_export_separately_with_a_combined_file() {
+fn simultaneous_tracks_export_separately_in_every_subtitle_format() {
     let directory = tempfile::tempdir().unwrap();
     let project = project(vec![
         cue(1, 0, 0, 1_000, "English"),
         cue(2, 1, 0, 1_000, "日本語"),
     ]);
-    let combined = directory.path().join("dual.srt");
-    export_project(&project, &combined, "srt", false, false, false).unwrap();
-    let first = std::fs::read_to_string(directory.path().join("dual.track-0.srt")).unwrap();
-    let second = std::fs::read_to_string(directory.path().join("dual.track-1.srt")).unwrap();
-    assert!(first.contains("English") && !first.contains("日本語"));
-    assert!(second.contains("日本語") && !second.contains("English"));
-    let merged = std::fs::read_to_string(&combined).unwrap();
-    assert!(merged.contains("English") && merged.contains("日本語"));
+    for format in ["srt", "vtt", "ass"] {
+        let target = directory.path().join(format!("dual.{format}"));
+        export_project(&project, &target, format, false, false, false).unwrap();
+        let first =
+            std::fs::read_to_string(directory.path().join(format!("dual.track-0.{format}")))
+                .unwrap();
+        let second =
+            std::fs::read_to_string(directory.path().join(format!("dual.track-1.{format}")))
+                .unwrap();
+        assert!(first.contains("English") && !first.contains("日本語"));
+        assert!(second.contains("日本語") && !second.contains("English"));
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), first);
+    }
 }
 
 #[test]
