@@ -52,7 +52,7 @@ function Start-BuildLogObserver([string]$Directory,[string]$Contract,[string]$As
         }
         return $state
     } catch {
-        try { Stop-BuildLogObserver $state } catch { Write-GuardLog 'ERROR' 'Observer startup cleanup failed.' }
+        try { Stop-BuildLogObserver $state } catch { Write-GuardLog 'ERROR' "Observer startup cleanup failed category=$($_.Exception.GetType().Name)." }
         throw
     }
 }
@@ -89,9 +89,11 @@ function Stop-BuildLogObserver($State) {
             if ($IsWindows -and $State.assigned) {
                 $State.job.Terminate()
             } elseif ($State.group) {
-                if ([NvsfCiOwnership]::SignalGroup($State.group,0) -eq 0) {
-                    if ([NvsfCiOwnership]::SignalGroup($State.group,9) -ne 0 -and [NvsfCiOwnership]::LastError() -ne 3) { throw 'Observer group termination failed.' }
-                } elseif ([NvsfCiOwnership]::LastError() -ne 3) { throw 'Observer group state unavailable.' }
+                $groupError=[NvsfCiOwnership]::SignalGroup($State.group,0)
+                if ($groupError -eq 0) {
+                    $groupError=[NvsfCiOwnership]::SignalGroup($State.group,9)
+                    if ($groupError -notin @(0,3)) { throw "Observer group termination failed error=$groupError." }
+                } elseif ($groupError -ne 3) { throw "Observer group state unavailable error=$groupError." }
             } elseif (-not $p.HasExited) { $p.Kill($true) }
             if (-not $p.WaitForExit(3000)) { throw 'Observer root was not reaped within three seconds.' }
             $p.Close()
@@ -100,8 +102,13 @@ function Stop-BuildLogObserver($State) {
                 while ($State.job.Active() -gt 0 -and $cleanup.Elapsed.TotalSeconds -lt 3) { [Threading.Thread]::Sleep(20) }
                 if ($State.job.Active() -gt 0) { throw 'Observer job still has live processes.' }
             } elseif ($State.group) {
-                while ([NvsfCiOwnership]::SignalGroup($State.group,0) -eq 0 -and $cleanup.Elapsed.TotalSeconds -lt 3) { [Threading.Thread]::Sleep(20) }
-                if ([NvsfCiOwnership]::SignalGroup($State.group,0) -eq 0 -or [NvsfCiOwnership]::LastError() -ne 3) { throw 'Observer process group cleanup could not be verified.' }
+                do {
+                    $groupError=[NvsfCiOwnership]::SignalGroup($State.group,0)
+                    if ($groupError -ne 0) { break }
+                    if ($cleanup.Elapsed.TotalSeconds -ge 3) { break }
+                    [Threading.Thread]::Sleep(20)
+                } while ($true)
+                if ($groupError -ne 3) { throw "Observer process group cleanup could not be verified error=$groupError." }
             }
             Write-GuardLog 'INFO' "Observer cleanup verified pid=$($State.pid)"
         }

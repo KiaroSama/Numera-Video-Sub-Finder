@@ -2,6 +2,12 @@
 
 Updated: 2026-11-02. **NOT a release acceptance report.** Hosted observations below refer to the exact named SHA; corrective source is not a passing result.
 
+## Detector rollback outcome and observer correction
+
+[Exactaa1eaec/run41448752291](https://github.com/KiaroSama/Numera-Video-Sub-Finder/actions/runs/41448752291) completes with five native targets and all eight shared jobs successful. Both Windows targets now pass the unchanged Korean literal witness. Intel fails before native provisioning in the observer-error cleanup regression: the expected observer error is rejected, but the cleanup-verification marker is missing. Both aggregates fail. All six outcomes were collected before corrective publication.
+
+The pending CI-only correction captures Unix group signalling status and native error in one managed call, rejects unknown errors in every monitor/cleanup caller and retains the original ownership and cleanup deadlines. Existing hosted negative checks cover absent and invalid group identifiers. The old Intel native error was not recorded; error-preservation risk is source-confirmed, not proof of its exact historical errno. Replacement execution is **NOT_RUN**; no test oracle, timeout or security boundary is weakened.
+
 ## Verified CLI/export source and pending preprocessing
 
 [Exacte3d8d3a/run41371353072, attempt2](https://github.com/KiaroSama/Numera-Video-Sub-Finder/actions/runs/41371353072/attempts/2) completes all16 jobs, all six native targets and both aggregates successfully. Linux reports225 ordinary cases,13 GUI behaviors,22 Rust ASan/LSan cases,7439/8798 measured lines (84.55%) and91.48% critical coverage; full-product qualification remains false. The actual independent FFmpeg subtitle decoder, typed worker errors, CLI status/preflight and separate-track exports pass within this source. Fresh independent review classifies all130 executable mutations critical/non-equivalent and confirms130 caught, six build-unviable, no misses/timeouts and no equivalent exclusions. The generated review-qualified flag is not rewritten; the independent review is separate evidence scoped to that actual inventory.
