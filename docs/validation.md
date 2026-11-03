@@ -2,6 +2,10 @@
 
 Updated: 2026-11-03. **NOT a release acceptance report.** Hosted observations below refer to the exact named SHA; corrective source is not a passing result.
 
+## Current compiler failure and pending correction
+
+[Exact eb2b119/run41564063812](https://github.com/KiaroSama/Numera-Video-Sub-Finder/actions/runs/41564063812) reports E0277 at region proposal collection in mutation and all six native targets. Seven other shared jobs pass; both aggregates fail. All six outcomes have been collected. These are compilation failures, not failed OCR measurements. The correction preserves `Rect::new` validation and collects its core result before the existing application-error conversion. Source review is complete; corrected-source hosted validation is **NOT_RUN**. No release or merge follows from partial shared-lane success.
+
 ## Latest verified development batch and pending source
 
 [Exact40b8dbf/run41514359513](https://github.com/KiaroSama/Numera-Video-Sub-Finder/actions/runs/41514359513), attempt1, passes all16 jobs, all six native targets and both aggregate gates. The exact source was fast-forwarded/pushed to main and its merged task branch removed. Intel's actual activation/cancellation test, eight hosted guard contracts, model provisioning and subsequent native acceptance pass. No local compilation or inference substitutes for those results.
