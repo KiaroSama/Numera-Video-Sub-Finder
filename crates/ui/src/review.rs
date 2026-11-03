@@ -78,6 +78,7 @@ pub fn Review(ui: Ui) -> impl IntoView {
                     <div class="panel-heading"><h2>"Review against source"</h2><button on:click=move |_|ui.pick_source() disabled=move ||ui.busy.get()>"Link video"</button></div>
                     <p class="hint">"Saved projects do not grant source-file access. Link the original video explicitly for preview."</p>
                     <Preview ui/>
+                    <crate::evidence::Evidence ui/>
                     <CueEditor ui/>
                     <Export ui/>
                 </section>

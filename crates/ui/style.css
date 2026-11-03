@@ -129,6 +129,10 @@ main { flex: 1; padding: 0 30px 30px; }
 .preview-empty svg { width: 56px; height: 56px; margin-bottom: 14px; color: #aaa8a4; }
 .preview-empty strong { font-size: 15px; font-weight: 550; }
 .preview-empty p { color: #a9b3c7; font-size: 12px; margin: 8px 0 0; }
+.preview-viewport { width: 100%; max-height: 420px; overflow: auto; direction: ltr; }
+.preview-controls { margin-top: 10px; }
+.preview-controls label { display: flex; align-items: center; gap: 8px; margin: 0; }
+.preview-controls select { width: auto; }
 .frame { position: relative; width: 100%; user-select: none; cursor: crosshair; }
 .source-frame { display: block; width: 100%; height: 100%; object-fit: contain; filter: none; opacity: 1; }
 .roi { position: absolute; border: 2px solid #ff6876; pointer-events: none; }
@@ -141,6 +145,13 @@ main { flex: 1; padding: 0 30px 30px; }
 .scrubber button { padding: 7px 9px; font-size: 11px; min-height: 34px; white-space: nowrap; }
 .scrubber output { font-size: 11px; white-space: nowrap; }
 .draw-mode { font-size: 12px; }
+.crop-comparison { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; margin-top: 12px; }
+.crop-comparison figure { margin: 0; min-width: 0; }
+.crop-comparison figcaption { font-size: 12px; margin-bottom: 8px; }
+.original-crop { display: block; width: 100%; height: auto; }
+.candidate-crop { position: relative; overflow: hidden; width: 100%; background: #0d0f14; }
+.candidate-crop img { position: absolute; max-width: none; height: auto; }
+@media (max-width: 720px) { .crop-comparison { grid-template-columns: 1fr; } }
 details { margin-top: 16px; }
 summary { cursor: pointer; font-weight: 650; padding: 7px 0; }
 .advanced { border-top: 1px solid var(--border); padding-top: 8px; }

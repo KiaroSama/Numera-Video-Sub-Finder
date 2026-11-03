@@ -1,8 +1,14 @@
 # Validation status
 
-Updated: 2026-11-02. **NOT a release acceptance report.** Hosted observations below refer to the exact named SHA; corrective source is not a passing result.
+Updated: 2026-11-03. **NOT a release acceptance report.** Hosted observations below refer to the exact named SHA; corrective source is not a passing result.
 
-## Latest failed batch and corrective source
+## Latest verified development batch and pending source
+
+[Exact40b8dbf/run41514359513](https://github.com/KiaroSama/Numera-Video-Sub-Finder/actions/runs/41514359513), attempt1, passes all16 jobs, all six native targets and both aggregate gates. The exact source was fast-forwarded/pushed to main and its merged task branch removed. Intel's actual activation/cancellation test, eight hosted guard contracts, model provisioning and subsequent native acceptance pass. No local compilation or inference substitutes for those results.
+
+The next source adds full-frame disconnected region proposals, preview zoom/pan/reset and original/candidate crop comparison, persistent forced-cleanup retry budgets, Tesseract5.5.4 and Leptos0.8.23. Its authored tests and actual native/GUI witnesses are **NOT_RUN**. Existing600/20 download,240-second GUI and two-second forced-cleanup budgets are not inflated. A persistent cleanup deadline does not prove two-second total cancellation or complete live-descendant census. Independent corpus, physical acceleration, native Tab/IME/screen reader, full DB/crop parity, platform signing and install lifecycle remain open.
+
+## Previous failed batch and corrective source
 
 [Exact612055e/run41468630843](https://github.com/KiaroSama/Numera-Video-Sub-Finder/actions/runs/41468630843) completes with four native targets (both Linux and Windows) and all eight shared jobs successful. Apple Silicon fails the stalled-observer cleanup contract with captured EPERM1. Intel reaches the full projector byte count, then fails the unchanged provisioning idle deadline and records cleanup EPERM1. All six outcomes were collected; both aggregates fail. No current-source all-green or merge is claimed.
 

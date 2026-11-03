@@ -35,6 +35,30 @@ pub async fn suggest_regions(
 }
 
 #[tauri::command]
+pub async fn cue_evidence(
+    host: tauri::State<'_, Host>,
+    cue_id: u64,
+) -> Result<tauri::ipc::Response> {
+    let host = host.inner().clone();
+    blocking(move || {
+        let _operation = lock(&host.0.operation)?;
+        host.ensure_idle()?;
+        let recorded = lock(&host.0.project)?
+            .as_ref()
+            .and_then(|p| p.cues.iter().find(|cue| cue.id == cue_id))
+            .and_then(|cue| cue.crop.clone())
+            .ok_or_else(|| {
+                "Original crop evidence is unavailable; link the source video for a new preview"
+                    .to_string()
+            })?;
+        let bytes =
+            nvsf_app::crop_evidence::read(&host.0.paths, &recorded).map_err(|e| e.to_string())?;
+        Ok(tauri::ipc::Response::new(bytes))
+    })
+    .await
+}
+
+#[tauri::command]
 pub async fn recognize_cue(
     host: tauri::State<'_, Host>,
     token: String,

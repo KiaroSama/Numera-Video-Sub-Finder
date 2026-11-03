@@ -189,13 +189,26 @@ function Write-NativeInventory([hashtable]$Record) {
 }
 $baseline = 'e456309491fd875487bf02b8a0dca76c1b1b00cc'
 $ortCommit = '402979ac1bef89dcd55add41eaa7277c407599eb'
-$prefix = Join-Path (Join-Path $work 'installed') $target.triplet
 try {
+    $nativeLock = [IO.File]::ReadAllText((Join-Path $root 'ci/native-lock.json'), $utf8) | ConvertFrom-Json
+    $tesseractPort = [IO.File]::ReadAllText((Join-Path $root 'ci/ports/tesseract/vcpkg.json'), $utf8) | ConvertFrom-Json
+    $portConfiguration = [IO.File]::ReadAllText((Join-Path $root 'vcpkg-configuration.json'), $utf8) | ConvertFrom-Json
+    if (@($portConfiguration.'overlay-ports').Count -ne 1 -or $portConfiguration.'overlay-ports'[0] -cne 'ci/ports') { throw 'Native configuration must select the reviewed local overlay ports.' }
+    if ($nativeLock.vcpkg_revision -ne $baseline -or $nativeLock.tesseract -ne '5.5.4' -or $tesseractPort.version -ne $nativeLock.tesseract) { throw 'Native lock and reviewed Tesseract overlay version must agree.' }
+    $overlayInputs = @{}
+    foreach ($relative in @('vcpkg-configuration.json', 'ci/ports/tesseract/vcpkg.json', 'ci/ports/tesseract/portfile.cmake', 'ci/ports/tesseract/fix_static_link_icu.patch', 'ci/ports/tesseract/fix-link-include-path.patch', 'ci/ports/tesseract/target-curl.diff', 'ci/ports/tesseract/LICENSE.vcpkg.txt')) {
+        $overlayInputs[$relative] = (Get-FileHash -LiteralPath (Join-Path $root $relative) -Algorithm SHA256).Hash.ToLowerInvariant()
+    }
+    $prefix = Join-Path (Join-Path $work 'installed') $target.triplet
     if ($env:GITHUB_SHA -notmatch '^[a-f0-9]{40}$') { throw 'Native staging requires an exact Actions source SHA.' }
     if ($StageMediaAdapter) {
         $record = [IO.File]::ReadAllText((Join-Path $notices 'native-inventory.json'), $utf8) | ConvertFrom-Json -AsHashtable
         $lockHash = (Get-FileHash -LiteralPath (Join-Path $root 'Cargo.lock') -Algorithm SHA256).Hash.ToLowerInvariant()
-        if ($record.schema -ne 1 -or $record.target -ne $TargetId -or $record.source_sha -ne $env:GITHUB_SHA -or $record.rust_target -ne $target.target -or $record.cargo_lock_sha256 -ne $lockHash -or $record.vcpkg_commit -ne $baseline) { throw 'Media staging requires the same-source/target/lock native inventory.' }
+        if ($record.schema -ne 1 -or $record.target -ne $TargetId -or $record.source_sha -ne $env:GITHUB_SHA -or $record.rust_target -ne $target.target -or $record.cargo_lock_sha256 -ne $lockHash -or $record.vcpkg_commit -ne $baseline -or $record.tesseract_version -ne $nativeLock.tesseract) { throw 'Media staging requires the same-source/target/lock native inventory.' }
+        if ($record.overlay_port_inputs.Count -ne $overlayInputs.Count) { throw 'Tesseract overlay inventory is incomplete.' }
+        foreach ($relative in $overlayInputs.Keys) {
+            if ($record.overlay_port_inputs[$relative] -ne $overlayInputs[$relative]) { throw 'Tesseract overlay inputs changed before media staging.' }
+        }
         $known = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
         if ($record.runtime_files.Count -lt 1 -or $record.runtime_files.Count -gt 512) { throw 'Invalid prior native inventory size.' }
         foreach ($entry in $record.runtime_files) {
@@ -531,7 +544,7 @@ foreach (`$name in @('PATH','INCLUDE','LIB','LIBPATH','VCINSTALLDIR','VCToolsIns
         Invoke-NativeCommand -Name 'llama-adhoc-sign' -Executable 'codesign' -Arguments @('--force', '--sign', '-', (Join-Path $runtimes $llamaName))
     }
     Invoke-NativeCommand -Name 'llama-help' -Executable (Join-Path $runtimes $llamaName) -Arguments @('--help') -Wall 30 -Idle 10
-    $record = @{ schema = 1; target = $TargetId; source_sha = $env:GITHUB_SHA; rust_target = $target.target; cargo_lock_sha256 = (Get-FileHash -LiteralPath (Join-Path $root 'Cargo.lock') -Algorithm SHA256).Hash.ToLowerInvariant(); vcpkg_commit = $baseline; ort_version = '1.31.0'; ort_source_commit = $(if ($ortSourceBuild) { $ortCommit } else { $null }); overlay_triplet = $target.triplet; linkage = 'dynamic'; build_type = 'release'; llama_tag_object = $llamaTagObject; llama_source_commit = $llamaCommit; llama_patch_sha256 = $llamaPatchHash; llama_bf16_reference = $kernelEvidence; llama_cli_status = 'EXPERIMENTAL_MODEL_NOT_LOADED'; media_adapter = $null; runtime_execution = 'NOT_RUN'; final_package_closure = 'PENDING_HOSTED_TEST' }
+    $record = @{ schema = 1; target = $TargetId; source_sha = $env:GITHUB_SHA; rust_target = $target.target; cargo_lock_sha256 = (Get-FileHash -LiteralPath (Join-Path $root 'Cargo.lock') -Algorithm SHA256).Hash.ToLowerInvariant(); vcpkg_commit = $baseline; tesseract_version = $nativeLock.tesseract; tesseract_source_commit = '7e548e6eff172f38f97664afe7f7ce40db36c8d6'; overlay_port_inputs = $overlayInputs; ort_version = '1.31.0'; ort_source_commit = $(if ($ortSourceBuild) { $ortCommit } else { $null }); overlay_triplet = $target.triplet; linkage = 'dynamic'; build_type = 'release'; llama_tag_object = $llamaTagObject; llama_source_commit = $llamaCommit; llama_patch_sha256 = $llamaPatchHash; llama_bf16_reference = $kernelEvidence; llama_cli_status = 'EXPERIMENTAL_MODEL_NOT_LOADED'; media_adapter = $null; runtime_execution = 'NOT_RUN'; final_package_closure = 'PENDING_HOSTED_TEST' }
     Write-NativeInventory $record
     Write-NativeLog 'INFO' "Provisioning complete target=$TargetId runtime_files=$($record.runtime_files.Count); media adapter staging and actual package/model inference remain later required CI gates."
 } catch {

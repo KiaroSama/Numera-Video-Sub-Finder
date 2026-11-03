@@ -48,6 +48,7 @@ fn main() {
             "repair_runtimes",
             "suggest_regions",
             "recognize_cue",
+            "cue_evidence",
             "install_visual_retry",
             "cancel_visual_retry",
             "propose_visual_retry",

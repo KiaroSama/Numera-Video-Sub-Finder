@@ -82,6 +82,44 @@ pub fn theme(driver: &Driver, output: &Path, name: &str) -> Result<()> {
     Ok(())
 }
 
+pub fn preview_navigation(driver: &Driver, output: &Path) -> Result<()> {
+    driver.select("select[aria-label='Preview zoom']", "400")?;
+    driver.wait("const v=document.querySelector('.preview-viewport'),f=document.querySelector('.frame');return v&&f&&f.getBoundingClientRect().width>v.clientWidth*3.95;", 5)?;
+    driver.click("button[aria-label='Pan preview right']")?;
+    driver.click("button[aria-label='Pan preview down']")?;
+    let observation = driver.script("const v=document.querySelector('.preview-viewport'),f=document.querySelector('.frame'),r=f.getBoundingClientRect();const before=document.querySelectorAll('.roi.excluded').length;const toggle=document.querySelector('.draw-mode input');toggle.click();const x=Math.round(r.left+r.width*.25),y=Math.round(r.top+r.height*.25),x2=Math.round(r.left+r.width*.5),y2=Math.round(r.top+r.height*.5);f.dispatchEvent(new MouseEvent('mousedown',{bubbles:true,button:0,clientX:x,clientY:y}));f.dispatchEvent(new MouseEvent('mouseup',{bubbles:true,button:0,clientX:x2,clientY:y2}));toggle.click();return {left:v.scrollLeft,top:v.scrollTop,before,width:r.width,height:r.height};")?;
+    driver.wait(
+        "return document.querySelectorAll('.roi.excluded').length===1;",
+        5,
+    )?;
+    let region = driver.script("const s=document.querySelector('.roi.excluded').style;return [parseFloat(s.left),parseFloat(s.top),parseFloat(s.width),parseFloat(s.height)];")?;
+    if observation["before"] != 0
+        || observation["left"].as_f64().unwrap_or(0.0) <= 0.0
+        || observation["top"].as_f64().unwrap_or(0.0) <= 0.0
+        || region.as_array().is_none_or(|values| {
+            values.len() != 4
+                || values
+                    .iter()
+                    .any(|v| v.as_f64().is_none_or(|n| (n - 25.0).abs() > 1.0))
+        })
+    {
+        return Err(format!(
+            "Zoom/pan changed normalized source coordinates: {observation} {region}"
+        )
+        .into());
+    }
+    driver.click("button[aria-label='Remove exclusion 1']")?;
+    driver.click(".preview-controls button:last-child")?;
+    driver.wait("const v=document.querySelector('.preview-viewport'),f=document.querySelector('.frame');return v&&f&&Math.abs(f.getBoundingClientRect().width-v.clientWidth)<2&&v.scrollLeft===0&&v.scrollTop===0&&document.querySelectorAll('.roi.excluded').length===0;", 5)?;
+    std::fs::write(
+        output.join("preview-navigation.json"),
+        serde_json::to_vec_pretty(
+            &json!({"observation":observation,"region_percent":region,"reset":true}),
+        )?,
+    )?;
+    Ok(())
+}
+
 pub fn layout(driver: &Driver, output: &Path) -> Result<()> {
     let original = driver.request(reqwest::Method::GET, "/window/rect", json!({}))?;
     let result = (|| -> Result<()> {

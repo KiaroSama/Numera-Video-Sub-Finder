@@ -3,7 +3,7 @@ use std::ffi::{CStr, c_char, c_void};
 
 pub(crate) fn tesseract(paths: &Paths) -> Result<String> {
     let library = paths.library(crate::runtimes::TESSERACT_LIBRARY)?;
-    // SAFETY: TessVersion has this exact signature in the pinned 5.5.3 C API;
+    // SAFETY: TessVersion has this exact signature in the pinned 5.5.4 C API;
     // its borrowed static string is read while the library owner remains alive.
     let version = unsafe {
         let get = library
@@ -11,8 +11,8 @@ pub(crate) fn tesseract(paths: &Paths) -> Result<String> {
             .map_err(|e| fail(e.to_string()))?;
         version_text(get())?
     };
-    if version != "5.5.3" {
-        return Err(fail("Tesseract runtime must match packaged version 5.5.3"));
+    if version != "5.5.4" {
+        return Err(fail("Tesseract runtime must match packaged version 5.5.4"));
     }
     Ok(version)
 }

@@ -45,7 +45,7 @@ impl Tesseract {
     pub fn new(paths: &Paths, language: &str) -> Result<Self> {
         let library = paths.library(crate::runtimes::TESSERACT_LIBRARY)?;
         unsafe fn symbol<T: Copy>(lib: &Library, name: &[u8]) -> Result<T> {
-            // SAFETY: caller supplies signatures verified against Tesseract5.5.3 capi.h.
+            // SAFETY: signatures match 5.5.4 capi.h, byte-identical to the admitted 5.5.3 header.
             Ok(*unsafe { lib.get::<T>(name) }.map_err(|e| fail(e.to_string()))?)
         }
         // SAFETY: exact ABI signatures are defined above; library outlives every use.
