@@ -55,11 +55,16 @@ impl AppearanceTracker {
         if same {
             if let Some(c) = &mut self.active {
                 c.end_ms = c.end_ms.max(until_ms);
-                if let Some(r) = recognized
-                    && r.confidence.unwrap_or(0.0) > c.confidence.unwrap_or(0.0)
-                {
-                    c.confidence = r.confidence;
-                    c.crop = r.crop;
+                if let Some(r) = recognized {
+                    // Uncertainty is sticky; freeze retained evidence once scores are incomparable.
+                    if r.confidence.is_none() {
+                        c.confidence = None;
+                    } else if c.confidence.is_some()
+                        && r.confidence.unwrap_or(0.0) > c.confidence.unwrap_or(0.0)
+                    {
+                        c.confidence = r.confidence;
+                        c.crop = r.crop;
+                    }
                 }
             }
             return Ok(None);

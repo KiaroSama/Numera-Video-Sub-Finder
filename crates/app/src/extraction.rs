@@ -34,6 +34,51 @@ pub fn extract(
     crate::worker::supervise(config, control, callback)
 }
 
+fn line_confidence(scores: &[Option<f32>]) -> Option<f32> {
+    if scores.is_empty() {
+        return None;
+    }
+    scores
+        .iter()
+        .copied()
+        .sum::<Option<f32>>()
+        .map(|sum| sum / scores.len() as f32)
+}
+
+#[cfg(test)]
+mod verifier_tests {
+    use super::line_confidence;
+
+    #[test]
+    fn one_unscored_line_cannot_be_averaged_into_confident_text() {
+        assert_eq!(
+            line_confidence(&[Some(0.99), Some(0.99), Some(0.99), None]),
+            None
+        );
+        assert_eq!(line_confidence(&[None]), None);
+        assert_eq!(line_confidence(&[]), None);
+        assert_eq!(line_confidence(&[Some(0.5), Some(1.0)]), Some(0.75));
+    }
+}
+
+/// Applies an independent observation without comparing uncalibrated engine scores.
+pub fn adjudicate_verifier(primary: &mut Recognition, verified: Result<Recognition>) -> Result<()> {
+    let verified = match verified {
+        Ok(verified) => verified,
+        Err(error) => {
+            primary.confidence = None;
+            return Err(error);
+        }
+    };
+    if primary.text.trim().is_empty() && !verified.text.trim().is_empty() {
+        primary.text = verified.text;
+        primary.confidence = None;
+    } else if primary.text.trim() != verified.text.trim() {
+        primary.confidence = None;
+    }
+    Ok(())
+}
+
 pub fn run(
     config: ExtractConfig,
     control: &Control,
@@ -203,7 +248,9 @@ pub fn run(
                 for (bx, by, bw, bh) in boxes {
                     let text_crop = image::imageops::crop_imm(&crop, bx, by, bw, bh).to_image();
                     let mut r = ocr.recognize(&text_crop)?;
-                    if r.confidence.unwrap_or(0.0) < config.min_confidence {
+                    if r.confidence
+                        .is_none_or(|score| score < config.min_confidence)
+                    {
                         if let Some(s) = &mut specialist {
                             let candidate = s.recognize(&text_crop)?;
                             if r.text.trim().is_empty() {
@@ -214,21 +261,22 @@ pub fn run(
                             }
                         }
                         if let Some(t) = &mut fallback
-                            && let Ok(v) = t.recognize(&text_crop, bh > bw.saturating_mul(2))
+                            && adjudicate_verifier(
+                                &mut r,
+                                t.recognize(&text_crop, bh > bw.saturating_mul(2)),
+                            )
+                            .is_err()
                         {
-                            // Scores from different engines are not calibrated against each other.
-                            // A disagreement remains a primary candidate requiring manual review.
-                            if !r.text.trim().is_empty() && v.text.trim() != r.text.trim() {
-                                r.confidence = None;
-                            } else if r.text.trim().is_empty() && !v.text.trim().is_empty() {
-                                r.text = v.text;
-                                r.confidence = None;
+                            let warning = "Independent Tesseract verification failed; affected observations require review";
+                            if !project.warnings.iter().any(|existing| existing == warning) {
+                                project.warnings.push(warning.into());
+                                log.event("WARNING", "OCR", warning);
                             }
                         }
                     }
                     if !r.text.trim().is_empty() {
                         lines.push(r.text);
-                        scores.push(r.confidence.unwrap_or(0.0));
+                        scores.push(r.confidence);
                     }
                 }
                 candidates[i] = if lines.is_empty() {
@@ -250,7 +298,7 @@ pub fn run(
                     }
                     Some(Recognition {
                         text,
-                        confidence: Some(scores.iter().sum::<f32>() / scores.len() as f32),
+                        confidence: line_confidence(&scores),
                         crop: Some(image_path.to_string_lossy().into_owned()),
                     })
                 };

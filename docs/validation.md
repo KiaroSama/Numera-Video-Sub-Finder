@@ -2,7 +2,15 @@
 
 Updated: 2026-11-03. **NOT a release acceptance report.** Hosted observations below refer to the exact named SHA; corrective source is not a passing result.
 
-## Current crop fixture compilation correction
+## Current independent-verifier candidate
+
+Original T012 source now exposes optional verifier failures through a fixed deduplicated warning and unknown confidence, preserving primary text/crop. Multiline aggregation and continuous-appearance tracking retain uncertainty through later scored observations and checkpoint restore; crop selection freezes when scores become incomparable. Four small app/core regressions and serial native `eng/fas/jpn` recognition of the existing generated Latin-digit `16` crop reuse current suites/command budgets. New compilation, tests and native results are **NOT_RUN**. Numeric pack admission is not script-quality qualification or a deterministic end-to-end forced Paddle fallback; real priority-language corpus acceptance remains open.
+
+## Verified preview integration
+
+[Exact1ddb669/run41625327551](https://github.com/KiaroSama/Numera-Video-Sub-Finder/actions/runs/41625327551) completes all16 jobs, all six native targets and both aggregate gates successfully. The exact source is merged into main. Linux reports240 ordinary cases,15 GUI behaviors,22 Rust ASan/LSan cases and7777/9151 measured lines (84.99%), critical91.36%, with full-product qualification false. This verifies the previous region/preview/crop/cleanup and dependency patch batch only. Independent corpus, physical acceleration, native Tab/IME/screen reader, full DB/crop parity, complete cancellation/tree evidence, platform signing and install lifecycle remain open. Historical NOT_RUN descriptions below are superseded only within that exact verified scope.
+
+## Historical crop fixture compilation correction
 
 [Exact680a6b3/run41597257028](https://github.com/KiaroSama/Numera-Video-Sub-Finder/actions/runs/41597257028) passes all eight shared jobs. All six native targets advance past the earlier compiler errors, then fail crop-test compilation on unsupported sha2 output-array `LowerHex` formatting; both aggregates fail. All outcomes are collected. An independent literal fixture digest replaces that formatting without changing production code or removing assertions. Corrected-source runtime is **NOT_RUN**; no merge or release is claimed.
 

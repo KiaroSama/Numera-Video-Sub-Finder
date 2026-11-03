@@ -79,6 +79,60 @@ fn representative_evidence_changes_only_for_strictly_better_confidence() {
 }
 
 #[test]
+fn uncertain_observation_stays_uncertain_without_discarding_better_evidence() {
+    let mut tracker = AppearanceTracker::new(0);
+    for (start, confidence, crop, expected_crop) in [
+        (0, Some(0.9), "best.png", "best.png"),
+        (40, None, "uncertain.png", "best.png"),
+        (80, Some(0.8), "worse.png", "best.png"),
+        (120, Some(0.95), "better.png", "best.png"),
+    ] {
+        tracker
+            .observe(
+                start,
+                start + 40,
+                Some(Recognition {
+                    text: "16".into(),
+                    confidence,
+                    crop: Some(crop.into()),
+                }),
+            )
+            .unwrap();
+        let cue = tracker.active().unwrap();
+        assert_eq!(cue.crop.as_deref(), Some(expected_crop));
+        assert_eq!(cue.confidence, if start == 0 { Some(0.9) } else { None });
+    }
+    let saved = tracker.active().unwrap().clone();
+    let mut restored = AppearanceTracker::restore(0, saved).unwrap();
+    restored
+        .observe(
+            160,
+            200,
+            Some(Recognition {
+                text: "16".into(),
+                confidence: Some(1.0),
+                crop: Some("later.png".into()),
+            }),
+        )
+        .unwrap();
+    assert_eq!(restored.active().unwrap().confidence, None);
+    assert_eq!(restored.active().unwrap().crop.as_deref(), Some("best.png"));
+    tracker.observe(160, 200, None).unwrap();
+    tracker
+        .observe(
+            200,
+            240,
+            Some(Recognition {
+                text: "16".into(),
+                confidence: Some(0.8),
+                crop: Some("new-appearance.png".into()),
+            }),
+        )
+        .unwrap();
+    assert_eq!(tracker.active().unwrap().confidence, Some(0.8));
+}
+
+#[test]
 fn invalid_direct_splits_preserve_cues_without_an_edit_history_wrapper() {
     let original = Cue::new(2, 0, 100, 900, "Hello 日本".into()).unwrap();
     for at in [0, 100, 900, 1_000] {
