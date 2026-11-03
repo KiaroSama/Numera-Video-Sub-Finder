@@ -25,7 +25,7 @@ tempfile.workspace = true
 tokio = { version = "=1.54.1", features = ["time", "sync", "macros"] }
 tauri = { version = "=2.12.5", features = [] }
 tauri-plugin-dialog = "=2.8.3"
-tauri-plugin-updater = { version = "=2.14.0", default-features = false, features = ["rustls-tls"] }
+tauri-plugin-updater = { version = "=2.14.1", default-features = false, features = ["rustls-tls"] }
 tauri-plugin-webdriver = { git = "https://github.com/Choochmeque/tauri-plugin-webdriver", rev = "50e7509073ca47dbf2f42a965d8161c198b96ac3", version = "=0.2.3", optional = true }
 
 [dev-dependencies]
