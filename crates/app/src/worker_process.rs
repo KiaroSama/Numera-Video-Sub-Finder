@@ -11,8 +11,21 @@ pub(crate) struct Process {
     _lease: Option<ChildStdin>,
     #[cfg(windows)]
     job: Option<super::windows::Job>,
-    reaped: bool,
+    status: Option<ExitStatus>,
+    cleanup_deadline: Option<Instant>,
     tree_signalled: bool,
+}
+
+fn cleanup_deadline(stored: &mut Option<Instant>, now: Instant) -> Instant {
+    *stored.get_or_insert(now + Duration::from_secs(2))
+}
+
+fn cleanup_pause(deadline: Instant, now: Instant) -> Result<Duration> {
+    let remaining = deadline.saturating_duration_since(now);
+    if remaining.is_zero() {
+        return Err(fail("Owned worker did not exit within cleanup deadline"));
+    }
+    Ok(remaining.min(Duration::from_millis(10)))
 }
 
 impl Process {
@@ -33,7 +46,8 @@ impl Process {
             _lease: None,
             #[cfg(windows)]
             job: None,
-            reaped: false,
+            status: None,
+            cleanup_deadline: None,
             tree_signalled: false,
         };
         #[cfg(windows)]
@@ -68,6 +82,9 @@ impl Process {
     }
 
     pub(crate) fn exited(&mut self) -> Result<bool> {
+        if self.status.is_some() {
+            return Ok(true);
+        }
         #[cfg(windows)]
         return Ok(self.child.try_wait()?.is_some());
         #[cfg(unix)]
@@ -91,7 +108,7 @@ impl Process {
     }
 
     pub(crate) fn signal_tree(&mut self) -> Result<()> {
-        if self.tree_signalled {
+        if self.status.is_some() || self.tree_signalled {
             return Ok(());
         }
         #[cfg(windows)]
@@ -116,16 +133,17 @@ impl Process {
     }
 
     pub(crate) fn finish(&mut self) -> Result<ExitStatus> {
+        if let Some(status) = self.status {
+            return Ok(status);
+        }
+        // Signal failures and destructor retries share this first forced-cleanup budget.
+        let deadline = cleanup_deadline(&mut self.cleanup_deadline, Instant::now());
         self.signal_tree()?;
-        let deadline = Instant::now() + Duration::from_secs(2);
         while !self.exited()? {
-            if Instant::now() >= deadline {
-                return Err(fail("Owned worker did not exit within cleanup deadline"));
-            }
-            std::thread::park_timeout(Duration::from_millis(10));
+            std::thread::park_timeout(cleanup_pause(deadline, Instant::now())?);
         }
         let status = self.child.wait()?;
-        self.reaped = true;
+        self.status = Some(status);
         self._lease.take();
         #[cfg(windows)]
         self.job.take();
@@ -135,11 +153,15 @@ impl Process {
 
 impl Drop for Process {
     fn drop(&mut self) {
-        if !self.reaped {
+        if self.status.is_none() {
             let _ = self.finish();
         }
     }
 }
+
+#[cfg(test)]
+#[path = "worker_process_tests.rs"]
+mod tests;
 
 #[cfg(unix)]
 unsafe extern "C" {

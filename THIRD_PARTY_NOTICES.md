@@ -7,7 +7,8 @@ Application-owned code is GPL-3.0-or-later; see LICENSE. Native dependencies, mo
 | Rust / Rust standard library | rust-toolchain.toml 1.99.1 | MIT / Apache-2.0; preserve notices |
 | Tauri 2 / Leptos 0.8 | Cargo.lock and crate manifests | MIT / Apache-2.0 families; preserve exact package licenses |
 | FFmpeg 9.0.2 | vcpkg baseline e456309491fd875487bf02b8a0dca76c1b1b00cc, vcpkg.json features | Applicable LGPL/GPL terms depend on exact features; nonfree disabled; preserve configuration and corresponding source |
-| Tesseract 5.5.3 / Leptonica | Same vcpkg baseline | Apache-2.0 / BSD-style; preserve native notices |
+| Tesseract 5.5.4 / Leptonica | Tesseract tag5.5.4 commit7e548e6eff172f38f97664afe7f7ce40db36c8d6 via ci/ports/tesseract; Leptonica at the unchanged vcpkg baseline | Apache-2.0 / BSD-style; preserve native notices |
+| Tesseract vcpkg overlay recipe and patches | Adapted from Microsoft vcpkg e456309491fd875487bf02b8a0dca76c1b1b00cc; source archive SHA512 pinned in portfile.cmake; redundant upstream-included MSVC patch omitted | MIT; Microsoft copyright/license retained in ci/ports/tesseract/LICENSE.vcpkg.txt and native package notices |
 | ONNX Runtime 1.31.0 | ci/targets.json official release hashes/source tag | MIT; preserve notices, runtime licenses and exact build provenance |
 | ort 2.0.0-rc.14 | Cargo.lock | MIT / Apache-2.0; exact prerelease explicitly approved |
 | webpki-root-certs 1.0.9 trust-anchor data | Cargo.lock; rustls/webpki-roots tag v/1.0.9 | CDLA-Permissive-2.0; full agreement in licenses/data/CDLA-Permissive-2.0.md is included with distributed data |

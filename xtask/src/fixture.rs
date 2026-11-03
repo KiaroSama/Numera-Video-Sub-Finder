@@ -49,6 +49,7 @@ pub fn generate(ffmpeg: &Path, output: &Path) -> Result<(), Box<dyn Error>> {
     std::fs::create_dir_all(output)?;
     crate::subtitle_interop::verify(ffmpeg, output)?;
     let font = crate::multilingual::provision_font(output, "latin")?;
+    crate::extraction_witness::generate_regions(ffmpeg, output, &font)?;
     let cues = vec![
         Cue::new(1, 0, 0, 2000, "Hello world".into())?,
         Cue::new(2, 0, 3000, 5000, "Hello world".into())?,

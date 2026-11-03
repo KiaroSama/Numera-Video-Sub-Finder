@@ -10,6 +10,10 @@ use std::{
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
+#[path = "region_witness.rs"]
+mod region_witness;
+pub use region_witness::generate as generate_regions;
+
 pub fn verify(input: &Path, data: &Path, root: &Path) -> Result<()> {
     if std::env::var("GITHUB_ACTIONS").as_deref() != Ok("true")
         || std::env::var("RUNNER_ENVIRONMENT").as_deref() != Ok("github-hosted")
@@ -136,20 +140,23 @@ pub fn verify(input: &Path, data: &Path, root: &Path) -> Result<()> {
     let nvsf_app::native_request::Response::Suggest(suggestions) = response else {
         return Err("Native suggestion worker returned a different response".into());
     };
-    if suggestions.is_empty() || suggestions.len() > 2 || suggestions == [Rect::default()] {
+    if suggestions.is_empty() || suggestions.len() > 8 || suggestions == [Rect::default()] {
         return Err(
-            "Actual region suggestion omitted subtitle bands or invented extra bands".into(),
+            "Actual region suggestion omitted detections or exceeded the region limit".into(),
         );
     }
     for region in &suggestions {
         region.validate()?;
     }
-    if !suggestions
-        .iter()
-        .any(|region| region.y + region.height > 0.8)
-    {
-        return Err("Suggested bands omitted the known bottom subtitle".into());
+    if !suggestions.iter().any(|region| {
+        region.x <= 0.5
+            && region.x + region.width >= 0.5
+            && region.y <= 0.85
+            && region.y + region.height >= 0.85
+    }) {
+        return Err("Suggested regions omitted the known bottom subtitle location".into());
     }
+    region_witness::verify(&paths, input.parent().ok_or("Fixture has no parent")?)?;
     let unreadable = nvsf_app::native_request::supervise(
         &paths,
         input,
@@ -257,7 +264,7 @@ pub fn verify(input: &Path, data: &Path, root: &Path) -> Result<()> {
         &root.join("report.json"),
         &serde_json::to_vec_pretty(&serde_json::json!({
             "source_sha":std::env::var("GITHUB_SHA")?, "passed":true, "synthetic":true,
-            "proof":["cancel after committed frame", "incompatible resume preservation", "active appearance resume", "saved Unicode correction export", "overwrite refusal", "completed checkpoint export without decoding", "balanced full exclusion", "real subtitle-band suggestion", "blank cue rejection", "verified model export/import and corrupt replacement refusal", "installed default reuse and verified bundled seed with corrupt candidate refusal"],
+            "proof":["cancel after committed frame", "incompatible resume preservation", "active appearance resume", "saved Unicode correction export", "overwrite refusal", "completed checkpoint export without decoding", "balanced full exclusion", "real subtitle-region containment", "disconnected middle/bottom native proposals", "blank cue rejection", "verified model export/import and corrupt replacement refusal", "installed default reuse and verified bundled seed with corrupt candidate refusal"],
             "not_proved":["real-language quality", "native pause UI", "power-loss durability"],
             "elapsed_ms":started.elapsed().as_millis()
         }))?,

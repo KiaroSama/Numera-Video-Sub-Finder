@@ -26,6 +26,15 @@ pub async fn call<T: DeserializeOwned>(
 pub async fn preview(token: &str, time_ms: u64) -> Result<String, String> {
     let args = arguments(&serde_json::json!({"token": token, "timeMs": time_ms}))?;
     let bytes = invoke("preview_frame", args).await.map_err(error_text)?;
+    image_url(bytes)
+}
+
+pub async fn cue_evidence(cue_id: u64) -> Result<String, String> {
+    let args = arguments(&serde_json::json!({"cueId":cue_id}))?;
+    image_url(invoke("cue_evidence", args).await.map_err(error_text)?)
+}
+
+fn image_url(bytes: JsValue) -> Result<String, String> {
     let bytes = js_sys::Uint8Array::new(&bytes);
     if bytes.length() > 8 * 1024 * 1024 {
         return Err("Preview exceeds binary transport limit".into());

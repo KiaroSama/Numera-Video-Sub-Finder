@@ -87,6 +87,8 @@ CLI extraction, benchmark, resume and batch return **2** when completed output c
 
 SRT, VTT and ASS keep distinct tracks separate. For multiple tracks, the chosen output contains the lowest-numbered primary track, with `.track-<id>.<format>` files for every track; it does not silently combine bilingual tracks. JSON retains the complete project. ASS represents time in centiseconds, enclosing millisecond intervals with at most 9 ms expansion at each edge so a short cue is never silently erased.
 
+Use **Zoom** (100–400%), native scrollbars or the labeled pan buttons to inspect a frame; **Reset view** restores fit without changing source pixels or normalized regions. In Review, expand **Compare original and selected-frame crops** and load the content-verified original extraction crop. The candidate shows the unmasked track region at the current source time. A moved/missing cache is reported honestly; it is never replaced with a newly decoded image and labelled original.
+
 Review source frames and uncertain cues before exporting. Save a review project before changing source, starting another job, repairing resources or installing an update. Checkpoints require matching source/configuration/selected-resource identities; installing unrelated language packs does not change that fingerprint. A checkpoint from an incompatible older fingerprint scheme may be refused rather than silently resumed.
 
 ## Updates, data and troubleshooting

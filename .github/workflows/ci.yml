@@ -78,7 +78,7 @@ jobs:
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: .ci-work/native/binary-cache
-          key: native-${{ matrix.id }}-${{ matrix.runner }}-${{ hashFiles('vcpkg.json', 'ci/triplets/*.cmake', 'scripts/ci/native.ps1') }}
+          key: native-${{ matrix.id }}-${{ matrix.runner }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json', 'ci/native-lock.json', 'ci/ports/**', 'ci/triplets/*.cmake', 'scripts/ci/native.ps1') }}
       - name: Native dependency source builds and verified runtime
         id: native-provision
         run: ./scripts/ci/native.ps1 -TargetId '${{ matrix.id }}'

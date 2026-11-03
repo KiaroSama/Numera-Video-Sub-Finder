@@ -164,6 +164,7 @@ fn main() {
             runtime_manager::repair_runtimes,
             recognition::suggest_regions,
             recognition::recognize_cue,
+            recognition::cue_evidence,
             visual_retry::install_visual_retry,
             visual_retry::cancel_visual_retry,
             visual_retry::propose_visual_retry,

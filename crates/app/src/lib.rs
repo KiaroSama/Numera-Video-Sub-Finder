@@ -1,4 +1,5 @@
 pub mod assistant;
+pub mod crop_evidence;
 pub mod export;
 pub mod extraction;
 pub mod inference;

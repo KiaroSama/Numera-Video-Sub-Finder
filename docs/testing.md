@@ -2,7 +2,19 @@
 
 All application compilation and execution checks run in GitHub Actions on the exact commit. The six native target rows are required, with maximum three concurrently hosted jobs, two build/test/native threads per runner, command/HTTP/job bounds and owned process cleanup. Missing jobs, wrong source SHA and missing reports fail the aggregate; no broad continue-on-error or fake passing badges.
 
-## Native cleanup and model progress correction (authored, not yet run)
+## Current source continuation (not yet run)
+
+Original T013/T020/T025 now has source-authored full-frame region grouping (at most eight separate proposals), preview zoom/pan/reset with source-coordinate ROI mapping, retained original versus selected-frame crop comparison, and one persistent forced-cleanup deadline across retries/Drop. Empty suggestions report manual selection instead of inventing a bottom region. A tiny synthetic middle/disconnected-location witness reuses the existing native suggestion worker; it does not classify scene text as dialogue.
+
+New pure tests cover spatial grouping, transformed coordinates, crop identity/containment/format/dimensions/nonregular files and cleanup-budget reuse. The existing single hosted GUI session adds actual zoom/pan/reset/ROI and original-crop loading observations, retaining its240-second budget. Crop reads admit only content-bound RGB8 PNGs in the application cache, with8MiB encoded/8192-axis/33177600-pixel limits and final-component no-follow handling. Regular filesystem calls are not hard-preempted. Candidate preview is explicitly unmasked; missing cached evidence is an error, not a reconstructed original.
+
+Tesseract advances to5.5.4 through a reviewed local overlay because the fixed upstream registry still selects5.5.3; other native pins remain. Leptos advances to0.8.23 with exactly two compatible transitive patch updates. Six-target builds, actual multilingual literals, GUI and package/version/notices acceptance remain required. All new runtime results are **NOT_RUN**; prior green evidence does not cover this source.
+
+## Verified activation-progress batch
+
+[Exact40b8dbf/run41514359513](https://github.com/KiaroSama/Numera-Video-Sub-Finder/actions/runs/41514359513) passes all16 jobs, all six native targets and both aggregates. Intel executes the activation/cancellation regression and all eight guard contracts; actual projector verification reports processed bytes through activation without increasing deadlines. The exact tested commit was merged into main. This is hosted development acceptance, not full-product qualification.
+
+## Native cleanup and model progress correction (historical candidate)
 
 [Exact612055e/run41468630843](https://github.com/KiaroSama/Numera-Video-Sub-Finder/actions/runs/41468630843) completes with both Linux and Windows targets plus all eight shared jobs successful. Apple Silicon fails the stalled-observer cleanup contract with captured EPERM; Intel reaches the projector's full881770560 bytes, then exceeds the unchanged60-second provisioning idle limit and also records cleanup EPERM. Both aggregates fail. The process snapshot does not identify the exact silent activation stage.
 

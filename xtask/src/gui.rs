@@ -317,6 +317,7 @@ pub fn smoke(gui: &Path, fixtures: &Path, data: &Path, output: &Path) -> Result<
             crate::gui_visual::theme(&driver, output, theme)?;
         }
         crate::gui_visual::layout(&driver, output)?;
+        crate::gui_visual::preview_navigation(&driver, output)?;
         for (position, route) in [(2, "Queue"), (5, "History")] {
             driver.click(&format!(
                 "nav[aria-label='Workspace navigation'] .nav-item:nth-of-type({position})"
@@ -366,7 +367,21 @@ pub fn smoke(gui: &Path, fixtures: &Path, data: &Path, output: &Path) -> Result<
         driver.click("#extract-start")?;
         driver.wait("return document.querySelectorAll('.cue-row').length >= 2 && document.querySelector('h1')?.textContent === 'Review';", 120)?;
         driver.click(".cue-row")?;
-        driver.wait("return !!document.querySelector('#cue-text');", 5)?;
+        driver.wait("return !!document.querySelector('#cue-text') && document.querySelector('[data-testid=load-cue-evidence]')?.disabled===false;", 10)?;
+        driver.script("document.querySelector('.crop-evidence').open=true;return true;")?;
+        driver.click("[data-testid=load-cue-evidence]")?;
+        driver.wait("const a=document.querySelector('.original-crop'),b=document.querySelector('.candidate-crop img');return a?.complete&&a.naturalWidth>0&&b?.complete&&b.naturalWidth>0;", 10)?;
+        let crops=driver.script("const a=document.querySelector('.original-crop'),b=document.querySelector('.candidate-crop');return {originalWidth:a.naturalWidth,originalHeight:a.naturalHeight,candidateWidth:b.getBoundingClientRect().width,candidateHeight:b.getBoundingClientRect().height,originalFilter:getComputedStyle(a).filter,candidateFilter:getComputedStyle(b.querySelector('img')).filter};")?;
+        if crops["originalFilter"] != "none"
+            || crops["candidateFilter"] != "none"
+            || crops["candidateHeight"].as_f64().unwrap_or(0.0) <= 0.0
+        {
+            return Err("Original/candidate crop comparison is missing or filters evidence".into());
+        }
+        std::fs::write(
+            output.join("crop-comparison.json"),
+            serde_json::to_vec_pretty(&crops)?,
+        )?;
         let corrected = "سلام Numera ۱۶\n日本語";
         driver.fill("#cue-text", corrected)?;
         let probe = || {
@@ -480,7 +495,7 @@ pub fn smoke(gui: &Path, fixtures: &Path, data: &Path, output: &Path) -> Result<
     std::fs::write(
         output.join("gui-report.json"),
         serde_json::to_vec_pretty(
-            &json!({"schema":1,"source_sha":std::env::var("GITHUB_SHA")?,"target":std::env::var("NVSF_TARGET_ID")?,"passed":true,"tests":13,"failed":0,"skipped":0,"profile":"instrumented","proof":["native startup","fixed source admission and source frame","three persisted themes with measured contrast and circular logo","six workspace destinations","narrow and wide layout","programmatic control focus","model catalog IDs and controls","full language catalog and nonpriority extraction choices","automatic update disable persisted through Settings","native diagnostics and unapproved repair guard","actual worker extraction","native close acknowledgement preserves draft/applied revision and blocks shortcuts","Unicode edit and exported bytes"],"not_proved":["native Tab traversal","physical IME composition","production listener absence","real-language quality","positive signed repair/update lifecycle","platform installers"]}),
+            &json!({"schema":1,"source_sha":std::env::var("GITHUB_SHA")?,"target":std::env::var("NVSF_TARGET_ID")?,"passed":true,"tests":15,"failed":0,"skipped":0,"profile":"instrumented","proof":["native startup","fixed source admission and source frame","three persisted themes with measured contrast and circular logo","six workspace destinations","narrow and wide layout","programmatic control focus","zoom/pan/reset with normalized source ROI coordinates","content-verified original and selected-frame crop comparison","model catalog IDs and controls","full language catalog and nonpriority extraction choices","automatic update disable persisted through Settings","native diagnostics and unapproved repair guard","actual worker extraction","native close acknowledgement preserves draft/applied revision and blocks shortcuts","Unicode edit and exported bytes"],"not_proved":["native Tab traversal","physical IME composition","production listener absence","real-language quality","positive signed repair/update lifecycle","platform installers"]}),
         )?,
     )?;
     Ok(())

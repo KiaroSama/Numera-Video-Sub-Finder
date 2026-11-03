@@ -62,6 +62,22 @@ pub fn region_style(rect: Rect) -> String {
     )
 }
 
+pub fn frame_point(x: f64, y: f64, bounds: [f64; 4]) -> Option<(f64, f64)> {
+    let [left, top, width, height] = bounds;
+    if ![x, y, left, top, width, height]
+        .iter()
+        .all(|v| v.is_finite())
+        || width <= 0.0
+        || height <= 0.0
+    {
+        return None;
+    }
+    Some((
+        ((x - left) / width).clamp(0.0, 1.0),
+        ((y - top) / height).clamp(0.0, 1.0),
+    ))
+}
+
 pub fn route_value(value: &str) -> Option<&'static str> {
     match value.trim_start_matches('#') {
         "extract" => Some("Extract"),
@@ -124,6 +140,26 @@ mod tests {
         assert_eq!(theme_value("invalid"), "system");
         assert!(region_style(Rect::default()).contains("top:70%"));
     }
+    #[test]
+    fn preview_coordinates_follow_scaled_scrolled_frame_not_viewport() {
+        assert_eq!(
+            frame_point(200.0, 100.0, [-100.0, -50.0, 600.0, 300.0]),
+            Some((0.5, 0.5))
+        );
+        assert_eq!(
+            frame_point(-200.0, 400.0, [-100.0, -50.0, 600.0, 300.0]),
+            Some((0.0, 1.0))
+        );
+        for bounds in [
+            [0.0, 0.0, 0.0, 10.0],
+            [0.0, 0.0, 10.0, -1.0],
+            [f64::NAN, 0.0, 10.0, 10.0],
+        ] {
+            assert!(frame_point(1.0, 1.0, bounds).is_none());
+        }
+        assert!(frame_point(f64::INFINITY, 0.0, [0.0, 0.0, 10.0, 10.0]).is_none());
+    }
+
     #[test]
     fn explicit_visual_replacement_keeps_original_evidence_and_time() {
         let mut cue = Cue::new(8, 2, 1200, 2200, "Original 日本".into()).unwrap();

@@ -72,19 +72,37 @@ pub fn Preview(ui: Ui) -> impl IntoView {
     let begin = RwSignal::new(None::<(f64, f64)>);
     let exclusion = RwSignal::new(false);
     let bounds = NodeRef::<leptos::html::Div>::new();
+    let viewport = NodeRef::<leptos::html::Div>::new();
+    let zoom = RwSignal::new(100u32);
+    let pan = move |x: i32, y: i32| {
+        begin.set(None);
+        if let Some(element) = viewport.get() {
+            element.set_scroll_left(element.scroll_left().saturating_add(x));
+            element.set_scroll_top(element.scroll_top().saturating_add(y));
+        }
+    };
+    Effect::new(move |_| {
+        let _ = ui
+            .source
+            .with(|source| source.as_ref().map(|s| s.token.clone()));
+        zoom.set(100);
+        pan(-i32::MAX, -i32::MAX);
+    });
     let point = move |e: &web_sys::MouseEvent| {
-        bounds.get().map(|element| {
+        bounds.get().and_then(|element| {
             let r = element.get_bounding_client_rect();
-            (
-                ((f64::from(e.client_x()) - r.left()) / r.width()).clamp(0.0, 1.0),
-                ((f64::from(e.client_y()) - r.top()) / r.height()).clamp(0.0, 1.0),
+            helpers::frame_point(
+                f64::from(e.client_x()),
+                f64::from(e.client_y()),
+                [r.left(), r.top(), r.width(), r.height()],
             )
         })
     };
     view! {
         <div class="preview-shell" aria-busy=move ||ui.preview_busy.get()>
             <Show when=move ||!ui.preview_url.get().is_empty() fallback=||view!{<div class="preview-empty"><svg viewBox="0 0 48 48" aria-hidden="true"><rect x="7" y="12" width="34" height="24" rx="3"/><path d="m20 18 10 6-10 6z"/></svg><strong>"Original frame preview"</strong><p>"Open a video to inspect subtitles and adjust regions."</p></div>}>
-                <div class="frame" node_ref=bounds style=move ||ui.source.with(|s|s.as_ref().map(|s|format!("aspect-ratio:{} / {}",s.media.width,s.media.height)).unwrap_or_default())
+                <div class="preview-viewport" node_ref=viewport tabindex="0" role="region" aria-label="Source frame viewport; use scrollbars or pan controls to move the zoomed image">
+                <div class="frame" node_ref=bounds style=move ||ui.source.with(|s|s.as_ref().map(|s|format!("width:{}%;aspect-ratio:{} / {}",zoom.get(),s.media.width,s.media.height)).unwrap_or_default())
                     on:mousedown=move |e|{if e.button()==0{begin.set(point(&e));}}
                     on:mouseup=move |e|{
                         if let (Some(a),Some(b))=(begin.get_untracked(),point(&e)){
@@ -100,8 +118,19 @@ pub fn Preview(ui: Ui) -> impl IntoView {
                     {move ||ui.config.with(|c|c.regions.iter().copied().enumerate().map(|(i,r)|view!{<div class="roi" style=helpers::region_style(r)><span>{format!("R{}",i+1)}</span></div>}).collect_view())}
                     {move ||ui.config.with(|c|c.exclusions.iter().copied().enumerate().map(|(i,r)|view!{<div class="roi excluded" style=helpers::region_style(r)><span>{format!("Exclude {}",i+1)}</span></div>}).collect_view())}
                 </div>
+                </div>
             </Show>
             <Show when=move ||ui.preview_busy.get()><span class="preview-loading" role="status">"Decoding source frame…"</span></Show>
+        </div>
+        <div class="button-row preview-controls" role="group" aria-label="Preview navigation">
+            <label>"Zoom"<select aria-label="Preview zoom" prop:value=move ||zoom.get().to_string() on:change=move |e|{
+                if let Ok(value)=event_target_value(&e).parse::<u32>() && [100,150,200,300,400].contains(&value){begin.set(None);zoom.set(value);}
+            }><option value="100">"Fit · 100%"</option><option value="150">"150%"</option><option value="200">"200%"</option><option value="300">"300%"</option><option value="400">"400%"</option></select></label>
+            <button aria-label="Pan preview left" disabled=move ||zoom.get()==100 on:click=move |_|pan(-120,0)>"Left"</button>
+            <button aria-label="Pan preview right" disabled=move ||zoom.get()==100 on:click=move |_|pan(120,0)>"Right"</button>
+            <button aria-label="Pan preview up" disabled=move ||zoom.get()==100 on:click=move |_|pan(0,-120)>"Up"</button>
+            <button aria-label="Pan preview down" disabled=move ||zoom.get()==100 on:click=move |_|pan(0,120)>"Down"</button>
+            <button on:click=move |_|{zoom.set(100);pan(-i32::MAX,-i32::MAX);}>"Reset view"</button>
         </div>
         <div class="scrubber">
             <button title="Previous 100 milliseconds" disabled=move ||ui.busy.get()||ui.closing.get()||ui.source.with(Option::is_none) on:click=move |_|ui.seek(ui.time.get_untracked().saturating_sub(100))>"−100 ms"</button>
