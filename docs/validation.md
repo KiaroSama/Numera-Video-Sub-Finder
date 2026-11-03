@@ -2,7 +2,11 @@
 
 Updated: 2026-11-03. **NOT a release acceptance report.** Hosted observations below refer to the exact named SHA; corrective source is not a passing result.
 
-## Current GUI witness visibility correction
+## Current crop fixture compilation correction
+
+[Exact680a6b3/run41597257028](https://github.com/KiaroSama/Numera-Video-Sub-Finder/actions/runs/41597257028) passes all eight shared jobs. All six native targets advance past the earlier compiler errors, then fail crop-test compilation on unsupported sha2 output-array `LowerHex` formatting; both aggregates fail. All outcomes are collected. An independent literal fixture digest replaces that formatting without changing production code or removing assertions. Corrected-source runtime is **NOT_RUN**; no merge or release is claimed.
+
+## Previous GUI witness visibility correction
 
 [Exact2161a4f/run41580107345](https://github.com/KiaroSama/Numera-Video-Sub-Finder/actions/runs/41580107345) compiles the application past the previous region-result error, then fails GUI witness compilation with E0624: sibling calls to two private Driver methods. Two crate-local visibility changes are source-reviewed, preserving the real WebDriver input path and every assertion/deadline. All six native targets and mutation fail at that access error; seven other shared jobs pass and both aggregates fail. All outcomes have been collected. Corrected-source execution remains **NOT_RUN**; no green or merge is claimed.
 
