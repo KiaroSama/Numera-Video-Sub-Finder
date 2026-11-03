@@ -127,7 +127,7 @@ impl Driver {
             .map(str::to_owned)
             .ok_or_else(|| "Missing W3C element identity".into())
     }
-    fn click(&self, selector: &str) -> Result<()> {
+    pub(crate) fn click(&self, selector: &str) -> Result<()> {
         let id = self.element(selector)?;
         self.request(
             reqwest::Method::POST,
@@ -150,7 +150,7 @@ impl Driver {
         )?;
         Ok(())
     }
-    fn select(&self, selector: &str, value: &str) -> Result<()> {
+    pub(crate) fn select(&self, selector: &str, value: &str) -> Result<()> {
         // This is an ordinary input event, not a patch to application state or production UI.
         self.script(&format!("const e=document.querySelector({});e.value={};e.dispatchEvent(new Event('change',{{bubbles:true}}));return e.value;", serde_json::to_string(selector)?, serde_json::to_string(value)?))?;
         Ok(())
