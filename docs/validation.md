@@ -2,7 +2,11 @@
 
 Updated: 2026-11-03. **NOT a release acceptance report.** Hosted observations below refer to the exact named SHA; corrective source is not a passing result.
 
-## Current compiler failure and pending correction
+## Current GUI witness visibility correction
+
+[Exact2161a4f/run41580107345](https://github.com/KiaroSama/Numera-Video-Sub-Finder/actions/runs/41580107345) compiles the application past the previous region-result error, then fails GUI witness compilation with E0624: sibling calls to two private Driver methods. Two crate-local visibility changes are source-reviewed, preserving the real WebDriver input path and every assertion/deadline. All six native targets and mutation fail at that access error; seven other shared jobs pass and both aggregates fail. All outcomes have been collected. Corrected-source execution remains **NOT_RUN**; no green or merge is claimed.
+
+## Previous region-result compiler failure
 
 [Exact eb2b119/run41564063812](https://github.com/KiaroSama/Numera-Video-Sub-Finder/actions/runs/41564063812) reports E0277 at region proposal collection in mutation and all six native targets. Seven other shared jobs pass; both aggregates fail. All six outcomes have been collected. These are compilation failures, not failed OCR measurements. The correction preserves `Rect::new` validation and collects its core result before the existing application-error conversion. Source review is complete; corrected-source hosted validation is **NOT_RUN**. No release or merge follows from partial shared-lane success.
 
