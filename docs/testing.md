@@ -2,7 +2,17 @@
 
 All application compilation and execution checks run in GitHub Actions on the exact commit. The six native target rows are required, with maximum three concurrently hosted jobs, two build/test/native threads per runner, command/HTTP/job bounds and owned process cleanup. Missing jobs, wrong source SHA and missing reports fail the aggregate; no broad continue-on-error or fake passing badges.
 
-## Current crop fixture compilation correction
+## Independent verifier uncertainty (authored, not yet run)
+
+Original T012 now preserves primary text/crop when optional Tesseract recognition fails, marks the observation unscored and records one fixed project warning without raw native diagnostics. Unknown scores trigger verification even at a zero threshold; one unscored line keeps the whole observation unscored. Within one continuous appearance, uncertainty survives later scored observations and checkpoint restoration; the retained crop freezes once scores become incomparable. A new appearance starts fresh. Existing strictly-better scored-crop selection remains unchanged while all observations are scored.
+
+Four small regressions reuse the existing app/core suites. The existing hosted OCR-evidence command additionally runs admitted `eng`, `fas` and `jpn` packs serially on the same generated Latin-digit `16` crop, then exercises shared verifier adjudication with an explicitly empty primary observation. Exact text and unchanged pixels are required. This is native-pack/numeric admission, **not Persian/Japanese-script quality or an end-to-end forced Paddle fallback**. The90-second cooperative and120/60-second outer budgets, two-thread policy, existing fixture/model bytes and quality thresholds remain unchanged. New execution is **NOT_RUN**; source review/formatting are not runtime proof.
+
+## Verified preview integration
+
+[Exact1ddb669/run41625327551](https://github.com/KiaroSama/Numera-Video-Sub-Finder/actions/runs/41625327551) passes all16 jobs, all six native targets and both aggregates; that exact source is merged into main. Linux records240 ordinary cases,15 GUI behaviors,22 Rust ASan/LSan cases,7777/9151 measured lines (84.99%) and91.36% critical coverage. Region proposals, zoom/pan/crop evidence, persistent cleanup retry budgets, Tesseract5.5.4 and Leptos0.8.23 pass within that hosted scope. Full-product qualification remains false. Earlier pending descriptions below are historical and do not verify the new T012 source.
+
+## Historical crop fixture compilation correction
 
 [Exact680a6b3/run41597257028](https://github.com/KiaroSama/Numera-Video-Sub-Finder/actions/runs/41597257028) passes all eight shared jobs and advances all six native targets through application/frontend compilation. Each native target then fails test compilation because the crop fixture formats the sha2 0.11 output array using unsupported `LowerHex`. The fixture now uses an independently computed literal SHA-256 of its width, height and RGB bytes. Production hashing and every negative assertion remain unchanged. All six outcomes are collected; replacement execution is **NOT_RUN**.
 

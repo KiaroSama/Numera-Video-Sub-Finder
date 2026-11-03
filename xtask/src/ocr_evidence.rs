@@ -262,6 +262,40 @@ pub fn capture(ffmpeg: &Path, fixture_dir: &Path, data_root: &Path, output: &Pat
         report["samples"].as_array_mut().ok_or("Missing diagnostic samples")?.push(json!({"label":label,"roi":image_summary(&roi),"boxes":boxes,"recognized":recognized,"tensors":tensors}));
         persist(output, &report)?;
     }
+    let frame = runtime.preview(&input, 5500)?;
+    let crop = image::imageops::crop_imm(&frame, 280, 282, 80, 58).to_image();
+    let original = image_summary(&crop);
+    let mut verified = Vec::new();
+    for language in ["eng", "fas", "jpn"] {
+        if started.elapsed() > Duration::from_secs(90) {
+            return Err("OCR evidence exceeded its deadline".into());
+        }
+        let mut engine = Tesseract::new(&paths, language)?;
+        let observation = engine.recognize(&crop, false)?;
+        verified.push(json!({"language":language,"observation":observation}));
+        report["priority_verifier"] = json!({"profile":"synthetic Latin-digit native-pack admission, not script quality","crop":original,"observations":verified});
+        persist(output, &report)?;
+        if observation.text != "16" {
+            return Err(format!(
+                "Priority verifier {language} did not recognize the fixed numeric16 crop"
+            )
+            .into());
+        }
+        let mut primary = nvsf_core::Recognition {
+            text: String::new(),
+            confidence: Some(0.0),
+            crop: None,
+        };
+        nvsf_app::extraction::adjudicate_verifier(&mut primary, Ok(observation))?;
+        if primary.text != "16" || primary.confidence.is_some() || image_summary(&crop) != original
+        {
+            return Err(
+                "Native verifier adjudication changed evidence or accepted calibrated confidence"
+                    .into(),
+            );
+        }
+        println!("Priority verifier native numeric admission completed language={language}");
+    }
     crate::ocr_replay::capture(&mut ocr, &paths, output, started, tensor_bytes)?;
     report["status"] =
         json!("captured; ordinary Hello/recurrence/timing acceptance is separate and unchanged");
