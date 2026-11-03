@@ -80,7 +80,7 @@ fn proposals(moments: &[Vec<Rect>]) -> Result<Vec<Rect>> {
             let bottom = (r.y + r.height + 0.02).min(1.0);
             Rect::new(left, top, right - left, bottom - top)
         })
-        .collect::<Result<Vec<_>>>()?;
+        .collect::<nvsf_core::Result<Vec<_>>>()?;
     if result.is_empty() {
         return Err(fail("No text region suggestions; select regions manually"));
     }

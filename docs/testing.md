@@ -2,7 +2,9 @@
 
 All application compilation and execution checks run in GitHub Actions on the exact commit. The six native target rows are required, with maximum three concurrently hosted jobs, two build/test/native threads per runner, command/HTTP/job bounds and owned process cleanup. Missing jobs, wrong source SHA and missing reports fail the aggregate; no broad continue-on-error or fake passing badges.
 
-## Current source continuation (not yet run)
+## Current source continuation and compiler correction
+
+[Exact eb2b119/run41564063812](https://github.com/KiaroSama/Numera-Video-Sub-Finder/actions/runs/41564063812) reaches a shared compiler error in region proposal collection: `Rect::new` yields the core error type, but the iterator was collected as the application error type. Mutation and all six native lanes report E0277 before their application tests; seven other shared jobs pass and both aggregates fail. All six outcomes have been collected. The one-line correction collects the core result first and converts its error through the existing outer `?`. Independent source review confirms the type boundary; corrected-source compilation and runtime acceptance remain **NOT_RUN**.
 
 Original T013/T020/T025 now has source-authored full-frame region grouping (at most eight separate proposals), preview zoom/pan/reset with source-coordinate ROI mapping, retained original versus selected-frame crop comparison, and one persistent forced-cleanup deadline across retries/Drop. Empty suggestions report manual selection instead of inventing a bottom region. A tiny synthetic middle/disconnected-location witness reuses the existing native suggestion worker; it does not classify scene text as dialogue.
 
