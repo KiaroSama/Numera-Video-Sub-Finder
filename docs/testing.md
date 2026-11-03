@@ -2,7 +2,11 @@
 
 All application compilation and execution checks run in GitHub Actions on the exact commit. The six native target rows are required, with maximum three concurrently hosted jobs, two build/test/native threads per runner, command/HTTP/job bounds and owned process cleanup. Missing jobs, wrong source SHA and missing reports fail the aggregate; no broad continue-on-error or fake passing badges.
 
-## Current GUI witness visibility correction
+## Current crop fixture compilation correction
+
+[Exact680a6b3/run41597257028](https://github.com/KiaroSama/Numera-Video-Sub-Finder/actions/runs/41597257028) passes all eight shared jobs and advances all six native targets through application/frontend compilation. Each native target then fails test compilation because the crop fixture formats the sha2 0.11 output array using unsupported `LowerHex`. The fixture now uses an independently computed literal SHA-256 of its width, height and RGB bytes. Production hashing and every negative assertion remain unchanged. All six outcomes are collected; replacement execution is **NOT_RUN**.
+
+## Previous GUI witness visibility correction
 
 [Exact2161a4f/run41580107345](https://github.com/KiaroSama/Numera-Video-Sub-Finder/actions/runs/41580107345) compiles the application past E0277, then reports E0624 because the new sibling GUI witness calls private `Driver::click` and `Driver::select` methods. The correction exposes only those existing helpers within the crate; WebDriver requests, assertions and deadlines remain unchanged. Mutation and all six native targets fail with that same access error; seven other shared jobs pass and both aggregates fail. All native outcomes are collected. Replacement compilation/runtime is **NOT_RUN**.
 
