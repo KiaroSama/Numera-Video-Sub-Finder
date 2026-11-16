@@ -24,6 +24,10 @@ jobs:
           build-mode: none
           db-location: .ci-work/codeql/${{ matrix.language }}
           queries: security-extended
+          # Unmodified upstream glib 0.18.5 kept only for its one-line security fix (patches/glib-0.18.5/PATCHED.md).
+          config: |
+            paths-ignore:
+              - patches/glib-0.18.5
       - uses: github/codeql-action/analyze@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee
         with:
           category: /language:${{ matrix.language }}

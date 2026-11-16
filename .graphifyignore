@@ -26,3 +26,5 @@ secrets.md
 .ignoreme/
 **/.ignoreme
 explain-AI.md
+# Vendored third-party security patches (upstream layout, not project code)
+patches/
