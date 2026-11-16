@@ -1,4 +1,5 @@
 mod preflight;
+mod provider_profile;
 mod status;
 
 use clap::{Parser, Subcommand};
@@ -78,6 +79,8 @@ enum Commands {
         request: PathBuf,
         #[arg(long)]
         control: PathBuf,
+        #[arg(long, hide = true)]
+        provider_profile: Option<PathBuf>,
     },
 }
 #[derive(Subcommand)]
@@ -135,6 +138,9 @@ struct ExtractArgs {
     gpu_required: bool,
     #[arg(long)]
     accelerator_required: bool,
+    /// Record actual two-stage ONNX placement; requires an explicit device and a new absolute directory.
+    #[arg(long, value_name = "ABSOLUTE_NEW_DIR")]
+    provider_profile: Option<PathBuf>,
 }
 fn utf8_path(path: &Path) -> Result<String> {
     path.to_str().map(str::to_owned).ok_or_else(||AppError::InvalidConfig("This operation requires a valid UTF-8 path; rename the input or select another destination".into()))
@@ -192,8 +198,13 @@ fn run(cli: Cli) -> Result<i32> {
     if let Commands::NativeRequest { request } = &cli.command {
         return nvsf_app::native_request::run(request).map(|()| 0);
     }
-    if let Commands::Worker { request, control } = &cli.command {
-        return run_worker(request, control).map(|()| 0);
+    if let Commands::Worker {
+        request,
+        control,
+        provider_profile,
+    } = &cli.command
+    {
+        return run_worker(request, control, provider_profile.as_deref()).map(|()| 0);
     }
     preflight::validate(&cli)?;
     let paths = Paths::new(cli.data_root.as_deref())?;
@@ -206,13 +217,19 @@ fn run(cli: Cli) -> Result<i32> {
     match cli.command {
         Commands::Extract(args) | Commands::Benchmark(args) => {
             let started = std::time::Instant::now();
-            let project =
-                nvsf_app::extract(config(args, cli.data_root.as_deref())?, &control, |p| {
-                    eprintln!(
-                        "{} {}ms cues={} provider={}",
-                        p.stage, p.position_ms, p.cues, p.provider
-                    );
-                })?;
+            let profile_directory = args.provider_profile.clone();
+            let config = config(args, cli.data_root.as_deref())?;
+            let progress = |p: nvsf_core::Progress| {
+                eprintln!(
+                    "{} {}ms cues={} provider={}",
+                    p.stage, p.position_ms, p.cues, p.provider
+                );
+            };
+            let project = if let Some(directory) = profile_directory.as_deref() {
+                worker::supervise_profiled(config, &control, progress, directory)?
+            } else {
+                nvsf_app::extract(config, &control, progress)?
+            };
             exit_code = status::project(&project);
             println!(
                 "{}",
@@ -379,12 +396,16 @@ fn run(cli: Cli) -> Result<i32> {
     Ok(exit_code)
 }
 
-fn run_worker(request: &Path, control_dir: &Path) -> Result<()> {
+fn run_worker(request: &Path, control_dir: &Path, profile_directory: Option<&Path>) -> Result<()> {
     nvsf_app::worker::guard_parent_lifetime()?;
     use worker::protocol;
     let job_id = protocol::job_id(control_dir)?;
     let config: ExtractConfig = protocol::read(request, job_id, protocol::CONTROL_LIMIT)?;
     config.validate()?;
+    if let Some(directory) = profile_directory {
+        provider_profile::validate_options(directory, &config.device, &config.language)?;
+        provider_profile::validate_new_directory(directory)?;
+    }
     let control = Control::default();
     control.pause.store(
         protocol::flag(control_dir, job_id, "pause")?,
@@ -420,14 +441,26 @@ fn run_worker(request: &Path, control_dir: &Path) -> Result<()> {
         Ok(())
     });
     let mut emission_error = None;
-    let output = nvsf_app::extraction::run(config, &control, |p| {
+    let progress = |p| {
         if emission_error.is_none()
             && let Err(error) = emit(job_id, &worker::Event::Progress(p))
         {
             emission_error = Some(error);
             control.cancel.store(true, Ordering::Relaxed);
         }
-    });
+    };
+    let output = if let Some(directory) = profile_directory {
+        let requested_device = config.device.clone();
+        let strict = config.gpu_required || config.accelerator_required;
+        nvsf_app::extraction::run_profiled(config, &control, progress, directory).and_then(
+            |(project, files)| {
+                provider_profile::write_evidence(directory, &requested_device, strict, &files)?;
+                Ok(project)
+            },
+        )
+    } else {
+        nvsf_app::extraction::run(config, &control, progress)
+    };
     stopped.store(true, Ordering::Relaxed);
     watcher.thread().unpark();
     watcher

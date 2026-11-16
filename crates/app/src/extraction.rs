@@ -3,6 +3,7 @@ use crate::{
     inference::Ocr,
     logging::Log,
     media, models,
+    providers::profiles::ProfileFiles,
     storage::{JobLock, hash_file, load_project, save_project},
     tesseract::Tesseract,
     vision,
@@ -82,8 +83,31 @@ pub fn adjudicate_verifier(primary: &mut Recognition, verified: Result<Recogniti
 pub fn run(
     config: ExtractConfig,
     control: &Control,
-    mut callback: impl FnMut(Progress),
+    callback: impl FnMut(Progress),
 ) -> Result<Project> {
+    run_inner(config, control, callback, None).map(|(project, _)| project)
+}
+
+/// Profiles the ordinary extraction sessions without changing the OCR or export policy.
+pub fn run_profiled(
+    config: ExtractConfig,
+    control: &Control,
+    callback: impl FnMut(Progress),
+    profile_directory: &Path,
+) -> Result<(Project, ProfileFiles)> {
+    let (project, profiles) = run_inner(config, control, callback, Some(profile_directory))?;
+    Ok((
+        project,
+        profiles.ok_or_else(|| fail("Extraction produced no provider profiles"))?,
+    ))
+}
+
+fn run_inner(
+    config: ExtractConfig,
+    control: &Control,
+    mut callback: impl FnMut(Progress),
+    profile_directory: Option<&Path>,
+) -> Result<(Project, Option<ProfileFiles>)> {
     config.validate()?;
     let paths = Paths::new(config.data_root.as_deref().map(Path::new))?;
     let log = Log::new(&paths, "nvsf-worker");
@@ -130,19 +154,35 @@ pub fn run(
             ));
         }
         if saved.completed {
+            if profile_directory.is_some() {
+                return Err(fail(
+                    "A completed checkpoint cannot establish fresh provider placement; choose a new output",
+                ));
+            }
             crate::export_project(&saved, output, "srt", config.overwrite, false, false)?;
-            return Ok(saved);
+            return Ok((saved, None));
         }
         start = start.max(saved.processed_ms);
         project = saved;
     }
-    let mut ocr = Ocr::new(
-        &paths,
-        &config.language,
-        &config.device,
-        config.threads,
-        config.gpu_required || config.accelerator_required,
-    )?;
+    let mut ocr = if let Some(directory) = profile_directory {
+        Ocr::new_profiled(
+            &paths,
+            &config.language,
+            &config.device,
+            config.threads,
+            config.gpu_required || config.accelerator_required,
+            directory,
+        )?
+    } else {
+        Ocr::new(
+            &paths,
+            &config.language,
+            &config.device,
+            config.threads,
+            config.gpu_required || config.accelerator_required,
+        )?
+    };
     let provider = ocr.provider.clone();
     let mut specialist = if nvsf_core::languages::find(&config.language)
         .is_some_and(|l| l.code == "jpn")
@@ -375,6 +415,12 @@ pub fn run(
         };
     }
     drop(process);
+    // Flush both profiles even after decode/OCR failure; preserve the original job error below.
+    let profiles = if profile_directory.is_some() {
+        Some(ocr.finish_profiles())
+    } else {
+        None
+    };
     project
         .warnings
         .push("Final frame end derived from the last observed frame interval".into());
@@ -403,6 +449,7 @@ pub fn run(
         log.event("ERROR", "JOB", &error.to_string());
         return Err(error);
     }
+    let profiles = profiles.transpose()?;
     project.cues.sort_by_key(|c| (c.start_ms, c.track));
     project.active_appearances.clear();
     crate::export_project(&project, output, "srt", config.overwrite, false, false)?;
@@ -417,5 +464,5 @@ pub fn run(
             started.elapsed().as_millis()
         ),
     );
-    Ok(project)
+    Ok((project, profiles))
 }

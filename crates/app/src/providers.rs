@@ -8,6 +8,9 @@ use ort::{
 };
 use std::path::Path;
 
+#[path = "provider_profile.rs"]
+pub mod profiles;
+
 pub(crate) fn cpu(builder: SessionBuilder) -> Result<SessionBuilder> {
     // rc.14's default MaxEfficiency can silently choose CoreML even for a CPU-labeled session.
     builder
@@ -21,6 +24,17 @@ pub fn session(
     requested: &str,
     threads: usize,
     required: bool,
+) -> Result<(Session, String)> {
+    session_profiled(env, path, requested, threads, required, None)
+}
+
+pub(crate) fn session_profiled(
+    env: &Environment,
+    path: &Path,
+    requested: &str,
+    threads: usize,
+    required: bool,
+    profile: Option<&Path>,
 ) -> Result<(Session, String)> {
     let selected = if requested == "auto" {
         if cfg!(feature = "cuda") {
@@ -40,12 +54,15 @@ pub fn session(
             "Required acceleration unavailable; this package selects CPU".into(),
         ));
     }
-    let attempt = build(env, path, selected, threads, required);
+    let attempt = build(env, path, selected, threads, required, profile);
     match attempt {
         Ok(s) => Ok((s, selected.into())),
         Err(e) if requested == "auto" && !required => {
             eprintln!("WARNING: {selected} unavailable ({e}); using CPU");
-            Ok((build(env, path, "cpu", threads, false)?, "cpu".into()))
+            Ok((
+                build(env, path, "cpu", threads, false, profile)?,
+                "cpu".into(),
+            ))
         }
         Err(e) => Err(e),
     }
@@ -57,6 +74,7 @@ fn build(
     provider: &str,
     threads: usize,
     required: bool,
+    profile: Option<&Path>,
 ) -> Result<Session> {
     let mut builder = Session::builder(env)
         .map_err(|e| fail(e.to_string()))?
@@ -100,6 +118,11 @@ fn build(
     if required {
         builder = builder
             .with_disable_cpu_fallback()
+            .map_err(|e| fail(e.to_string()))?;
+    }
+    if let Some(path) = profile {
+        builder = builder
+            .with_profiling(path)
             .map_err(|e| fail(e.to_string()))?;
     }
     builder

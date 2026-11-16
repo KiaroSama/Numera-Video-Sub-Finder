@@ -10,4 +10,12 @@ A refused close preserves the open workspace. Finish an active review operation,
 
 Use doctor for resource inventory, not quality or acceleration certification. Logs are in the selected data root/logs; they use UTC and unique run names with bounded historical retention. Review private paths before sharing diagnostics. Preserve failure evidence; never attach media, crops, credentials or complete private project data to a public issue by default.
 
-Unsigned macOS distribution may be rejected by platform policy. Do not globally disable Gatekeeper/signature checks. Installer/signing/IME/device limitations are listed in validation rather than hidden behind a successful compile.
+## Windows development signature warnings
+
+The new Authenticode path is implemented pending hosted verification. Its pinned self-signed development publisher is not publicly trusted: an untrusted-publisher/SmartScreen warning, or `Get-AuthenticodeSignature` reporting `UnknownError` with an untrusted-root message (sometimes `NotTrusted`), is expected. Follow the [read-only signer-pin check](installation.md#windows-development-signature-check) and compare the exact asset inventory/report. A pin match alone is not file-digest verification, and an arbitrary error is not an accepted warning: missing/wrong signer, `HashMismatch`, expiry or another policy failure must stop installation.
+
+No trust-store import or timestamp is used. The certificate expires2027-11-03, after which its untimestamped signatures stop validating. Do not import it into Trusted Root/Trusted People, disable SmartScreen or alter security policy to suppress warnings. Vendor DLLs retain their original bytes/signatures. If a final icon-resource check fails, rebuild the correct artifact in hosted CI; an adjacent logo or cached shell thumbnail is not a repair.
+
+macOS signing/notarization remains blocked without Apple credentials, so platform policy may reject unsigned development artifacts. Do not disable Gatekeeper/signature checks or remove quarantine to conceal that gap. Linux packages remain unsigned at the native level; separate updater signatures are unchanged and do not imply native package trust. Installer/signing/IME/device limitations stay open in [validation](validation.md), not hidden behind a successful compile.
+
+GPU profiling and the separate Windows x64 CUDA variant are still in progress. Physical RTX 4070 Ti qualification has not executed and will use only exact CI-built artifacts. Provider availability or a selected GPU label is not proof of node placement or speedup; retain the strict failure rather than inventing a fallback success.

@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "onnxruntime": "1.31.0",
+  "variants": {
+    "windows-x64-cuda12": {
+      "target": "x86_64-pc-windows-msvc",
+      "asset": "onnxruntime-win-x64-gpu_cuda12-1.31.0.zip",
+      "url": "https://github.com/microsoft/onnxruntime/releases/download/v1.31.0/onnxruntime-win-x64-gpu_cuda12-1.31.0.zip",
+      "bytes": 392994831,
+      "sha256": "fa79097fa478961cbd31c297671ac169eb0d3f1dfdc9e8481e091850f8c4810b",
+      "digest_source": "https://api.github.com/repos/microsoft/onnxruntime/releases/tags/v1.31.0"
+    }
+  }
+}

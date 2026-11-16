@@ -9,6 +9,10 @@ pub fn validate(cli: &Cli) -> Result<()> {
     match &cli.command {
         Commands::Extract(args) | Commands::Benchmark(args) => {
             config(args.clone(), cli.data_root.as_deref())?;
+            if let Some(directory) = args.provider_profile.as_deref() {
+                crate::provider_profile::validate_options(directory, &args.device, &args.language)?;
+                crate::provider_profile::validate_new_directory(directory)?;
+            }
         }
         Commands::Batch {
             inputs,

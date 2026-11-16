@@ -12,6 +12,8 @@ jobs:
     uses: ./.github/workflows/ci.yml
     secrets:
       TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      NVSF_WINDOWS_CODESIGN_PFX: ${{ secrets.NVSF_WINDOWS_CODESIGN_PFX }}
+      NVSF_WINDOWS_CODESIGN_PASSWORD: ${{ secrets.NVSF_WINDOWS_CODESIGN_PASSWORD }}
   portable:
     uses: ./.github/workflows/quality.yml
   dependencies:
