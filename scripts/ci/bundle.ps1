@@ -428,7 +428,7 @@ try {
                     if ($null -eq $dirIcon) { throw 'AppImage is missing its embedded .DirIcon.' }
                     # linuxdeploy may link .DirIcon; follow to the final target and keep it inside the AppDir.
                     $dirIconFile = if ($dirIcon.LinkType) { $dirIcon.ResolveLinkTarget($true) } else { $dirIcon }
-                    if ($null -eq $dirIconFile -or -not $dirIconFile.Exists -or $dirIconFile.PSIsContainer -or -not $dirIconFile.FullName.StartsWith([IO.Path]::GetFullPath($appDir) + [IO.Path]::DirectorySeparatorChar, [StringComparison]::Ordinal)) { throw 'AppImage .DirIcon does not resolve to a file inside the AppDir.' }
+                    if ($null -eq $dirIconFile -or $dirIconFile -isnot [IO.FileInfo] -or -not $dirIconFile.Exists -or -not $dirIconFile.FullName.StartsWith([IO.Path]::GetFullPath($appDir) + [IO.Path]::DirectorySeparatorChar, [StringComparison]::Ordinal)) { throw 'AppImage .DirIcon does not resolve to a file inside the AppDir.' }
                     $approvedHashes = @(Get-ChildItem -LiteralPath (Join-Path $desktop 'icons') -Filter '*.png' -File | ForEach-Object { (Get-FileHash -LiteralPath $_.FullName).Hash })
                     if ((Get-FileHash -LiteralPath $dirIconFile.FullName).Hash -notin $approvedHashes) { throw 'AppImage .DirIcon differs from the approved logo.' }
                     $iconChecks.Add('appimage-diricon')
