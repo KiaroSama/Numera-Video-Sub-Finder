@@ -106,7 +106,7 @@ impl<'a> Pe<'a> {
         }
         let root = u32_at(data, optional + directory + 16)? as usize;
         let size = u32_at(data, optional + directory + 20)? as usize;
-        if size < 16 || size > 16 * 1024 * 1024 {
+        if !(16..=16 * 1024 * 1024).contains(&size) {
             return Err("PE resource directory exceeds limit".into());
         }
         let result = Self {
@@ -194,8 +194,10 @@ impl<'a> Tree<'a> {
                 }
                 let raw = self.pe.resource(at + 2, length * 2)?;
                 let text = raw
-                    .chunks_exact(2)
-                    .map(|v| u16::from_le_bytes([v[0], v[1]]))
+                    .as_chunks::<2>()
+                    .0
+                    .iter()
+                    .map(|v| u16::from_le_bytes(*v))
                     .collect::<Vec<_>>();
                 if text.contains(&0) || String::from_utf16(&text).is_err() {
                     return Err("Invalid UTF-16 resource name".into());
