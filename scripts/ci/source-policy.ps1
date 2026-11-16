@@ -4,11 +4,15 @@ Set-StrictMode -Version Latest
 $utf8=[Text.UTF8Encoding]::new($false,$true)
 $files=@(& git ls-files)
 if($LASTEXITCODE -ne 0 -or $files.Count -eq 0){throw 'No tracked source inventory'}
+# Reviewed third-party security patches keep upstream file layout; only these exact roots skip the owned-file ceiling.
+$vendored=@('patches/glib-0.18.5')
+foreach($root in $vendored){if("$root/PATCHED.md" -notin $files -or "$root/LICENSE" -notin $files){throw "Vendored patch lacks provenance or license: $root"}}
 foreach($file in $files) {
     if($file -match '(^|/)(\.ai|\.specify|specs|\.claude|\.kiro|\.codex|\.agents|\.cursor|\.cline|graphify-out|\.codebase-memory|plans|\.ignoreme)(/|$)' -or $file -match '(^|/)(secrets\.md|explain-AI\.md|CLAUDE\.md|AGENTS\.md|reference\.md|\.env(?:\..*)?)$') {throw 'Excluded local/private content is tracked'}
     if($file -match '\.(rs|toml|lock|json|ya?ml|ps1|md|html|css|cmake)$' -or $file -in @('LICENSE','.gitignore','.graphifyignore')) {
         $text=[IO.File]::ReadAllText((Join-Path (Get-Location) $file),$utf8)
-        if($file.EndsWith('.rs') -and ($text.Split("`n").Count -gt 800)){throw "Owned source exceeds file ceiling: $file"}
+        $isVendored=@($vendored|Where-Object{$file.StartsWith("$_/",[StringComparison]::Ordinal)}).Count -gt 0
+        if($file.EndsWith('.rs') -and -not $isVendored -and ($text.Split("`n").Count -gt 800)){throw "Owned source exceeds file ceiling: $file"}
         if($text -match '-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----' -or $text -match '(?:ghp_|github_pat_)[A-Za-z0-9_]{30,}') {throw 'Potential real secret in tracked content; publication stops'}
     }
 }
@@ -23,6 +27,8 @@ $claims=@{
     # Standalone test=false binaries are built/replayed/fuzzed with ASan, not cargo test.
     'fuzz'=@('.github/workflows/quality.yml','fuzz')
     'ci/loom'=@('.github/workflows/quality.yml','loom')
+    # Patched GTK3 glib is compiled by the Linux native desktop builds.
+    'patches/glib-0.18.5'=@('.github/workflows/ci.yml','native')
 }
 foreach($manifest in $files|Where-Object {$_ -match '/Cargo.toml$'}) {
     $package=(Split-Path $manifest -Parent).Replace('\','/')
