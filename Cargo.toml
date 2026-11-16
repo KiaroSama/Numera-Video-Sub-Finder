@@ -1,7 +1,7 @@
 [workspace]
 resolver = "3"
 members = ["crates/core", "crates/app", "crates/media-native", "crates/cli", "crates/ui", "crates/desktop", "xtask"]
-exclude = [".ci-work"]
+exclude = [".ci-work", "patches"]
 default-members = ["crates/core", "crates/app", "crates/cli", "xtask"]
 
 [workspace.package]
@@ -39,3 +39,8 @@ unexpected_cfgs = { level = "warn", check-cfg = ['cfg(loom)'] }
 
 [workspace.lints.clippy]
 unwrap_used = "warn"
+
+# Security patch: glib 0.18.5 with the upstream GHSA-wrw7-89jp-8q8g fix.
+# Tauri still requires the gtk-rs 0.18 GTK3 stack; remove once it moves to glib >= 0.20.
+[patch.crates-io]
+glib = { path = "patches/glib-0.18.5" }

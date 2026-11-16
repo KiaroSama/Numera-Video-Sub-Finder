@@ -4,6 +4,8 @@ Updated: 2026-11-17. **NOT a release acceptance report.** Hosted observations be
 
 2026-11-17, owner decision D-018: support is limited to Windows x64, Windows ARM64, Linux x64 and Linux ARM64. Apple signing/notarization and macOS screenshot obligations are withdrawn, not blocked. Earlier macOS results and pending descriptions remain historical evidence only.
 
+2026-11-17, dependency advisory GHSA-wrw7-89jp-8q8g (glib `VariantStrIter` unsound, Dependabot alert 1): Tauri 2.12 still requires the gtk-rs 0.18 GTK3 stack and no fixed 0.18.x exists, so the workspace patches glib 0.18.5 through `[patch.crates-io]` with the upstream one-line out-pointer fix (`patches/glib-0.18.5/PATCHED.md`). Remove the patch when Tauri moves to glib 0.20 or later.
+
 ## Current development identity, icons and GPU work
 
 **Implemented, pending hosted verification:** Windows development Authenticode and final icon-resource checks. The approved D014 identity is self-signed `CN=Numera Video Sub Finder`, RSA 3072, with code-signing EKU `1.3.6.1.5.5.7.3.3`, expiring **2027-11-03**. Its public certificate DER SHA-256 pin is `fd066bb47fb069723b76650fe628cf4726b6f710b8245097d055312a8a912317`. This is pinned development integrity, not a publicly trusted publisher: Windows untrusted-publisher/SmartScreen warnings remain expected. There is no timestamp, so signatures cease to validate after certificate expiry. No certificate is imported into a trust store; hosted signing uses only the disposable runner's Personal (`CurrentUser\My`) store and must remove its imported identity afterward.

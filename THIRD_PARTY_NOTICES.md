@@ -10,6 +10,7 @@ Application-owned code is GPL-3.0-or-later; see LICENSE. Native dependencies, mo
 | Tesseract 5.5.4 / Leptonica | Tesseract tag5.5.4 commit7e548e6eff172f38f97664afe7f7ce40db36c8d6 via ci/ports/tesseract; Leptonica at the unchanged vcpkg baseline | Apache-2.0 / BSD-style; preserve native notices |
 | Tesseract vcpkg overlay recipe and patches | Adapted from Microsoft vcpkg e456309491fd875487bf02b8a0dca76c1b1b00cc; source archive SHA512 pinned in portfile.cmake; redundant upstream-included MSVC patch omitted | MIT; Microsoft copyright/license retained in ci/ports/tesseract/LICENSE.vcpkg.txt and native package notices |
 | ONNX Runtime 1.31.0 | ci/targets.json official release hashes/source tag | MIT; preserve notices, runtime licenses and exact build provenance |
+| glib 0.18.5 (security-patched) | patches/glib-0.18.5, crates.io 0.18.5 plus the upstream glib 0.20.0 fix for GHSA-wrw7-89jp-8q8g (see patches/glib-0.18.5/PATCHED.md) | MIT; LICENSE and COPYRIGHT kept in the patched copy |
 | ort 2.0.0-rc.14 | Cargo.lock | MIT / Apache-2.0; exact prerelease explicitly approved |
 | webpki-root-certs 1.0.9 trust-anchor data | Cargo.lock; rustls/webpki-roots tag v/1.0.9 | CDLA-Permissive-2.0; full agreement in licenses/data/CDLA-Permissive-2.0.md is included with distributed data |
 | PaddleOCR v5 ONNX models | ci/models.json immutable official PaddlePaddle Hub revisions | Declared Apache-2.0; hashes identify bytes, not benchmark quality |
