@@ -27,7 +27,7 @@ An offline-first desktop workspace for extracting **visible, burned-in subtitles
 
 **Development; not a qualified release.** Source and CI definitions do not prove successful builds or OCR quality. The live CI badge is authoritative for hosted checks. See [validation status](docs/validation.md) for remaining gates. Android and iPhone applications are not included.
 
-The six native targets are Windows, macOS and Linux, each x64 and ARM64. Hosted CPU CI is separate from real-device accelerator qualification. Final distribution requires verified platform signatures; missing Windows signing and Apple signing/notarization inputs currently block publication. The dedicated updater key is not a platform certificate. No signing, GPU placement or quality certification is implied by source availability.
+The five native 64-bit targets are Windows x64/ARM64, Linux x64/ARM64 and macOS x64 (Intel). macOS ARM64 and all 32-bit builds are not produced. Hosted CPU CI is separate from real-device accelerator qualification. Final distribution requires verified platform signatures; missing Windows signing and Apple signing/notarization inputs currently block publication. The dedicated updater key is not a platform certificate. No signing, GPU placement or quality certification is implied by source availability.
 
 ## Installation and setup
 
@@ -103,7 +103,7 @@ Logs and original crop evidence are local. At startup, matching application logs
 
 ## Builds and tests
 
-**Builds run only in GitHub Actions.** Manually dispatch **Final verification** (`verify.yml`) after all changes are pushed; it calls native, portable-quality, dependency and source-analysis lanes once for that commit. Pushes and pull requests do not start CI automatically. The committed lockfile, native source baseline, model manifests and six-target inventory drive the pipeline. Local Cargo/Trunk/Tauri compilation is not part of the project's authorized workflow.
+**Builds run only in GitHub Actions.** Manually dispatch **Final verification** (`verify.yml`) after all changes are pushed; it calls native, portable-quality, dependency and source-analysis lanes once for that commit. Pushes and pull requests do not start CI automatically. The committed lockfile, native source baseline, model manifests and five-target inventory drive the pipeline. Local Cargo/Trunk/Tauri compilation is not part of the project's authorized workflow.
 
 See [testing](docs/testing.md), [architecture](docs/architecture.md), [OCR contracts](docs/ocr-models.md), [performance policy](docs/performance.md), [platform support](docs/platform-support.md), [CI matrix](docs/ci-matrix.md), [troubleshooting](docs/troubleshooting.md), [references](docs/references.md), and [third-party notices](THIRD_PARTY_NOTICES.md). Generated synthetic fixtures cover integration/timing mechanics only, not held-out real-world CER or subtitle-event recall.
 

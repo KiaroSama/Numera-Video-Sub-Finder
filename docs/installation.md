@@ -1,6 +1,6 @@
 # Installation and first setup
 
-**Current status: development source, not a completed release.** All six native target checks and platform-signing gates must pass before a ready-build prerelease is published. Do not treat an Actions log, an unsigned intermediate or an empty release as an installer. See [validation](validation.md) for exact observed results and open qualification.
+**Current status: development source, not a completed release.** All five native target checks and platform-signing gates must pass before a ready-build prerelease is published. Do not treat an Actions log, an unsigned intermediate or an empty release as an installer. See [validation](validation.md) for exact observed results and open qualification.
 
 ## 1. Choose the correct build
 
@@ -106,7 +106,7 @@ The language dropdown contains **123 official Tesseract language and vertical va
 
 The admitted Chinese/English/Japanese and Arabic-family Paddle models are used only for their compatible languages. Other catalog languages use Tesseract CPU recognition plus the native detector; strict required-acceleration mode therefore cannot pass for those recognizers. `osd`, `equ`, arbitrary paths and combined expressions such as `eng+fra` are not selectable language IDs.
 
-GPU node profiling (T112) and a separate Windows x64 CUDA build variant (T113) are in progress, not verified downloads or performance claims. The six CPU baseline products remain distinct. Physical RTX 4070 Ti qualification (T114) will use only exact CI-built artifacts; no physical execution, speedup or other-provider/hardware qualification is claimed.
+GPU node profiling (T112) and a separate Windows x64 CUDA build variant (T113) are in progress, not verified downloads or performance claims. The five CPU baseline products remain distinct. Physical RTX 4070 Ti qualification (T114) will use only exact CI-built artifacts; no physical execution, speedup or other-provider/hardware qualification is claimed.
 
 **Pack availability and hash verification do not measure subtitle accuracy.** Original English/Persian/Japanese accuracy/timing gates remain open; other languages are explicitly unmeasured. See [OCR contracts](ocr-models.md).
 
@@ -135,4 +135,4 @@ Review source frames and uncertain cues before exporting. Save a review project 
 
 ## Source builds
 
-Build and test **only in GitHub Actions**. On the authorized repository, manually run **Final verification** (`verify.yml`) for the completed pushed source. It invokes reusable `ci.yml` for the six native targets and the portable/security/source-analysis children once. No local Cargo/Trunk/Tauri compilation or local application-test fallback is part of this project's workflow. The new Windows development signing/icon implementation still needs its own exact-SHA hosted verification; Apple signing/notarization remains blocked, and final release publication still needs all required evidence.
+Build and test **only in GitHub Actions**. On the authorized repository, manually run **Final verification** (`verify.yml`) for the completed pushed source. It invokes reusable `ci.yml` for the five native targets and the portable/security/source-analysis children once. No local Cargo/Trunk/Tauri compilation or local application-test fallback is part of this project's workflow. The new Windows development signing/icon implementation still needs its own exact-SHA hosted verification; Apple signing/notarization remains blocked, and final release publication still needs all required evidence.

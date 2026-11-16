@@ -23,7 +23,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - id: targets
         run: |
-          jq -e '.schema == 1 and (.targets | length == 6) and .scope == "desktop-only"' ci/targets.json
+          jq -e '.schema == 1 and (.targets | length == 5) and .scope == "desktop-only"' ci/targets.json
           echo "matrix=$(jq -c '{include: .targets | map({id, runner, target, os, arch, triplet})}' ci/targets.json)" >> "$GITHUB_OUTPUT"
   native:
     needs: inventory
@@ -174,7 +174,7 @@ jobs:
         env:
           CARGO_TARGET_DIR: ${{ github.workspace }}/.ci-work/cuda-target
         run: |
-          # Opt-in GPU variant only; the six CPU baseline products and their caches stay unchanged.
+          # Opt-in GPU variant only; the five CPU baseline products and their caches stay unchanged.
           $lock = [IO.File]::ReadAllText('ci/gpu-lock.json', [Text.Encoding]::UTF8) | ConvertFrom-Json
           $pin = $lock.variants.'windows-x64-cuda12'
           if ($lock.schema -ne 1 -or $pin.url -notmatch '^https://github\.com/microsoft/onnxruntime/releases/download/') { throw 'GPU runtime pin is invalid' }
@@ -431,7 +431,7 @@ jobs:
           pattern: desktop-*-${{ github.sha }}
           path: .ci-work/downloaded
           merge-multiple: true
-      - name: Check six exact-source reports
+      - name: Check five exact-source reports
         run: |
           for id in $(jq -r '.targets[].id' ci/targets.json); do
             jq -e --arg sha "$GITHUB_SHA" --arg id "$id" '.schema==1 and .source_sha==$sha and .target==$id and (.files|length>=2) and all(.files[]; (.sha256|test("^[a-f0-9]{64}$")))' ".ci-work/downloaded/packages/reports/$id.json"
