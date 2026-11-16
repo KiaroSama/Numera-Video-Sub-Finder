@@ -1,4 +1,5 @@
 mod coverage_scope;
+mod executable_icons;
 mod extraction_witness;
 mod fixture;
 mod gate;
@@ -148,6 +149,14 @@ enum Cmd {
         #[arg(long)]
         packages: PathBuf,
     },
+    ExecutableIcons {
+        #[arg(long)]
+        binary: PathBuf,
+        #[arg(long)]
+        icon: PathBuf,
+        #[arg(long)]
+        output: PathBuf,
+    },
     Package {
         #[arg(long)]
         target: String,
@@ -282,6 +291,11 @@ fn run() -> Result<(), Box<dyn Error>> {
             output,
         } => runtime_pack::generate(&target, &runtimes, &output),
         Cmd::UpdateAssets { target, packages } => update_assets::generate(&target, &packages),
+        Cmd::ExecutableIcons {
+            binary,
+            icon,
+            output,
+        } => executable_icons::verify(&binary, &icon, &output),
         Cmd::Package {
             target,
             cli,

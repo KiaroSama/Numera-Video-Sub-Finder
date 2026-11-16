@@ -4,6 +4,10 @@ on:
     secrets:
       TAURI_SIGNING_PRIVATE_KEY:
         required: true
+      NVSF_WINDOWS_CODESIGN_PFX:
+        required: true
+      NVSF_WINDOWS_CODESIGN_PASSWORD:
+        required: true
 permissions:
   contents: read
 concurrency:
@@ -63,6 +67,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Frontend environment regression contracts failed' }
           ./scripts/ci/guard.ps1 -Name notice-contracts -WallSeconds 20 -IdleSeconds 10 -Executable pwsh -Arguments @('-NoLogo','-NoProfile','-NonInteractive','-File','scripts/ci/notice-tests.ps1')
           if ($LASTEXITCODE -ne 0) { throw 'Native notice regression contracts failed' }
+          if ($IsWindows) {
+            ./scripts/ci/guard.ps1 -Name authenticode-contracts -WallSeconds 60 -IdleSeconds 30 -Executable pwsh -Arguments @('-NoLogo','-NoProfile','-NonInteractive','-File','scripts/ci/authenticode-tests.ps1')
+            if ($LASTEXITCODE -ne 0) { throw 'Authenticode regression contracts failed' }
+          }
       - name: Linux native prerequisites
         if: matrix.os == 'linux'
         run: |
@@ -99,34 +107,7 @@ jobs:
         run: |
           cargo metadata --locked --no-deps --format-version 1 > .ci-work/workspace.json
           if ($LASTEXITCODE -ne 0) { throw 'Committed dependency lock mismatch' }
-      - name: Core and native static analysis
-        run: |
-          ./scripts/ci/guard.ps1 -Name rust-clippy -WallSeconds 1200 -IdleSeconds 180 -Executable cargo -Arguments @('clippy','--locked','-vv','-p','nvsf-core','-p','nvsf-app','-p','nvsf-media-native','-p','nvsf-cli','-p','xtask','--','-D','warnings')
-          if ($LASTEXITCODE -ne 0) { throw 'Rust static analysis failed' }
-      - name: Same-target native media adapter and loader closure
-        timeout-minutes: 35
-        run: |
-          ./scripts/ci/guard.ps1 -Name media-adapter-release -WallSeconds 1800 -IdleSeconds 360 -Executable cargo -Arguments @('build','--locked','--release','--target','${{ matrix.target }}','-p','nvsf-media-native')
-          if ($LASTEXITCODE -ne 0) { throw 'Native media adapter build failed' }
-          ./scripts/ci/native.ps1 -TargetId '${{ matrix.id }}' -StageMediaAdapter
-          if ($LASTEXITCODE -ne 0) { throw 'Native media adapter loader staging failed' }
-      - name: CLI and frontend build
-        run: |
-          ./scripts/ci/guard.ps1 -Name native-release -WallSeconds 1800 -IdleSeconds 360 -Executable cargo -Arguments @('build','--locked','--release','-p','nvsf-cli','-p','xtask')
-          if ($LASTEXITCODE -ne 0) { throw 'Native CLI build failed' }
-          if ($IsMacOS -and '${{ matrix.arch }}' -eq 'x64') {
-            ./scripts/ci/trunk-intel.ps1
-          } else {
-            ./scripts/ci/guard.ps1 -Name trunk-install -WallSeconds 1200 -IdleSeconds 180 -Executable cargo -Arguments @('install','trunk','--version','0.22.1','--locked','--config','profile.release.lto="off"','--config','profile.release.codegen-units=16','--root','.ci-work/tools')
-          }
-          if ($LASTEXITCODE -ne 0) { throw 'Trunk installation failed' }
-          "$env:GITHUB_WORKSPACE/.ci-work/tools/bin" >> $env:GITHUB_PATH
-          $env:PATH = "$env:GITHUB_WORKSPACE/.ci-work/tools/bin$([IO.Path]::PathSeparator)$env:PATH"
-      - name: Native Windows ARM frontend helpers
-        if: matrix.id == 'windows-arm64'
-        timeout-minutes: 30
-        run: ./scripts/ci/frontend-tools.ps1
-      - name: Instrumented native GUI build
+      - name: Native resource tools and approved icons
         run: |
           if ($IsMacOS -and '${{ matrix.arch }}' -eq 'x64') {
             $stage = Join-Path $env:GITHUB_WORKSPACE ('.ci-work/tools/tauri-stage-' + [Guid]::NewGuid().ToString('N'))
@@ -164,6 +145,81 @@ jobs:
           $env:PATH = "$env:GITHUB_WORKSPACE/.ci-work/tools/bin$([IO.Path]::PathSeparator)$env:PATH"
           ./scripts/ci/guard.ps1 -Name native-icons -WallSeconds 60 -IdleSeconds 20 -Executable cargo -Arguments @('tauri','icon','assets/logo.svg','--output','crates/desktop/icons')
           if ($LASTEXITCODE -ne 0) { throw 'Native icon generation failed' }
+      - name: Core and native static analysis
+        run: |
+          ./scripts/ci/guard.ps1 -Name rust-clippy -WallSeconds 1200 -IdleSeconds 180 -Executable cargo -Arguments @('clippy','--locked','-vv','-p','nvsf-core','-p','nvsf-app','-p','nvsf-media-native','-p','nvsf-cli','-p','xtask','--','-D','warnings')
+          if ($LASTEXITCODE -ne 0) { throw 'Rust static analysis failed' }
+      - name: Same-target native media adapter and loader closure
+        timeout-minutes: 35
+        run: |
+          ./scripts/ci/guard.ps1 -Name media-adapter-release -WallSeconds 1800 -IdleSeconds 360 -Executable cargo -Arguments @('build','--locked','--release','--target','${{ matrix.target }}','-p','nvsf-media-native')
+          if ($LASTEXITCODE -ne 0) { throw 'Native media adapter build failed' }
+          ./scripts/ci/native.ps1 -TargetId '${{ matrix.id }}' -StageMediaAdapter
+          if ($LASTEXITCODE -ne 0) { throw 'Native media adapter loader staging failed' }
+      - name: CLI and frontend build
+        run: |
+          ./scripts/ci/guard.ps1 -Name native-release -WallSeconds 1800 -IdleSeconds 360 -Executable cargo -Arguments @('build','--locked','--release','-p','nvsf-cli','-p','xtask')
+          if ($LASTEXITCODE -ne 0) { throw 'Native CLI build failed' }
+          if ($IsMacOS -and '${{ matrix.arch }}' -eq 'x64') {
+            ./scripts/ci/trunk-intel.ps1
+          } else {
+            ./scripts/ci/guard.ps1 -Name trunk-install -WallSeconds 1200 -IdleSeconds 180 -Executable cargo -Arguments @('install','trunk','--version','0.22.1','--locked','--config','profile.release.lto="off"','--config','profile.release.codegen-units=16','--root','.ci-work/tools')
+          }
+          if ($LASTEXITCODE -ne 0) { throw 'Trunk installation failed' }
+          "$env:GITHUB_WORKSPACE/.ci-work/tools/bin" >> $env:GITHUB_PATH
+          $env:PATH = "$env:GITHUB_WORKSPACE/.ci-work/tools/bin$([IO.Path]::PathSeparator)$env:PATH"
+      - name: Separate Windows x64 CUDA 12 CLI variant
+        if: matrix.id == 'windows-x64'
+        timeout-minutes: 40
+        env:
+          CARGO_TARGET_DIR: ${{ github.workspace }}/.ci-work/cuda-target
+        run: |
+          # Opt-in GPU variant only; the six CPU baseline products and their caches stay unchanged.
+          $lock = [IO.File]::ReadAllText('ci/gpu-lock.json', [Text.Encoding]::UTF8) | ConvertFrom-Json
+          $pin = $lock.variants.'windows-x64-cuda12'
+          if ($lock.schema -ne 1 -or $pin.url -notmatch '^https://github\.com/microsoft/onnxruntime/releases/download/') { throw 'GPU runtime pin is invalid' }
+          $work = Join-Path $env:GITHUB_WORKSPACE '.ci-work/cuda'
+          New-Item -ItemType Directory -Force -Path $work | Out-Null
+          $archive = Join-Path $work $pin.asset
+          ./scripts/ci/guard.ps1 -Name cuda-ort-download -WallSeconds 900 -IdleSeconds 180 -Executable curl -Arguments @('--fail','--location','--proto','=https','--proto-redir','=https','--connect-timeout','30','--max-time','840','--output',$archive,$pin.url)
+          if ($LASTEXITCODE -ne 0) { throw 'Pinned CUDA ONNX Runtime download failed' }
+          if ((Get-Item -LiteralPath $archive).Length -ne $pin.bytes -or (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant() -ne $pin.sha256) { throw 'CUDA ONNX Runtime archive identity mismatch' }
+          $variant = Join-Path $env:GITHUB_WORKSPACE '.ci-work/cuda-variant'
+          $runtimes = Join-Path $variant 'runtimes'
+          New-Item -ItemType Directory -Force -Path $runtimes | Out-Null
+          $zip = [IO.Compression.ZipFile]::OpenRead($archive)
+          try {
+            # Match by exact one-level root folder plus member path; the root folder name is not assumed.
+            foreach ($name in @('lib/onnxruntime.dll','lib/onnxruntime_providers_shared.dll','lib/onnxruntime_providers_cuda.dll','LICENSE','ThirdPartyNotices.txt')) {
+              $found = @($zip.Entries | Where-Object { $_.FullName -match ('^[^/]+/' + [regex]::Escape($name) + '$') })
+              if ($found.Count -ne 1) { throw "CUDA runtime member missing or ambiguous: $name" }
+              $entry = $found[0]
+              if ($entry.Length -lt 1 -or $entry.Length -gt 1073741824) { throw "CUDA runtime member unbounded: $name" }
+              [IO.Compression.ZipFileExtensions]::ExtractToFile($entry, (Join-Path $runtimes ([IO.Path]::GetFileName($name))), $false)
+            }
+          } finally { $zip.Dispose() }
+          Remove-Item -LiteralPath $archive -Force
+          ./scripts/ci/guard.ps1 -Name cuda-cli-release -WallSeconds 1800 -IdleSeconds 360 -Executable cargo -Arguments @('build','--locked','--release','-p','nvsf-cli','--features','cuda')
+          if ($LASTEXITCODE -ne 0) { throw 'CUDA CLI variant build failed' }
+          Copy-Item -LiteralPath (Join-Path $env:CARGO_TARGET_DIR 'release/nvsf.exe') -Destination (Join-Path $variant 'nvsf.exe')
+          $files = @(Get-ChildItem -LiteralPath $variant -File -Recurse | ForEach-Object { [ordered]@{ file = [IO.Path]::GetRelativePath($variant, $_.FullName).Replace('\','/'); bytes = $_.Length; sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant() } })
+          $manifest = [ordered]@{ schema = 1; variant = 'windows-x64-cuda12'; source_sha = $env:GITHUB_SHA; status = 'development-unqualified-gpu'; onnxruntime = $lock.onnxruntime; ort_archive_sha256 = $pin.sha256; host_requirements = 'NVIDIA driver with CUDA 12 runtime, cuBLAS and cuDNN 9 supplied by the host; not bundled'; files = $files }
+          [IO.File]::WriteAllText((Join-Path $variant 'gpu-variant.json'), ($manifest | ConvertTo-Json -Depth 4), [Text.UTF8Encoding]::new($false))
+          Remove-Item -LiteralPath $env:CARGO_TARGET_DIR -Recurse -Force
+      - name: Upload separate CUDA variant
+        if: matrix.id == 'windows-x64'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: gpu-windows-x64-cuda12-${{ github.sha }}
+          path: .ci-work/cuda-variant/
+          if-no-files-found: error
+          retention-days: 7
+      - name: Native Windows ARM frontend helpers
+        if: matrix.id == 'windows-arm64'
+        timeout-minutes: 30
+        run: ./scripts/ci/frontend-tools.ps1
+      - name: Instrumented native GUI build
+        run: |
           ./scripts/ci/frontend.ps1 -E2e
           if ($LASTEXITCODE -ne 0) { throw 'Instrumented Rust frontend build failed' }
           ./scripts/ci/guard.ps1 -Name instrumented-desktop -WallSeconds 1800 -IdleSeconds 360 -Executable cargo -Arguments @('build','--locked','--release','--timings','-vv','-p','nvsf-desktop','--features','e2e')
@@ -279,6 +335,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Relocated package validation failed' }
       - name: Actual installer and archive formats
         timeout-minutes: 35
+        env:
+          # Selected development signing inputs reach only the Windows bundling step.
+          NVSF_WINDOWS_CODESIGN_PFX: ${{ matrix.os == 'windows' && secrets.NVSF_WINDOWS_CODESIGN_PFX || '' }}
+          NVSF_WINDOWS_CODESIGN_PASSWORD: ${{ matrix.os == 'windows' && secrets.NVSF_WINDOWS_CODESIGN_PASSWORD || '' }}
         run: |
           ./scripts/ci/bundle.ps1 -TargetId '${{ matrix.id }}' -PackagesRoot '.ci-work/packages'
       - name: Signed internal updater payload and metadata candidates

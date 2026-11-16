@@ -31,7 +31,27 @@ pub enum Event {
 pub fn supervise(
     config: ExtractConfig,
     control: &Control,
+    callback: impl FnMut(Progress),
+) -> Result<Project> {
+    supervise_inner(config, control, callback, None)
+}
+
+/// Same isolated worker supervision; the worker writes provider profiles and evidence
+/// into the caller-validated new directory before reporting completion.
+pub fn supervise_profiled(
+    config: ExtractConfig,
+    control: &Control,
+    callback: impl FnMut(Progress),
+    profile_directory: &Path,
+) -> Result<Project> {
+    supervise_inner(config, control, callback, Some(profile_directory))
+}
+
+fn supervise_inner(
+    config: ExtractConfig,
+    control: &Control,
     mut callback: impl FnMut(Progress),
+    profile_directory: Option<&Path>,
 ) -> Result<Project> {
     config.validate()?;
     let paths = Paths::new(config.data_root.as_deref().map(Path::new))?;
@@ -49,7 +69,11 @@ pub fn supervise(
         .arg("--request")
         .arg(&request)
         .arg("--control")
-        .arg(scratch.path())
+        .arg(scratch.path());
+    if let Some(directory) = profile_directory {
+        command.arg("--provider-profile").arg(directory);
+    }
+    command
         .env("TEMP", scratch.path())
         .env("TMP", scratch.path())
         .env("TMPDIR", scratch.path())

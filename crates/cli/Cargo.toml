@@ -9,6 +9,10 @@ license.workspace = true
 name = "nvsf"
 path = "src/main.rs"
 
+[features]
+default = []
+cuda = ["nvsf-app/cuda"]
+
 [dependencies]
 nvsf-app.workspace = true
 nvsf-core.workspace = true
@@ -17,6 +21,9 @@ serde_json.workspace = true
 serde.workspace = true
 chrono.workspace = true
 ctrlc = "=3.5.2"
+
+[target.'cfg(windows)'.build-dependencies]
+tauri-winres = "=0.3.7"
 
 [lints]
 workspace = true

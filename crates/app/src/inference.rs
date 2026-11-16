@@ -15,6 +15,7 @@ pub struct Ocr {
     language: String,
     pub provider: String,
     _runtime: libloading::Library,
+    profile_root: Option<std::path::PathBuf>,
 }
 
 impl Ocr {
@@ -24,6 +25,31 @@ impl Ocr {
         device: &str,
         threads: usize,
         required: bool,
+    ) -> Result<Self> {
+        Self::new_inner(paths, language, device, threads, required, None)
+    }
+
+    /// Profiles the same ordinary sessions into a new, absolute caller-owned directory.
+    /// Use a separate process for each native runtime variant; the environment is process-global.
+    pub fn new_profiled(
+        paths: &Paths,
+        language: &str,
+        device: &str,
+        threads: usize,
+        required: bool,
+        profile_directory: &std::path::Path,
+    ) -> Result<Self> {
+        let root = providers::profiles::reserve(profile_directory)?;
+        Self::new_inner(paths, language, device, threads, required, Some(root))
+    }
+
+    fn new_inner(
+        paths: &Paths,
+        language: &str,
+        device: &str,
+        threads: usize,
+        required: bool,
+        profile_root: Option<std::path::PathBuf>,
     ) -> Result<Self> {
         let detector_metadata =
             crate::model_contract::validate_metadata("det", models::metadata("det")?)?;
@@ -71,13 +97,28 @@ impl Ocr {
         };
         drop(guard);
         let det = models::verify(paths, "det")?;
-        let (detector, provider) = providers::session(&env, &det, device, threads, required)?;
+        let detector_profile = profile_root.as_ref().map(|root| root.join("detector"));
+        let (detector, provider) = providers::session_profiled(
+            &env,
+            &det,
+            device,
+            threads,
+            required,
+            detector_profile.as_deref(),
+        )?;
         crate::session_contract::validate(&detector, detector_metadata.classes)?;
         let mut dictionary = Vec::new();
         let (recognizer, tesseract) = if let Some(id) = id {
             let rec = models::verify(paths, id)?;
-            let (recognizer, actual) =
-                providers::session(&env, &rec, &provider, threads, required)?;
+            let recognizer_profile = profile_root.as_ref().map(|root| root.join("recognizer"));
+            let (recognizer, actual) = providers::session_profiled(
+                &env,
+                &rec,
+                &provider,
+                threads,
+                required,
+                recognizer_profile.as_deref(),
+            )?;
             if actual != provider {
                 return Err(fail("Detection and recognition provider mismatch"));
             }
@@ -108,6 +149,31 @@ impl Ocr {
             dictionary,
             language: language.into(),
             provider,
+            profile_root,
+        })
+    }
+
+    /// Flushes both native profiles before returning their confined paths; registration is not placement.
+    pub fn finish_profiles(mut self) -> Result<providers::profiles::ProfileFiles> {
+        let root = self
+            .profile_root
+            .take()
+            .ok_or_else(|| fail("OCR sessions were not created with profiling"))?;
+        let detector = self
+            .detector
+            .end_profiling()
+            .map_err(|e| fail(e.to_string()));
+        // Flush the recognizer even when ending detector profiling failed.
+        let recognizer = match self.recognizer.as_mut() {
+            Some(session) => session.end_profiling().map_err(|e| fail(e.to_string())),
+            None => Err(fail(
+                "A profiled ONNX recognizer is required for two-stage evidence",
+            )),
+        };
+        Ok(providers::profiles::ProfileFiles {
+            detector: providers::profiles::profile_path(&root, &detector?)?,
+            recognizer: providers::profiles::profile_path(&root, &recognizer?)?,
+            runtime_build: ort::info().to_string(),
         })
     }
 
