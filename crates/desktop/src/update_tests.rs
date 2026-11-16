@@ -134,8 +134,8 @@ fn discovered_release_is_only_an_offer_and_a_failed_check_clears_it() {
     let log = nvsf_app::logging::Log::new(&paths, "nvsf-desktop");
     let host = Host::new(paths, log);
     let mut platforms = std::collections::BTreeMap::new();
-    for os in ["windows", "linux", "darwin"] {
-        for format in ["portable", "nsis", "msi", "app", "appimage", "deb", "rpm"] {
+    for os in ["windows", "linux"] {
+        for format in ["portable", "nsis", "msi", "appimage", "deb", "rpm"] {
             platforms.insert(
                 format!("{os}-{}-{format}", std::env::consts::ARCH),
                 nvsf_app::updates::Artifact {

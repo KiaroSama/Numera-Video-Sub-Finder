@@ -116,8 +116,10 @@ impl ExtractConfig {
                 "choose a language from the official catalog".into(),
             ));
         }
-        if !["cpu", "auto", "cuda", "directml", "coreml"].contains(&self.device.as_str()) {
-            return Err(Error::Invalid("unknown device".into()));
+        if !["cpu", "auto", "cuda", "directml"].contains(&self.device.as_str()) {
+            return Err(Error::Invalid(
+                "device must be cpu, auto, cuda or directml".into(),
+            ));
         }
         if !["accurate", "balanced", "fast"].contains(&self.quality.as_str())
             || self.threads == 0

@@ -119,8 +119,6 @@ fn nonblocking(pipe: &ChildStdout) -> Result<()> {
     unsafe extern "C" {
         fn fcntl(fd: i32, command: i32, ...) -> i32;
     }
-    #[cfg(target_os = "macos")]
-    const NONBLOCK: i32 = 0x4;
     #[cfg(target_os = "linux")]
     const NONBLOCK: i32 = 0x800;
     // SAFETY: owned pipe descriptor; F_GETFL takes no additional argument, F_SETFL

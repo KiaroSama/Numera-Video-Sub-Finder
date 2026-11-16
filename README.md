@@ -9,7 +9,7 @@
 [![Rust 1.99](https://img.shields.io/badge/Rust-1.99-orange)](rust-toolchain.toml)
 [![Edition 2024](https://img.shields.io/badge/Edition-2024-orange)](Cargo.toml)
 [![Windows desktop](https://img.shields.io/badge/Windows-desktop-0078d4)](ci/targets.json)
-[![macOS desktop](https://img.shields.io/badge/macOS-desktop-555555)](ci/targets.json)
+[![Windows and Linux desktop](https://img.shields.io/badge/Platforms-Windows%20%7C%20Linux-555555)](ci/targets.json)
 [![Linux desktop](https://img.shields.io/badge/Linux-desktop-fcc624)](ci/targets.json)
 [![Tauri 2](https://img.shields.io/badge/Tauri-2-24c8db)](crates/desktop/Cargo.toml)
 [![Leptos Rust UI](https://img.shields.io/badge/UI-Leptos-ef3939)](crates/ui/Cargo.toml)
@@ -27,7 +27,7 @@ An offline-first desktop workspace for extracting **visible, burned-in subtitles
 
 **Development; not a qualified release.** Source and CI definitions do not prove successful builds or OCR quality. The live CI badge is authoritative for hosted checks. See [validation status](docs/validation.md) for remaining gates. Android and iPhone applications are not included.
 
-The five native 64-bit targets are Windows x64/ARM64, Linux x64/ARM64 and macOS x64 (Intel). macOS ARM64 and all 32-bit builds are not produced. Hosted CPU CI is separate from real-device accelerator qualification. Final distribution requires verified platform signatures; missing Windows signing and Apple signing/notarization inputs currently block publication. The dedicated updater key is not a platform certificate. No signing, GPU placement or quality certification is implied by source availability.
+The four native 64-bit targets are Windows x64, Windows ARM64, Linux x64 and Linux ARM64. All 32-bit builds are excluded. Hosted CPU CI is separate from real-device accelerator qualification. Final distribution requires verified platform signatures; missing Windows signing inputs currently block publication. The dedicated updater key is not a platform certificate. No signing, GPU placement or quality certification is implied by source availability.
 
 ## Installation and setup
 
@@ -83,7 +83,7 @@ nvsf languages install fra
 nvsf dependencies
 ```
 
-`dependencies --repair --consent` requests a matching signed application-local native pack when a component is missing or incompatible; it never installs system FFmpeg or changes PATH. A matching published pack is required. Restart after repair. `doctor` reports actual native API/version checks, not proven operator placement. `--gpu-required` / `--accelerator-required` fail when the requested execution policy cannot be established. `auto` may use CPU only with a reported fallback; an ordinary CPU package does not contain CUDA/DirectML/CoreML runtime qualification.
+`dependencies --repair --consent` requests a matching signed application-local native pack when a component is missing or incompatible; it never installs system FFmpeg or changes PATH. A matching published pack is required. Restart after repair. `doctor` reports actual native API/version checks, not proven operator placement. `--gpu-required` / `--accelerator-required` fail when the requested execution policy cannot be established. `auto` may use CPU only with a reported fallback; an ordinary CPU package does not contain CUDA/DirectML runtime qualification. Device options are `cpu`, `auto`, `cuda` and `directml`.
 
 `batch`, `resume`, `export`, and `benchmark` share the native application service. Run each subcommand's `--help` for exact options. Benchmark elapsed time is a measurement of that run, not a universal speed or quality claim.
 
@@ -93,7 +93,7 @@ Writable models, projects, logs and cache use the OS's local application-data di
 
 Video and subtitle text remain local during inference. The desktop checks signed official stable-release metadata at startup and at most daily while open; disable automatic checks in Settings or check manually. **No update payload downloads or installs without separate approval.** Explicit model/language provisioning and approved dependency repair also use the network. Model bytes are checked against pinned hashes; managed runtime packs and update metadata require signatures. No stable release/feed is claimed before publication.
 
-Installed Windows, macOS `.app` and Linux AppImage are the intended automatic-update formats; portable archives, deb and rpm use verified download and manual format-specific installation. Save review edits and finish jobs/resource operations before installation. Checkpoints bind source/configuration/selected resources; installing unrelated language packs does not change their identity. Private media, crop evidence, projects and logs are never uploaded by the application.
+Installed Windows and Linux AppImage are the intended automatic-update formats; portable archives, deb and rpm use verified download and manual format-specific installation. Save review edits and finish jobs/resource operations before installation. Checkpoints bind source/configuration/selected resources; installing unrelated language packs does not change their identity. Private media, crop evidence, projects and logs are never uploaded by the application.
 
 ## Logging
 
@@ -103,7 +103,7 @@ Logs and original crop evidence are local. At startup, matching application logs
 
 ## Builds and tests
 
-**Builds run only in GitHub Actions.** Manually dispatch **Final verification** (`verify.yml`) after all changes are pushed; it calls native, portable-quality, dependency and source-analysis lanes once for that commit. Pushes and pull requests do not start CI automatically. The committed lockfile, native source baseline, model manifests and five-target inventory drive the pipeline. Local Cargo/Trunk/Tauri compilation is not part of the project's authorized workflow.
+**Builds run only in GitHub Actions.** Manually dispatch **Final verification** (`verify.yml`) after all changes are pushed; it calls native, portable-quality, dependency and source-analysis lanes once for that commit. Pushes and pull requests do not start CI automatically. The committed lockfile, native source baseline, model manifests and four-target inventory drive the pipeline. Local Cargo/Trunk/Tauri compilation is not part of the project's authorized workflow.
 
 See [testing](docs/testing.md), [architecture](docs/architecture.md), [OCR contracts](docs/ocr-models.md), [performance policy](docs/performance.md), [platform support](docs/platform-support.md), [CI matrix](docs/ci-matrix.md), [troubleshooting](docs/troubleshooting.md), [references](docs/references.md), and [third-party notices](THIRD_PARTY_NOTICES.md). Generated synthetic fixtures cover integration/timing mechanics only, not held-out real-world CER or subtitle-event recall.
 

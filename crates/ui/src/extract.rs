@@ -34,7 +34,7 @@ pub fn Extract(ui: Ui) -> impl IntoView {
                 <label for="device">"Processing device"</label>
                 <select id="device" prop:value=move || ui.config.with(|c| c.device.clone()) on:change=move |e| ui.config.update(|c| c.device=event_target_value(&e))>
                     <option value="auto">"Auto · acceleration first"</option><option value="cpu">"CPU"</option><option value="cuda">"CUDA"</option>
-                    <option value="directml">"DirectML"</option><option value="coreml">"Core ML"</option>
+                    <option value="directml">"DirectML"</option>
                 </select>
                 <p class="hint">"Availability is checked by the backend. Unverified acceleration is never reported as working."</p>
                 <label for="quality">"Sampling quality"</label>

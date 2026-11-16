@@ -14,14 +14,6 @@ pub(super) struct Driver {
     client: Client,
     base: String,
     session: String,
-    #[cfg(target_os = "macos")]
-    debugger: std::cell::RefCell<Option<crate::gui_debugger::Debugger>>,
-    #[cfg(target_os = "macos")]
-    debugger_attempted: std::cell::Cell<bool>,
-    #[cfg(target_os = "macos")]
-    owned_pid: u32,
-    #[cfg(target_os = "macos")]
-    evidence: std::path::PathBuf,
 }
 
 impl Driver {
@@ -31,45 +23,6 @@ impl Driver {
         route: &str,
         body: Value,
     ) -> Result<Value> {
-        #[cfg(target_os = "macos")]
-        if route == "/screenshot"
-            && std::env::var("NVSF_GUI_CRASH_DEBUGGER").as_deref() == Ok("1")
-            && !self.debugger_attempted.replace(true)
-        {
-            match crate::gui_debugger::Debugger::attach(self.owned_pid, &self.evidence) {
-                Ok((debugger, acknowledged)) => {
-                    *self.debugger.borrow_mut() = Some(debugger);
-                    if acknowledged {
-                        let resumed = self
-                            .client
-                            .post(format!(
-                                "{}/session/{}/execute/sync",
-                                self.base, self.session
-                            ))
-                            .timeout(Duration::from_secs(3))
-                            .json(&json!({"script":"return true;","args":[]}))
-                            .send()?
-                            .error_for_status()?
-                            .json::<Value>()?;
-                        if resumed["value"] != true {
-                            return Err(
-                                "Native debugger attached but original WebView did not resume"
-                                    .into(),
-                            );
-                        }
-                    } else {
-                        eprintln!(
-                            "[WARNING] [CI] Native debugger attachment unacknowledged; original screenshot continues with the same owned observer"
-                        );
-                    }
-                }
-                // The debugger is optional evidence, never the behavior under test: record the
-                // bounded failure and still exercise the original screenshot path.
-                Err(error) => eprintln!(
-                    "[WARNING] [CI] Native crash debugger unavailable; original screenshot continues: {error}"
-                ),
-            }
-        }
         let response = self
             .client
             .request(
@@ -287,14 +240,6 @@ pub fn smoke(gui: &Path, fixtures: &Path, data: &Path, output: &Path) -> Result<
         client,
         base,
         session,
-        #[cfg(target_os = "macos")]
-        debugger: std::cell::RefCell::new(None),
-        #[cfg(target_os = "macos")]
-        debugger_attempted: std::cell::Cell::new(false),
-        #[cfg(target_os = "macos")]
-        owned_pid: process.pid(),
-        #[cfg(target_os = "macos")]
-        evidence: output.to_owned(),
     };
     let result = (|| -> Result<()> {
         driver.request(
@@ -455,12 +400,6 @@ pub fn smoke(gui: &Path, fixtures: &Path, data: &Path, output: &Path) -> Result<
         Ok(())
     })();
     if let Err(error) = &result {
-        #[cfg(target_os = "macos")]
-        if let Some(debugger) = driver.debugger.borrow_mut().as_mut()
-            && let Err(error) = debugger.finish()
-        {
-            eprintln!("[WARNING] [CI] Native debugger evidence inconclusive: {error}");
-        }
         let status = process.status().map(|status| format!("{status:?}"));
         std::fs::write(
             output.join("gui-failure.json"),
@@ -471,9 +410,6 @@ pub fn smoke(gui: &Path, fixtures: &Path, data: &Path, output: &Path) -> Result<
                 "elapsed_ms":process.started.elapsed().as_millis(),"error":error.to_string(),"passed":false
             }))?,
         )?;
-        if let Err(error) = crate::gui_failure::capture(output, process.pid(), launched) {
-            eprintln!("[WARNING] [CI] Owned native fault evidence inconclusive: {error}");
-        }
         eprintln!(
             "[ERROR] [CI] GUI failed before cleanup; owned child status={:?}",
             process.status()
@@ -481,12 +417,7 @@ pub fn smoke(gui: &Path, fixtures: &Path, data: &Path, output: &Path) -> Result<
         process.stop();
         return result;
     }
-    // End the original GUI before waiting for the debugger's synchronous continue.
     close_and_wait(&driver, &mut process)?;
-    #[cfg(target_os = "macos")]
-    if let Some(debugger) = driver.debugger.borrow_mut().as_mut() {
-        debugger.finish()?;
-    }
     drop(driver);
     process.stop();
     if process.started.elapsed() > Duration::from_secs(240) {

@@ -29,9 +29,9 @@ pub fn validate_options(directory: &Path, device: &str, language: &str) -> Resul
             "--provider-profile requires a new absolute directory without parent components",
         ));
     }
-    if !matches!(device, "cpu" | "cuda" | "directml" | "coreml") {
+    if !matches!(device, "cpu" | "cuda" | "directml") {
         return Err(invalid(
-            "--provider-profile requires explicit --device cpu, cuda, directml or coreml; auto is not placement evidence",
+            "--provider-profile requires explicit --device cpu, cuda or directml; auto is not placement evidence",
         ));
     }
     if nvsf_core::languages::paddle_model(language).is_none() {

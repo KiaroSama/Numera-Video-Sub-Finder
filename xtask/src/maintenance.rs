@@ -299,7 +299,6 @@ fn environment_snapshot() -> Vec<Option<OsString>> {
     [
         "PATH",
         "LD_LIBRARY_PATH",
-        "DYLD_LIBRARY_PATH",
         "NVSF_RUNTIME_ROOT",
         "NVSF_DATA_ROOT",
         "HTTP_PROXY",

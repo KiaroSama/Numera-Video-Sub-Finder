@@ -108,8 +108,7 @@ pub fn standalone(target: &str, packages: &Path, fixtures: &Path) -> Result<()> 
         .arg(&data)
         .arg("doctor")
         .env_remove("NVSF_RUNTIME_ROOT")
-        .env_remove("LD_LIBRARY_PATH")
-        .env_remove("DYLD_LIBRARY_PATH");
+        .env_remove("LD_LIBRARY_PATH");
     let old_path = std::env::var_os("PATH").unwrap_or_default();
     let clean: Vec<_> = std::env::split_paths(&old_path)
         .filter(|p| {
@@ -155,8 +154,6 @@ pub(crate) fn validate_media_inventory(
 ) -> Result<()> {
     let name = if target.starts_with("windows-") {
         "nvsf_media_native.dll"
-    } else if target.starts_with("macos-") {
-        "libnvsf_media_native.dylib"
     } else {
         "libnvsf_media_native.so"
     };

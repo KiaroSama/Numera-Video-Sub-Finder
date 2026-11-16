@@ -3121,7 +3121,6 @@ dependencies = [
  "base64 0.23.1",
  "chrono",
  "dirs",
- "flate2",
  "fs2",
  "image",
  "libloading 0.9.0",
@@ -3135,7 +3134,6 @@ dependencies = [
  "serde_json",
  "serde_yaml_ng",
  "sha2 0.11.1",
- "tar",
  "tempfile",
  "thiserror 2.0.21",
 ]

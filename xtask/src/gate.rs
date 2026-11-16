@@ -2,13 +2,7 @@ use serde_json::Value;
 use std::{collections::HashSet, error::Error, path::Path};
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
-const TARGETS: [&str; 5] = [
-    "linux-x64",
-    "linux-arm64",
-    "windows-x64",
-    "windows-arm64",
-    "macos-x64",
-];
+const TARGETS: [&str; 4] = ["linux-x64", "linux-arm64", "windows-x64", "windows-arm64"];
 
 fn sha(value: &str, length: usize) -> bool {
     value.len() == length && value.bytes().all(|c| c.is_ascii_hexdigit())
@@ -101,7 +95,7 @@ pub fn validate(reports: &Path, source: &str) -> Result<()> {
         6,
     )?;
     println!(
-        "Five exact-source native package/runtime/GUI/suite reports passed; release qualification is a separate mandatory gate"
+        "Four exact-source native package/runtime/GUI/suite reports passed; release qualification is a separate mandatory gate"
     );
     Ok(())
 }

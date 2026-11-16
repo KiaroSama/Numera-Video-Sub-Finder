@@ -96,14 +96,6 @@ fn format() -> &'static str {
     match bundle_type() {
         Some(BundleType::Nsis) => "nsis",
         Some(BundleType::Msi) => "msi",
-        Some(BundleType::App)
-            if std::env::current_exe().ok().is_some_and(|exe| {
-                exe.ancestors()
-                    .any(|p| p.extension().is_some_and(|ext| ext == "app"))
-            }) =>
-        {
-            "app"
-        }
         Some(BundleType::AppImage) => "appimage",
         Some(BundleType::Deb) => "deb",
         Some(BundleType::Rpm) => "rpm",
@@ -111,7 +103,7 @@ fn format() -> &'static str {
     }
 }
 fn automatic() -> bool {
-    matches!(format(), "nsis" | "msi" | "app" | "appimage")
+    matches!(format(), "nsis" | "msi" | "appimage")
 }
 fn now() -> u64 {
     SystemTime::now()

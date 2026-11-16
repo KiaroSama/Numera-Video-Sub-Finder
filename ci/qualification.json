@@ -3,7 +3,7 @@
   "scope": "desktop-only",
   "release_ready": false,
   "requirements": {
-    "native_targets": ["linux-x64", "linux-arm64", "windows-x64", "windows-arm64", "macos-x64"],
+    "native_targets": ["linux-x64", "linux-arm64", "windows-x64", "windows-arm64"],
     "real_languages": ["en", "fa", "ja"],
     "cer_max": {"en": 0.02, "fa": 0.05, "ja": 0.05},
     "accurate_event_recall_min": 0.98,
@@ -16,7 +16,7 @@
   "evidence": {
     "real_corpus_annotation": {"state": "BLOCKED", "reason": "Licensed real candidates exist; independent visible-text/frame-PTS annotations are not yet admitted for fa/ja"},
     "physical_gpu": {"state": "BLOCKED", "reason": "Only standard public hosted runners authorized; no physical device runner available"},
-    "signing": {"state": "BLOCKED", "reason": "Windows Authenticode and Apple Developer ID/notarization inputs unavailable; the authorized updater key does not establish native platform trust"},
+    "signing": {"state": "BLOCKED", "reason": "Windows development Authenticode is self-signed (untrusted root, untimestamped); macOS support removed by D-018; the authorized updater key does not establish native platform trust"},
     "six_native_cpu": {"state": "NOT_RUN", "reason": "Source and workflow authored; exact source SHA results pending"}
   }
 }

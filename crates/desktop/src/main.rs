@@ -110,8 +110,8 @@ fn main() {
             {
                 paths.use_bundled_runtimes(&resources.join("runtimes"))?;
             }
-            // Bare portable macOS binaries have no Resources directory. Paths retains
-            // sibling/managed resolution; doctor still validates actual runtimes.
+            // Portable packages retain sibling/managed runtime resolution;
+            // doctor still validates the selected runtime files.
             app.manage(Host::new(paths, setup_log.clone()));
             setup_log.event("INFO", "DESKTOP", "phase=host-managed");
             updates::schedule(app.handle());

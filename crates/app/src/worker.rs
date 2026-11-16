@@ -240,7 +240,4 @@ unsafe extern "C" {
     #[cfg(target_os = "linux")]
     #[link_name = "__errno_location"]
     fn errno() -> *mut i32;
-    #[cfg(target_os = "macos")]
-    #[link_name = "__error"]
-    fn errno() -> *mut i32;
 }

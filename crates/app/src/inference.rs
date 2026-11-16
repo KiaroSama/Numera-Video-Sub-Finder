@@ -69,13 +69,7 @@ impl Ocr {
                     .into(),
             ));
         }
-        let runtime = paths.runtime(if cfg!(windows) {
-            "onnxruntime.dll"
-        } else if cfg!(target_os = "macos") {
-            "libonnxruntime.dylib"
-        } else {
-            "libonnxruntime.so"
-        })?;
+        let runtime = paths.runtime(crate::runtimes::ONNX_LIBRARY)?;
         let library = paths.library(crate::runtimes::ONNX_LIBRARY)?;
         static ENV: std::sync::OnceLock<Environment> = std::sync::OnceLock::new();
         static INIT: std::sync::Mutex<()> = std::sync::Mutex::new(());

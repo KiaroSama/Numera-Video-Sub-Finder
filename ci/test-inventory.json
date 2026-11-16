@@ -2,7 +2,7 @@
   "schema": 1,
   "scope": "desktop-only",
   "families": [
-    {"id":"CT-01","area":"static/build/contracts","command":"cargo fmt; cargo clippy; five native builds","state":"AUTHORED"},
+    {"id":"CT-01","area":"static/build/contracts","command":"cargo fmt; cargo clippy; four native builds","state":"AUTHORED"},
     {"id":"CT-02","area":"portable core","command":"cargo test -p nvsf-core","state":"AUTHORED"},
     {"id":"CT-03","area":"native FFmpeg","command":"cargo test -p nvsf-media-native; xtask maintenance; xtask smoke; xtask gui","state":"PARTIAL"},
     {"id":"CT-04","area":"timing/tracking","command":"core contracts/stress; actual CLI smoke","state":"PARTIAL"},
@@ -12,7 +12,7 @@
     {"id":"CT-08","area":"Miri","command":null,"state":"NOT_RUN"},
     {"id":"CT-09","area":"sanitizers/FFI","command":"scripts/ci/media-sanitizer.ps1 (Linux x64 actual Rust caller/cdylib/std ASan and LSan)","state":"PARTIAL","reason":"Exact a029d49/run40798353437 passes actual Rust caller/cdylib/std admission; release FFmpeg/C closure uninstrumented, no UBSan or cross-platform qualification; replacement-source result still required"},
     {"id":"CT-10","area":"real multilingual OCR","command":"xtask multilingual (synthetic integration only)","state":"BLOCKED","reason":"Independent real fa/ja annotations absent; representative synthetic script witnesses do not qualify real quality"},
-    {"id":"CT-11","area":"model admission/precision","command":"app model_contract and session_contract tests; five-target native OCR/model witnesses","state":"PARTIAL","reason":"Pinned metadata hash/profile/ordered vocabulary and actual ORT session signature gates authored; replacement-source hosted execution required. No upstream pixel parity, real-language accuracy or physical precision qualification inferred"},
+    {"id":"CT-11","area":"model admission/precision","command":"app model_contract and session_contract tests; four-target native OCR/model witnesses","state":"PARTIAL","reason":"Pinned metadata hash/profile/ordered vocabulary and actual ORT session signature gates authored; replacement-source hosted execution required. No upstream pixel parity, real-language accuracy or physical precision qualification inferred"},
     {"id":"CT-12","area":"physical accelerators","command":null,"state":"BLOCKED","reason":"No authorized hardware runner"},
     {"id":"CT-13","area":"provider policy","command":"strict required CPU failure; native initialization","state":"PARTIAL"},
     {"id":"CT-14","area":"performance","command":"CLI benchmark","state":"PARTIAL"},

@@ -21,14 +21,9 @@ pub fn icons(output: &Path) -> Result<()> {
         }
         records.push(json!({"file":file,"width":size,"height":size,"transparent_corners":true,"opaque_center":true}));
     }
-    for (file, magic) in [
-        ("icon.ico", &b"\0\0\x01\0"[..]),
-        ("icon.icns", &b"icns"[..]),
-    ] {
-        let bytes = std::fs::read(root.join(file))?;
-        if !bytes.starts_with(magic) || bytes.len() < 32 {
-            return Err(format!("Native icon container missing or malformed: {file}").into());
-        }
+    let bytes = std::fs::read(root.join("icon.ico"))?;
+    if !bytes.starts_with(b"\0\0\x01\0") || bytes.len() < 32 {
+        return Err("Native icon container missing or malformed: icon.ico".into());
     }
     std::fs::write(
         output.join("native-logo.json"),
@@ -162,8 +157,8 @@ pub fn layout(driver: &Driver, output: &Path) -> Result<()> {
             output.join("control-focus-before.json"),
             serde_json::to_vec_pretty(&before)?,
         )?;
-        // Showing a macOS window does not activate its application; session selection
-        // in the pinned driver is logical only. Activate through the native CI surface.
+        // Session selection in the pinned driver is logical only.
+        // Focus the owned window through the native CI surface.
         let native = driver.request(
             reqwest::Method::POST,
             "/execute/async",
@@ -177,7 +172,7 @@ pub fn layout(driver: &Driver, output: &Path) -> Result<()> {
         )?;
         settled?;
         // Native parent focus is diagnostic: an embedded WebView can hold input focus
-        // while its parent reports false, including after successful macOS activation.
+        // while its parent reports false.
         if !native["focused"].is_boolean()
             || native["error"].is_string()
             || focused["documentFocused"] != true

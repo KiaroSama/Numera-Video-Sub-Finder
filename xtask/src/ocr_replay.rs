@@ -170,13 +170,7 @@ pub fn capture(
     if started.elapsed().as_secs() >= 90 {
         return Err("Replay exceeded shared OCR deadline".into());
     }
-    let runtime = paths.runtime(if cfg!(windows) {
-        "onnxruntime.dll"
-    } else if cfg!(target_os = "macos") {
-        "libonnxruntime.dylib"
-    } else {
-        "libonnxruntime.so"
-    })?;
+    let runtime = paths.runtime(nvsf_app::runtimes::ONNX_LIBRARY)?;
     report["runtime_sha256"] = json!(crate::fixture::sha(&runtime)?);
     if started.elapsed().as_secs() >= 90 {
         return Err("Replay exceeded shared OCR deadline".into());
@@ -201,7 +195,7 @@ mod tests {
         for bytes in [
             b"[]".as_slice(),
             br#"[{"cat":"Node","args":{}}]"#,
-            br#"[{"cat":"Node","args":{"provider":"CPUExecutionProvider"}},{"cat":"Node","args":{"provider":"CoreMLExecutionProvider"}}]"#,
+            br#"[{"cat":"Node","args":{"provider":"CPUExecutionProvider"}},{"cat":"Node","args":{"provider":"CUDAExecutionProvider"}}]"#,
             b"{}",
         ] {
             assert!(cpu_profile(bytes).is_err());

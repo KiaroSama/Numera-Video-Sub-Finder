@@ -50,7 +50,7 @@ fn profiling_flag_is_opt_in_and_preserves_the_requested_directory() {
 #[test]
 fn profiling_arguments_require_absolute_normal_paths_and_explicit_onnx_device_language() {
     let root = absolute_directory();
-    for device in ["cpu", "cuda", "directml", "coreml"] {
+    for device in ["cpu", "cuda", "directml"] {
         assert!(validate_options(&root, device, "en").is_ok());
     }
     for path in [

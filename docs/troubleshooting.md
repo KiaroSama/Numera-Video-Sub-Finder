@@ -1,6 +1,8 @@
 # Troubleshooting
 
-- Missing native runtime: keep the target-correct GUI, nvsf worker, runtimes and resources together. Reinstall/unpack the matching package; do not copy a DLL/dylib from another architecture or silently use developer PATH.
+The four supported 64-bit targets are Windows x64, Windows ARM64, Linux x64 and Linux ARM64.
+
+- Missing native runtime: keep the target-correct GUI, nvsf worker, runtimes and resources together. Reinstall/unpack the matching package; do not copy a DLL/shared library from another architecture or silently use developer PATH.
 - Missing/corrupt model: use explicit model installation or import the exact checksummed ONNX file. Existing working bytes stay intact after integrity failure. Do not delete a partial download until its useful recovery status is known.
 - Resume mismatch: checkpoint source/config/model hashes must match. Current configuration includes absolute paths/data root; a moved source/checkpoint needs explicit compatible regrant and is not silently rewritten. Preserve checkpoints and corrected project data.
 - Output exists or unavailable: choose another destination or explicitly approve replacement. Each output is atomically published; multi-track files cannot be a single cross-file filesystem transaction. The combined file is published last.
@@ -16,6 +18,6 @@ The new Authenticode path is implemented pending hosted verification. Its pinned
 
 No trust-store import or timestamp is used. The certificate expires2027-11-03, after which its untimestamped signatures stop validating. Do not import it into Trusted Root/Trusted People, disable SmartScreen or alter security policy to suppress warnings. Vendor DLLs retain their original bytes/signatures. If a final icon-resource check fails, rebuild the correct artifact in hosted CI; an adjacent logo or cached shell thumbnail is not a repair.
 
-macOS signing/notarization remains blocked without Apple credentials, so platform policy may reject unsigned development artifacts. Do not disable Gatekeeper/signature checks or remove quarantine to conceal that gap. Linux packages remain unsigned at the native level; separate updater signatures are unchanged and do not imply native package trust. Installer/signing/IME/device limitations stay open in [validation](validation.md), not hidden behind a successful compile.
+Linux packages remain unsigned at the native level; separate updater signatures are unchanged and do not imply native package trust. Installer/signing/IME/device limitations stay open in [validation](validation.md), not hidden behind a successful compile.
 
 GPU profiling and the separate Windows x64 CUDA variant are still in progress. Physical RTX 4070 Ti qualification has not executed and will use only exact CI-built artifacts. Provider availability or a selected GPU label is not proof of node placement or speedup; retain the strict failure rather than inventing a fallback success.

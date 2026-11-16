@@ -56,7 +56,6 @@ fn provider(requested: &str) -> Result<&'static str> {
         "cpu" => Ok("CPUExecutionProvider"),
         "cuda" => Ok("CUDAExecutionProvider"),
         "directml" => Ok("DmlExecutionProvider"),
-        "coreml" => Ok("CoreMLExecutionProvider"),
         _ => Err(fail("Unsupported profile execution provider")),
     }
 }
@@ -94,10 +93,7 @@ pub fn parse(bytes: &[u8], requested: &str, strict: bool) -> Result<Placement> {
             .filter(|name| {
                 matches!(
                     *name,
-                    "CPUExecutionProvider"
-                        | "CUDAExecutionProvider"
-                        | "DmlExecutionProvider"
-                        | "CoreMLExecutionProvider"
+                    "CPUExecutionProvider" | "CUDAExecutionProvider" | "DmlExecutionProvider"
                 )
             })
             .ok_or_else(|| fail("Execution profile node has no admitted provider"))?;

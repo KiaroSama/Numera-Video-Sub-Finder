@@ -35,8 +35,6 @@ pub fn read(paths: &Paths, recorded: &str) -> Result<Vec<u8>> {
     {
         use std::os::unix::fs::OpenOptionsExt;
         // Native O_NONBLOCK | O_NOFOLLOW: refuse swapped links and never wait on a FIFO open.
-        #[cfg(target_os = "macos")]
-        const FLAGS: i32 = 0x4 | 0x100;
         #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
         const FLAGS: i32 = 2048 | 0x20000;
         #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
@@ -156,8 +154,6 @@ mod tests {
             assert!(read(&paths, path.to_str().unwrap()).is_err());
             std::fs::remove_file(&path).unwrap();
             use std::os::unix::ffi::OsStrExt;
-            #[cfg(target_os = "macos")]
-            type Mode = u16;
             #[cfg(target_os = "linux")]
             type Mode = u32;
             unsafe extern "C" {

@@ -90,7 +90,7 @@ function Stop-BuildLogObserver($State) {
                 $State.job.Terminate()
             } elseif ($State.group) {
                 $cleanup=[Diagnostics.Stopwatch]::StartNew()
-                [int[]]$pendingErrors=if ($IsMacOS) { @(0,1) } else { @(0) }
+                [int[]]$pendingErrors=@(0)
                 $groupError=[NvsfCiOwnership]::SignalGroup($State.group,0)
                 if ($groupError -eq 0) {
                     $groupError=[NvsfCiOwnership]::SignalGroup($State.group,9)

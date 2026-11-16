@@ -1,7 +1,7 @@
 #requires -Version 7.4
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)][ValidatePattern('^(linux|windows|macos)-(x64|arm64)$')][string]$TargetId,
+    [Parameter(Mandatory)][ValidatePattern('^(linux|windows)-(x64|arm64)$')][string]$TargetId,
     [string]$PackagesRoot = '.ci-work/packages'
 )
 $ErrorActionPreference = 'Stop'
@@ -17,7 +17,7 @@ $targets = [IO.File]::ReadAllText((Join-Path $root 'ci/targets.json'), $utf8) | 
 $matches = @($targets.targets | Where-Object id -EQ $TargetId)
 if ($targets.scope -ne 'desktop-only' -or $matches.Count -ne 1) { throw 'Unknown desktop bundle target.' }
 $target = $matches[0]
-$os = if ($IsWindows) { 'windows' } elseif ($IsMacOS) { 'macos' } else { 'linux' }
+$os = if ($IsWindows) { 'windows' } elseif ($IsLinux) { 'linux' } else { throw 'Only Windows and Linux hosted runners are supported.' }
 $arch = [Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture.ToString().ToLowerInvariant()
 if ($target.os -ne $os -or $target.arch -ne $arch) { throw 'Bundling requires the matching native OS and process architecture.' }
 if ($env:GITHUB_SHA -notmatch '^[a-f0-9]{40}$') { throw 'A real Actions source SHA is required.' }
@@ -361,9 +361,6 @@ try {
         $signer = (Join-Path $PSScriptRoot 'windows-signing.ps1').Replace('\', '/')
         $bundleConfig.bundle.windows = @{ signCommand = @{ cmd = 'pwsh'; args = @('-NoLogo', '-NoProfile', '-NonInteractive', '-File', $signer, '-Path', '%1') } }
     }
-    if ($IsMacOS) {
-        $bundleConfig.bundle.macOS = @{ files = @{ 'MacOS/runtimes' = (Join-Path $payload 'runtimes').Replace('\', '/'); 'MacOS/data/models' = (Join-Path $payload 'data/models').Replace('\', '/') } }
-    }
     $configPath = Join-Path $stage 'bundle.conf.json'
     [IO.File]::WriteAllText($configPath, ($bundleConfig | ConvertTo-Json -Depth 12), $utf8)
     $formats = @($target.package_formats)
@@ -377,89 +374,69 @@ try {
     $checks = 2
     $formatProofs = [Collections.Generic.List[string]]::new()
     foreach ($format in $nativeFormats) {
-        $dir = if ($format -eq 'app') { 'macos' } else { $format }
-        $pattern = switch ($format) { 'nsis' { '*-setup.exe' } 'app' { '*.app' } 'dmg' { '*.dmg' } 'appimage' { '*.AppImage' } 'deb' { '*.deb' } 'rpm' { '*.rpm' } }
+        $dir = $format
+        $pattern = switch ($format) { 'nsis' { '*-setup.exe' } 'appimage' { '*.AppImage' } 'deb' { '*.deb' } 'rpm' { '*.rpm' } }
         $found = @(Get-ChildItem -LiteralPath (Join-Path $release "bundle/$dir") -Filter $pattern)
         if ($found.Count -ne 1) { throw "Required format is missing or ambiguous: $format" }
         $dest = Join-Path $output $found[0].Name
         if (Test-Path -LiteralPath $dest) { throw 'Refusing to overwrite an existing bundle output.' }
-        if ($format -eq 'app') {
-            Invoke-BundleCommand -Name copy-app -Executable ditto -Arguments @($found[0].FullName, $dest) -Wall 180 -Idle 120
-            $contents = Join-Path $dest 'Contents'
-            foreach ($member in @('Info.plist', 'MacOS/numera-video-sub-finder', 'MacOS/nvsf', 'Resources/icon.icns')) {
-                if (-not [IO.File]::Exists((Join-Path $contents $member))) { throw "Application bundle is missing: $member" }
-            }
-            Assert-InstalledPayload (Join-Path $contents 'Resources') (Join-Path $contents 'MacOS')
-            $sourceIcns = Join-Path $desktop 'icons/icon.icns'
-            Assert-FileBytes (Join-Path $contents 'Resources/icon.icns') (Get-FileHash -LiteralPath $sourceIcns).Hash.ToLowerInvariant() ([IO.FileInfo]::new($sourceIcns)).Length
-            if ([IO.File]::ReadAllText((Join-Path $contents 'Info.plist'), $utf8) -notmatch '<key>CFBundleIconFile</key>\s*<string>icon(\.icns)?</string>') { throw 'Application bundle does not reference the approved icon.' }
-            $iconChecks.Add('app-icns')
-            foreach ($branch in @('runtimes', 'data/models')) {
-                foreach ($entry in @(Get-Inventory (Join-Path $payload $branch) $payload)) { Assert-FileBytes (Join-Path $contents "MacOS/$($entry.file)") $entry.sha256 $entry.bytes }
-            }
-            $formatProofs.Add('app: GUI/CLI/resource byte inventory and expected native layout')
-            $appFiles = @(Get-Inventory $dest $packages)
-            $artifacts.Add(@{ format = $format; path = [IO.Path]::GetRelativePath($packages, $dest).Replace('\', '/'); files = $appFiles; bytes = ($appFiles | Measure-Object bytes -Sum).Sum })
-        } else {
-            Copy-BundleFile $found[0].FullName $dest
+        Copy-BundleFile $found[0].FullName $dest
+        switch ($format) {
+            'nsis' { Assert-Header $dest '4D5A' }
+            'appimage' { Assert-Header $dest '7F454C46'; Assert-Header $dest '414902' 8 }
+            'deb' { Assert-Header $dest '213C617263683E0A' }
+            'rpm' { Assert-Header $dest 'EDABEEDB' }
+        }
+        if ($format -in @('nsis', 'deb', 'rpm', 'appimage')) {
+            $inspect = Join-Path $stage "inspect-$format"
+            [IO.Directory]::CreateDirectory($inspect) | Out-Null
             switch ($format) {
-                'nsis' { Assert-Header $dest '4D5A' }
-                'appimage' { Assert-Header $dest '7F454C46'; Assert-Header $dest '414902' 8 }
-                'deb' { Assert-Header $dest '213C617263683E0A' }
-                'rpm' { Assert-Header $dest 'EDABEEDB' }
-                'dmg' { Invoke-BundleCommand -Name dmg-integrity -Executable hdiutil -Arguments @('verify', $dest) -Wall 180 -Idle 120 }
-            }
-            if ($format -in @('nsis', 'deb', 'rpm', 'appimage')) {
-                $inspect = Join-Path $stage "inspect-$format"
-                [IO.Directory]::CreateDirectory($inspect) | Out-Null
-                switch ($format) {
-                    'nsis' {
-                        Invoke-BundleCommand -Name nsis-content -Executable 7z -Arguments @('x', '-y', '-mmt2', '-sccUTF-8', "-o$inspect", $dest) -Wall 180 -Idle 90
-                        $workers = @(Get-ChildItem -LiteralPath $inspect -Filter 'nvsf.exe' -File -Recurse)
-                        if ($workers.Count -ne 1) { throw 'NSIS extraction does not contain exactly one native CLI.' }
-                        $binDir = $workers[0].DirectoryName
-                        Assert-InstalledPayload $binDir $binDir -Format nsis
-                        $installedGui = Join-Path $binDir 'numera-video-sub-finder.exe'
-                        Assert-ExecutableIcon $installedGui 'nsis-gui'
-                        Assert-ExecutableIcon (Join-Path $binDir 'nvsf.exe') 'nsis-cli'
-                        Assert-ExecutableIcon $dest 'nsis-setup'
-                        $signatures.Add(@{ role = 'nsis-gui'; evidence = (Assert-DevelopmentSignature -Path $installedGui -CertificateSha256 $NvsfSignerSha256) })
-                        $signatures.Add(@{ role = 'nsis-setup'; evidence = (Assert-DevelopmentSignature -Path $dest -CertificateSha256 $NvsfSignerSha256) })
-                        $ledgerRoles = @(Get-ChildItem -LiteralPath $signingLedger -Filter '*.json' | Where-Object Name -NotLike 'uninstaller-icons-*' | ForEach-Object { ([IO.File]::ReadAllText($_.FullName, $utf8) | ConvertFrom-Json).role })
-                        foreach ($required in @('gui', 'uninstaller', 'setup')) { if ($required -notin $ledgerRoles) { throw "Custom signer did not observe required role: $required" } }
-                        if (-not @(Get-ChildItem -LiteralPath $signingLedger -Filter 'uninstaller-icons-*.json').Count) { throw 'Uninstaller icon evidence is missing.' }
-                        $signatures.Add(@{ role = 'nsis-uninstaller'; evidence = 'signed, pinned-verified and icon-checked by the allowlisted custom signer before NSIS embedding' })
-                    }
-                    'deb' {
-                        Invoke-BundleCommand -Name deb-content -Executable dpkg-deb -Arguments @('-X', $dest, $inspect) -Wall 180 -Idle 90
-                        Assert-InstalledPayload (Join-Path $inspect "usr/lib/$($config.productName)") (Join-Path $inspect 'usr/bin') -Format $format
-                        Assert-LinuxIcons $inspect $format
-                    }
-                    'rpm' {
-                        Invoke-BundleCommand -Name rpm-content -Executable bsdtar -Arguments @('-xvf', $dest, '-C', $inspect, '--no-same-owner') -Wall 180 -Idle 90
-                        Assert-InstalledPayload (Join-Path $inspect "usr/lib/$($config.productName)") (Join-Path $inspect 'usr/bin') -Format $format
-                        Assert-LinuxIcons $inspect $format
-                    }
-                    'appimage' {
-                        Invoke-BundleCommand -Name appimage-mode -Executable chmod -Arguments @('755', $dest)
-                        Invoke-BundleCommand -Name appimage-content -Executable $dest -Arguments @('--appimage-extract') -WorkingDirectory $inspect -Wall 180 -Idle 90
-                        $appDir = Join-Path $inspect 'squashfs-root'
-                        Assert-InstalledPayload (Join-Path $appDir "usr/lib/$($config.productName)") (Join-Path $appDir 'usr/bin') -Format appimage -LoaderPatched
-                        Assert-LinuxIcons $appDir 'appimage'
-                        $dirIcon = Get-Item -LiteralPath (Join-Path $appDir '.DirIcon') -Force -ErrorAction SilentlyContinue
-                        if ($null -eq $dirIcon) { throw 'AppImage is missing its embedded .DirIcon.' }
-                        # linuxdeploy may link .DirIcon; follow to the final target and keep it inside the AppDir.
-                        $dirIconFile = if ($dirIcon.LinkType) { $dirIcon.ResolveLinkTarget($true) } else { $dirIcon }
-                        if ($null -eq $dirIconFile -or -not $dirIconFile.Exists -or $dirIconFile.PSIsContainer -or -not $dirIconFile.FullName.StartsWith([IO.Path]::GetFullPath($appDir) + [IO.Path]::DirectorySeparatorChar, [StringComparison]::Ordinal)) { throw 'AppImage .DirIcon does not resolve to a file inside the AppDir.' }
-                        $approvedHashes = @(Get-ChildItem -LiteralPath (Join-Path $desktop 'icons') -Filter '*.png' -File | ForEach-Object { (Get-FileHash -LiteralPath $_.FullName).Hash })
-                        if ((Get-FileHash -LiteralPath $dirIconFile.FullName).Hash -notin $approvedHashes) { throw 'AppImage .DirIcon differs from the approved logo.' }
-                        $iconChecks.Add('appimage-diricon')
-                    }
+                'nsis' {
+                    Invoke-BundleCommand -Name nsis-content -Executable 7z -Arguments @('x', '-y', '-mmt2', '-sccUTF-8', "-o$inspect", $dest) -Wall 180 -Idle 90
+                    $workers = @(Get-ChildItem -LiteralPath $inspect -Filter 'nvsf.exe' -File -Recurse)
+                    if ($workers.Count -ne 1) { throw 'NSIS extraction does not contain exactly one native CLI.' }
+                    $binDir = $workers[0].DirectoryName
+                    Assert-InstalledPayload $binDir $binDir -Format nsis
+                    $installedGui = Join-Path $binDir 'numera-video-sub-finder.exe'
+                    Assert-ExecutableIcon $installedGui 'nsis-gui'
+                    Assert-ExecutableIcon (Join-Path $binDir 'nvsf.exe') 'nsis-cli'
+                    Assert-ExecutableIcon $dest 'nsis-setup'
+                    $signatures.Add(@{ role = 'nsis-gui'; evidence = (Assert-DevelopmentSignature -Path $installedGui -CertificateSha256 $NvsfSignerSha256) })
+                    $signatures.Add(@{ role = 'nsis-setup'; evidence = (Assert-DevelopmentSignature -Path $dest -CertificateSha256 $NvsfSignerSha256) })
+                    $ledgerRoles = @(Get-ChildItem -LiteralPath $signingLedger -Filter '*.json' | Where-Object Name -NotLike 'uninstaller-icons-*' | ForEach-Object { ([IO.File]::ReadAllText($_.FullName, $utf8) | ConvertFrom-Json).role })
+                    foreach ($required in @('gui', 'uninstaller', 'setup')) { if ($required -notin $ledgerRoles) { throw "Custom signer did not observe required role: $required" } }
+                    if (-not @(Get-ChildItem -LiteralPath $signingLedger -Filter 'uninstaller-icons-*.json').Count) { throw 'Uninstaller icon evidence is missing.' }
+                    $signatures.Add(@{ role = 'nsis-uninstaller'; evidence = 'signed, pinned-verified and icon-checked by the allowlisted custom signer before NSIS embedding' })
+                }
+                'deb' {
+                    Invoke-BundleCommand -Name deb-content -Executable dpkg-deb -Arguments @('-X', $dest, $inspect) -Wall 180 -Idle 90
+                    Assert-InstalledPayload (Join-Path $inspect "usr/lib/$($config.productName)") (Join-Path $inspect 'usr/bin') -Format $format
+                    Assert-LinuxIcons $inspect $format
+                }
+                'rpm' {
+                    Invoke-BundleCommand -Name rpm-content -Executable bsdtar -Arguments @('-xvf', $dest, '-C', $inspect, '--no-same-owner') -Wall 180 -Idle 90
+                    Assert-InstalledPayload (Join-Path $inspect "usr/lib/$($config.productName)") (Join-Path $inspect 'usr/bin') -Format $format
+                    Assert-LinuxIcons $inspect $format
+                }
+                'appimage' {
+                    Invoke-BundleCommand -Name appimage-mode -Executable chmod -Arguments @('755', $dest)
+                    Invoke-BundleCommand -Name appimage-content -Executable $dest -Arguments @('--appimage-extract') -WorkingDirectory $inspect -Wall 180 -Idle 90
+                    $appDir = Join-Path $inspect 'squashfs-root'
+                    Assert-InstalledPayload (Join-Path $appDir "usr/lib/$($config.productName)") (Join-Path $appDir 'usr/bin') -Format appimage -LoaderPatched
+                    Assert-LinuxIcons $appDir 'appimage'
+                    $dirIcon = Get-Item -LiteralPath (Join-Path $appDir '.DirIcon') -Force -ErrorAction SilentlyContinue
+                    if ($null -eq $dirIcon) { throw 'AppImage is missing its embedded .DirIcon.' }
+                    # linuxdeploy may link .DirIcon; follow to the final target and keep it inside the AppDir.
+                    $dirIconFile = if ($dirIcon.LinkType) { $dirIcon.ResolveLinkTarget($true) } else { $dirIcon }
+                    if ($null -eq $dirIconFile -or -not $dirIconFile.Exists -or $dirIconFile.PSIsContainer -or -not $dirIconFile.FullName.StartsWith([IO.Path]::GetFullPath($appDir) + [IO.Path]::DirectorySeparatorChar, [StringComparison]::Ordinal)) { throw 'AppImage .DirIcon does not resolve to a file inside the AppDir.' }
+                    $approvedHashes = @(Get-ChildItem -LiteralPath (Join-Path $desktop 'icons') -Filter '*.png' -File | ForEach-Object { (Get-FileHash -LiteralPath $_.FullName).Hash })
+                    if ((Get-FileHash -LiteralPath $dirIconFile.FullName).Hash -notin $approvedHashes) { throw 'AppImage .DirIcon differs from the approved logo.' }
+                    $iconChecks.Add('appimage-diricon')
                 }
             }
-            $formatProofs.Add($(if ($format -eq 'dmg') { 'dmg: native hdiutil checksum verification; mounted content/install not claimed' } else { "${format}: actual package header/decompressed content checks; installed execution not claimed" }))
-            $artifacts.Add(@{ format = $format; file = [IO.Path]::GetRelativePath($packages, $dest).Replace('\', '/'); bytes = ([IO.FileInfo]::new($dest)).Length; sha256 = (Get-FileHash -LiteralPath $dest).Hash.ToLowerInvariant() })
         }
+        $formatProofs.Add("${format}: actual package header/decompressed content checks; installed execution not claimed")
+        $artifacts.Add(@{ format = $format; file = [IO.Path]::GetRelativePath($packages, $dest).Replace('\', '/'); bytes = ([IO.FileInfo]::new($dest)).Length; sha256 = (Get-FileHash -LiteralPath $dest).Hash.ToLowerInvariant() })
         $checks++
     }
     if ($IsWindows) {
@@ -498,8 +475,8 @@ try {
     } else {
         $archive = Join-Path $output "$baseName.tar.gz"
         if (Test-Path -LiteralPath $archive) { throw 'Refusing to overwrite native archive.' }
-        $archiveParent = if ($IsMacOS) { $output } else { $packages }
-        $archiveName = if ($IsMacOS) { "$($config.productName).app" } else { $baseName }
+        $archiveParent = $packages
+        $archiveName = $baseName
         Invoke-BundleCommand -Name native-archive -Executable tar -Arguments @('-czvf', $archive, '-C', $archiveParent, $archiveName) -Wall 300 -Idle 120
         Assert-Header $archive '1F8B'
         $inspect = Join-Path $stage 'inspect-tar'
@@ -514,7 +491,7 @@ try {
     }
     $actualFormats = @($artifacts | ForEach-Object { $_.format } | Sort-Object)
     if (Compare-Object ($formats | Sort-Object) $actualFormats) { throw 'Required format inventory is incomplete.' }
-    $report = @{ schema = 1; source_sha = $env:GITHUB_SHA; target = $TargetId; passed = $true; tests = $checks; failed = 0; skipped = 0; status = 'development-unqualified'; signing = $signingLabel; signatures = @($signatures.ToArray()); icon_checks = @($iconChecks.ToArray()); formats = @($artifacts.ToArray()); files = @(Get-Inventory $output $packages); proof = @('same-source input byte inventory', 'real native bundler exit and all required format outputs', 'portable ZIP/tar decompressed byte integrity') + @($formatProofs.ToArray()); qualification = @{ installer_lifecycle = 'NOT_RUN'; installed_launch = 'NOT_RUN'; physical_gpu = 'NOT_RUN'; production_signing = $(if ($windowsSigning) { 'development-self-signed-untrusted-root-untimestamped' } else { 'NOT_RUN' }); apple_signing = $(if ($IsMacOS) { 'BLOCKED_NO_APPLE_CREDENTIALS' } else { 'NOT_APPLICABLE' }); linuxdeploy_modified_elf_byte_parity = 'NOT_CLAIMED'; microsoft_redistribution_rights = $(if ($IsWindows) { 'NOT_VALIDATED' } else { 'NOT_APPLICABLE' }); windows_webview = $(if ($IsWindows) { 'system WebView2 required for portable GUI; NSIS bootstrap may require internet' } else { 'NOT_APPLICABLE' }); compression_thread_count = 'NOT_MEASURED'; linux_bundler_cpu_capacity = $(if ($IsLinux) { $bundleCpuList } else { 'NOT_APPLICABLE' }) } }
+    $report = @{ schema = 1; source_sha = $env:GITHUB_SHA; target = $TargetId; passed = $true; tests = $checks; failed = 0; skipped = 0; status = 'development-unqualified'; signing = $signingLabel; signatures = @($signatures.ToArray()); icon_checks = @($iconChecks.ToArray()); formats = @($artifacts.ToArray()); files = @(Get-Inventory $output $packages); proof = @('same-source input byte inventory', 'real native bundler exit and all required format outputs', 'portable ZIP/tar decompressed byte integrity') + @($formatProofs.ToArray()); qualification = @{ installer_lifecycle = 'NOT_RUN'; installed_launch = 'NOT_RUN'; physical_gpu = 'NOT_RUN'; production_signing = $(if ($windowsSigning) { 'development-self-signed-untrusted-root-untimestamped' } else { 'NOT_RUN' }); linuxdeploy_modified_elf_byte_parity = 'NOT_CLAIMED'; microsoft_redistribution_rights = $(if ($IsWindows) { 'NOT_VALIDATED' } else { 'NOT_APPLICABLE' }); windows_webview = $(if ($IsWindows) { 'system WebView2 required for portable GUI; NSIS bootstrap may require internet' } else { 'NOT_APPLICABLE' }); compression_thread_count = 'NOT_MEASURED'; linux_bundler_cpu_capacity = $(if ($IsLinux) { $bundleCpuList } else { 'NOT_APPLICABLE' }) } }
     $reports = Join-Path $packages 'reports'
     [IO.Directory]::CreateDirectory($reports) | Out-Null
     $reportPath = Join-Path $reports "$TargetId-bundles.json"
