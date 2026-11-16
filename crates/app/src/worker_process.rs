@@ -95,10 +95,8 @@ impl Process {
             let mut info = Info([0; 32]);
             #[cfg(target_os = "linux")]
             const OPTIONS: i32 = 4 | 1 | 0x01000000;
-            #[cfg(target_os = "macos")]
-            const OPTIONS: i32 = 4 | 1 | 0x20;
             // SAFETY: supported native64 siginfo_t fits this aligned 128-byte storage;
-            // waitid writes synchronously and its first c_int is si_signo on both OSes.
+            // waitid writes synchronously and its first c_int is si_signo on Linux.
             let status = unsafe { waitid(1, self.id(), info.0.as_mut_ptr().cast(), OPTIONS) };
             if status != 0 {
                 return Err(std::io::Error::last_os_error().into());

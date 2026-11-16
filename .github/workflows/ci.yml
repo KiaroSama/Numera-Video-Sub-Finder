@@ -23,7 +23,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - id: targets
         run: |
-          jq -e '.schema == 1 and (.targets | length == 5) and .scope == "desktop-only"' ci/targets.json
+          jq -e '.schema == 1 and (.targets | length == 4) and .scope == "desktop-only"' ci/targets.json
           echo "matrix=$(jq -c '{include: .targets | map({id, runner, target, os, arch, triplet})}' ci/targets.json)" >> "$GITHUB_OUTPUT"
   native:
     needs: inventory
@@ -39,7 +39,6 @@ jobs:
       OMP_NUM_THREADS: 2
       NVSF_TARGET_ID: ${{ matrix.id }}
       ORT_SKIP_DOWNLOAD: 1
-      MACOSX_DEPLOYMENT_TARGET: '13.0'
     defaults:
       run:
         shell: pwsh
@@ -77,10 +76,6 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential pkg-config clang libclang-dev nasm cmake ninja-build autoconf autoconf-archive automake libtool libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf libfuse2 libarchive-tools gdb dbus-daemon xvfb xdotool wmctrl openbox fonts-dejavu-core fonts-noto-core fonts-noto-cjk
           if ($LASTEXITCODE -ne 0) { throw 'Linux prerequisites failed' }
-      - name: macOS native prerequisites
-        if: matrix.os == 'macos'
-        timeout-minutes: 20
-        run: ./scripts/ci/guard.ps1 -Name macos-prerequisites -WallSeconds 900 -IdleSeconds 180 -Executable brew -Arguments @('install','nasm','autoconf','autoconf-archive','automake','libtool','pkg-config')
       - name: Restore verified native dependency cache
         id: native-cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -109,38 +104,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Committed dependency lock mismatch' }
       - name: Native resource tools and approved icons
         run: |
-          if ($IsMacOS -and '${{ matrix.arch }}' -eq 'x64') {
-            $stage = Join-Path $env:GITHUB_WORKSPACE ('.ci-work/tools/tauri-stage-' + [Guid]::NewGuid().ToString('N'))
-            New-Item -ItemType Directory -Path $stage -ErrorAction Stop | Out-Null
-            $archive = Join-Path $stage 'tauri.zip'
-            ./scripts/ci/guard.ps1 -Name tauri-download -WallSeconds 210 -IdleSeconds 60 -Executable curl -Arguments @('--fail','--location','--proto','=https','--proto-redir','=https','--connect-timeout','30','--max-time','180','--output',$archive,'https://github.com/tauri-apps/tauri/releases/download/tauri-cli-v2.12.4/cargo-tauri-x86_64-apple-darwin.zip')
-            if ($LASTEXITCODE -ne 0) { throw 'Official Intel Tauri CLI download failed' }
-            if ((Get-Item -LiteralPath $archive).Length -ne 8391002 -or (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant() -ne '164d184c0e50800dcae7bb31f0815066ebd27efc3e3bb73117974bcd2e982192') { throw 'Official Tauri CLI archive identity mismatch' }
-            $zip = [IO.Compression.ZipFile]::OpenRead($archive)
-            try {
-              $expected = @('LICENSE-APACHE-2.0','LICENSE-MIT','README.md','cargo-tauri')
-              if ($zip.Entries.Count -ne $expected.Count) { throw 'Unexpected Tauri CLI archive inventory' }
-              foreach ($entry in $zip.Entries) {
-                if ($entry.FullName -notin $expected -or $entry.Length -lt 1 -or $entry.Length -gt 33554432 -or (($entry.ExternalAttributes -shr 16) -band 0xF000) -eq 0xA000) { throw 'Unsafe Tauri CLI archive entry' }
-              }
-              if (@($zip.Entries.FullName | Sort-Object -Unique).Count -ne $expected.Count) { throw 'Duplicate Tauri CLI archive entry' }
-            } finally { $zip.Dispose() }
-            $unpack = Join-Path $stage 'unpacked'
-            Expand-Archive -LiteralPath $archive -DestinationPath $unpack -ErrorAction Stop
-            $tool = Join-Path $unpack 'cargo-tauri'
-            ./scripts/ci/guard.ps1 -Name tauri-architecture -WallSeconds 15 -IdleSeconds 5 -Executable lipo -Arguments @('-archs',$tool) -CaptureStdoutPath (Join-Path $stage 'architecture.txt')
-            if ($LASTEXITCODE -ne 0 -or [IO.File]::ReadAllText((Join-Path $stage 'architecture.txt'),[Text.Encoding]::UTF8).Trim() -ne 'x86_64') { throw 'Tauri CLI is not the required native Intel binary' }
-            $bin = Join-Path $env:GITHUB_WORKSPACE '.ci-work/tools/bin/cargo-tauri'
-            Copy-Item -LiteralPath $tool -Destination $bin -ErrorAction Stop
-            ./scripts/ci/guard.ps1 -Name tauri-mode -WallSeconds 15 -IdleSeconds 5 -Executable chmod -Arguments @('755',$bin)
-            if ($LASTEXITCODE -ne 0) { throw 'Tauri CLI executable mode setup failed' }
-          } else {
-            ./scripts/ci/guard.ps1 -Name tauri-install -WallSeconds 1200 -IdleSeconds 180 -Executable cargo -Arguments @('install','tauri-cli','--version','2.12.4','--locked','--root','.ci-work/tools')
-            if ($LASTEXITCODE -ne 0) { throw 'Tauri CLI installation failed' }
-          }
+          ./scripts/ci/guard.ps1 -Name tauri-install -WallSeconds 1200 -IdleSeconds 180 -Executable cargo -Arguments @('install','tauri-cli','--version','2.12.4','--locked','--root','.ci-work/tools')
+          if ($LASTEXITCODE -ne 0) { throw 'Tauri CLI installation failed' }
           ./scripts/ci/guard.ps1 -Name tauri-version -WallSeconds 15 -IdleSeconds 5 -Executable "$env:GITHUB_WORKSPACE/.ci-work/tools/bin/cargo-tauri$(if ($IsWindows) { '.exe' } else { '' })" -Arguments @('--version') -CaptureStdoutPath "$env:GITHUB_WORKSPACE/.ci-work/tools/tauri-version.txt"
           if ($LASTEXITCODE -ne 0 -or [IO.File]::ReadAllText("$env:GITHUB_WORKSPACE/.ci-work/tools/tauri-version.txt",[Text.Encoding]::UTF8).Trim() -ne 'tauri-cli 2.12.4') { throw 'Installed Tauri CLI version mismatch' }
-          if ($IsMacOS -and '${{ matrix.arch }}' -eq 'x64') { Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction Stop }
           "$env:GITHUB_WORKSPACE/.ci-work/tools/bin" >> $env:GITHUB_PATH
           $env:PATH = "$env:GITHUB_WORKSPACE/.ci-work/tools/bin$([IO.Path]::PathSeparator)$env:PATH"
           ./scripts/ci/guard.ps1 -Name native-icons -WallSeconds 60 -IdleSeconds 20 -Executable cargo -Arguments @('tauri','icon','assets/logo.svg','--output','crates/desktop/icons')
@@ -160,11 +127,7 @@ jobs:
         run: |
           ./scripts/ci/guard.ps1 -Name native-release -WallSeconds 1800 -IdleSeconds 360 -Executable cargo -Arguments @('build','--locked','--release','-p','nvsf-cli','-p','xtask')
           if ($LASTEXITCODE -ne 0) { throw 'Native CLI build failed' }
-          if ($IsMacOS -and '${{ matrix.arch }}' -eq 'x64') {
-            ./scripts/ci/trunk-intel.ps1
-          } else {
-            ./scripts/ci/guard.ps1 -Name trunk-install -WallSeconds 1200 -IdleSeconds 180 -Executable cargo -Arguments @('install','trunk','--version','0.22.1','--locked','--config','profile.release.lto="off"','--config','profile.release.codegen-units=16','--root','.ci-work/tools')
-          }
+          ./scripts/ci/guard.ps1 -Name trunk-install -WallSeconds 1200 -IdleSeconds 180 -Executable cargo -Arguments @('install','trunk','--version','0.22.1','--locked','--config','profile.release.lto="off"','--config','profile.release.codegen-units=16','--root','.ci-work/tools')
           if ($LASTEXITCODE -ne 0) { throw 'Trunk installation failed' }
           "$env:GITHUB_WORKSPACE/.ci-work/tools/bin" >> $env:GITHUB_PATH
           $env:PATH = "$env:GITHUB_WORKSPACE/.ci-work/tools/bin$([IO.Path]::PathSeparator)$env:PATH"
@@ -174,7 +137,7 @@ jobs:
         env:
           CARGO_TARGET_DIR: ${{ github.workspace }}/.ci-work/cuda-target
         run: |
-          # Opt-in GPU variant only; the five CPU baseline products and their caches stay unchanged.
+          # Opt-in GPU variant only; the four CPU baseline products and their caches stay unchanged.
           $lock = [IO.File]::ReadAllText('ci/gpu-lock.json', [Text.Encoding]::UTF8) | ConvertFrom-Json
           $pin = $lock.variants.'windows-x64-cuda12'
           if ($lock.schema -ne 1 -or $pin.url -notmatch '^https://github\.com/microsoft/onnxruntime/releases/download/') { throw 'GPU runtime pin is invalid' }
@@ -376,14 +339,6 @@ jobs:
             .ci-work/ocr-evidence/
           if-no-files-found: error
           retention-days: 7
-      - name: Finalize owned native crash evidence
-        if: ${{ failure() && matrix.os == 'macos' }}
-        timeout-minutes: 1
-        run: |
-          if (Test-Path -LiteralPath '.ci-work/gui-evidence/gui-failure.json') {
-            ./scripts/ci/guard.ps1 -Name gui-fault-final -WallSeconds 5 -IdleSeconds 3 -Executable "$env:GITHUB_WORKSPACE/target/release/xtask" -Arguments @('gui-fault','--output','.ci-work/gui-evidence')
-            if ($LASTEXITCODE -ne 0) { throw 'Owned native crash evidence remains inconclusive; original GUI failure retained' }
-          }
       - name: Preserve failed diagnostics
         if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -431,7 +386,7 @@ jobs:
           pattern: desktop-*-${{ github.sha }}
           path: .ci-work/downloaded
           merge-multiple: true
-      - name: Check five exact-source reports
+      - name: Check four exact-source reports
         run: |
           for id in $(jq -r '.targets[].id' ci/targets.json); do
             jq -e --arg sha "$GITHUB_SHA" --arg id "$id" '.schema==1 and .source_sha==$sha and .target==$id and (.files|length>=2) and all(.files[]; (.sha256|test("^[a-f0-9]{64}$")))' ".ci-work/downloaded/packages/reports/$id.json"

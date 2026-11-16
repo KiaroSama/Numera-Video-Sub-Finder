@@ -193,9 +193,7 @@ pub fn smoke(cli: &Path, fixture_dir: &Path, data_root: &Path) -> Result<(), Box
 }
 
 pub fn clean_runtime_environment(command: &mut Command) {
-    command
-        .env_remove("LD_LIBRARY_PATH")
-        .env_remove("DYLD_LIBRARY_PATH");
+    command.env_remove("LD_LIBRARY_PATH");
     let paths = std::env::var_os("PATH").unwrap_or_default();
     let clean: Vec<_> = std::env::split_paths(&paths)
         .filter(|p| {
@@ -248,12 +246,11 @@ mod tests {
         let mut command = Command::new("relocated/gui");
         command
             .env("LD_LIBRARY_PATH", "checkout/runtimes")
-            .env("DYLD_LIBRARY_PATH", "checkout/runtimes")
             .env("NVSF_RUNTIME_ROOT", "checkout/runtimes")
             .env("NVSF_DATA_ROOT", "isolated-data");
         clean_runtime_environment(&mut command);
         let environment: std::collections::BTreeMap<_, _> = command.get_envs().collect();
-        for key in ["LD_LIBRARY_PATH", "DYLD_LIBRARY_PATH", "NVSF_RUNTIME_ROOT"] {
+        for key in ["LD_LIBRARY_PATH", "NVSF_RUNTIME_ROOT"] {
             assert_eq!(environment.get(std::ffi::OsStr::new(key)), Some(&None));
         }
         assert_eq!(

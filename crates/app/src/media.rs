@@ -10,8 +10,6 @@ use std::{
 
 pub const NATIVE_LIBRARY_NAME: &str = if cfg!(windows) {
     "nvsf_media_native.dll"
-} else if cfg!(target_os = "macos") {
-    "libnvsf_media_native.dylib"
 } else {
     "libnvsf_media_native.so"
 };

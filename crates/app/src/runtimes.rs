@@ -35,15 +35,11 @@ pub struct Diagnostic {
 
 pub const TESSERACT_LIBRARY: &str = if cfg!(windows) {
     "tesseract55.dll"
-} else if cfg!(target_os = "macos") {
-    "libtesseract.dylib"
 } else {
     "libtesseract.so"
 };
 pub const ONNX_LIBRARY: &str = if cfg!(windows) {
     "onnxruntime.dll"
-} else if cfg!(target_os = "macos") {
-    "libonnxruntime.dylib"
 } else {
     "libonnxruntime.so"
 };

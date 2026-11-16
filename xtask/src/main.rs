@@ -4,8 +4,6 @@ mod extraction_witness;
 mod fixture;
 mod gate;
 mod gui;
-#[cfg(any(target_os = "macos", test))]
-mod gui_debugger;
 mod gui_failure;
 mod gui_visual;
 mod maintenance;
@@ -15,8 +13,6 @@ mod ocr_replay;
 mod package;
 mod process;
 mod production;
-#[cfg(target_os = "macos")]
-mod production_macos;
 #[cfg(any(target_os = "linux", test))]
 mod production_supervisor;
 mod quality;
@@ -90,24 +86,12 @@ enum Cmd {
         #[arg(long)]
         output: PathBuf,
     },
-    GuiFault {
-        #[arg(long)]
-        output: PathBuf,
-    },
     #[cfg(target_os = "linux")]
     ProductionParent {
         #[arg(long)]
         gui: PathBuf,
         #[arg(long)]
         state: PathBuf,
-    },
-    #[cfg(target_os = "macos")]
-    #[command(hide = true)]
-    ProductionMac {
-        #[arg(long)]
-        pid: u32,
-        #[arg(long)]
-        close: bool,
     },
     Production {
         #[arg(long)]
@@ -264,11 +248,8 @@ fn run() -> Result<(), Box<dyn Error>> {
             output,
         } => visual_witness::verify(&fixture_dir, &data_root, &output),
         Cmd::WorkerFaults { output } => worker_faults::verify(&output),
-        Cmd::GuiFault { output } => gui_failure::finalize(&output),
         #[cfg(target_os = "linux")]
         Cmd::ProductionParent { gui, state } => production_supervisor::run(&gui, &state),
-        #[cfg(target_os = "macos")]
-        Cmd::ProductionMac { pid, close } => production_macos::run(pid, close),
         Cmd::Production {
             gui,
             data_root,

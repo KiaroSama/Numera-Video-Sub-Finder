@@ -276,12 +276,6 @@ os.execv(exe, [exe, *argv])
         }
         if ($stopwatch.Elapsed.TotalSeconds -ge $WallSeconds -or ($stopwatch.Elapsed.TotalSeconds - $lastProgress) -ge $IdleSeconds) {
             $code = 124
-            if ($IsMacOS -and $group) {
-                try {
-                    . (Join-Path $PSScriptRoot 'process-snapshot.ps1')
-                    Write-MacProcessSnapshot $group ($logPath + '.processes.json')
-                } catch { Write-GuardLog 'WARNING' 'Owned timeout process snapshot unavailable; original timeout and cleanup retained.' }
-            }
             throw "Command exceeded wall/idle deadline: name=$Name pid=$ownedPid."
         }
         # Bounded scheduling wait, never a progress heartbeat that resets the idle deadline.
@@ -310,7 +304,7 @@ os.execv(exe, [exe, *argv])
                 }
             } elseif ($group) {
                 $cleanup = [Diagnostics.Stopwatch]::StartNew()
-                [int[]]$pendingErrors = if ($IsMacOS) { @(0,1) } else { @(0) }
+                [int[]]$pendingErrors = @(0)
                 $groupError = [NvsfCiOwnership]::SignalGroup($group, 0)
                 if ($groupError -in $pendingErrors) {
                     if ($groupError -eq 0) {

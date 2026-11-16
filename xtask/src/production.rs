@@ -1,6 +1,6 @@
 //! Hosted-only verification of the uninstrumented, packaged GUI using native window lifecycle.
 use serde_json::json;
-#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[cfg(target_os = "linux")]
 use std::io::Read;
 use std::{
     error::Error,
@@ -488,7 +488,7 @@ pub(crate) fn stack_arguments(pid: u32) -> Vec<String> {
     .collect()
 }
 
-#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[cfg(target_os = "linux")]
 fn helper(program: &str, args: &[String], root: &Path, index: &mut u64) -> Result<(bool, String)> {
     *index += 1;
     let capture = root.join(format!("native-helper-{index}.log"));
@@ -574,39 +574,6 @@ fn native_close(pid: u32, window: &str, root: &Path, index: &mut u64) -> Result<
     } else {
         Err(format!("Native EWMH close failed; window manager required: {text}").into())
     }
-}
-
-#[cfg(target_os = "macos")]
-fn mac_observe(pid: u32, close: bool, root: &Path, index: &mut u64) -> Result<String> {
-    let executable = std::env::current_exe()?;
-    let executable = executable
-        .to_str()
-        .ok_or("Native observer path is not UTF-8")?;
-    let mut args = vec!["production-mac".into(), "--pid".into(), pid.to_string()];
-    if close {
-        args.push("--close".into());
-    }
-    let (success, text) = helper(executable, &args, root, index)?;
-    if !success {
-        return Err(format!("macOS owned native observer failed: {text}").into());
-    }
-    Ok(text)
-}
-#[cfg(target_os = "macos")]
-fn native_window(pid: u32, root: &Path, index: &mut u64) -> Result<Option<String>> {
-    let text = mac_observe(pid, false, root, index)?;
-    if !text.trim().is_empty() && text.trim() != TITLE {
-        return Err("macOS observer returned an unexpected window identity".into());
-    }
-    Ok((text.trim() == TITLE).then(|| TITLE.into()))
-}
-#[cfg(target_os = "macos")]
-fn native_close(pid: u32, _window: &str, root: &Path, index: &mut u64) -> Result<()> {
-    let text = mac_observe(pid, true, root, index)?;
-    if !text.trim().is_empty() {
-        return Err("macOS native close returned an unexpected response".into());
-    }
-    Ok(())
 }
 
 #[cfg(windows)]

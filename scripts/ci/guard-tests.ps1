@@ -21,14 +21,6 @@ function Invoke-Contract([string]$Name, [string]$Code, [string]$Capture, [string
     & $guard @parameters
 }
 try {
-    . (Join-Path $PSScriptRoot 'process-snapshot.ps1')
-    $snapshot = @(ConvertFrom-MacProcessSnapshot "42 1 42 S 0:01.23 128 cargo`n43 42 42 R+ 1:20.00 4096 rustc" 42)
-    if ($snapshot.Count -ne 2 -or $snapshot[1].executable -cne 'rustc' -or $snapshot[1].rss_kib -ne 4096 -or $snapshot[1].cpu_time -cne '1:20.00') { throw 'Owned process snapshot lost literal resource evidence.' }
-    foreach ($invalid in @('43 42 99 R 0:00.00 1 rustc','43 42 42 R 0:00.00 1 /private/rustc','43 42 42 R 0:00.00 1 rustc --private-argument','malformed')) {
-        $rejected = $false
-        try { $null = ConvertFrom-MacProcessSnapshot $invalid 42 } catch { $rejected = $true }
-        if (-not $rejected) { throw 'Process snapshot accepted an unrelated group or private text.' }
-    }
     # Duplicate real executable directories reproduce multi-candidate PATH resolution without mocks.
     $env:PATH = (Split-Path $pwsh -Parent) + [IO.Path]::PathSeparator + $originalPath
     if (-not $IsWindows) {
@@ -185,21 +177,12 @@ while([DateTime]::UtcNow -lt $deadline) {
 }
 exit 0
 '@
-    $failureLog = $null
     try { Invoke-Contract 'frozen-progress' $frozenCode (Join-Path $work 'frozen.stdout') $progress }
     catch {
         $rejected = $_.Exception.Message -match 'exit_code=124'
-        if ($_.Exception.Message -match ' log=(.+)$') { $failureLog = $Matches[1] }
     }
     if (-not $rejected) { throw 'Existing unchanged build logs incorrectly reset the idle deadline.' }
     if ($global:NvsfBuildLogAssembly.path -cne $assemblyBefore -or $global:NvsfBuildLogAssembly.hash -cne $assemblyHashBefore) { throw 'Guard recompiled or replaced its source-bound observer assembly.' }
-    if ($IsMacOS) {
-        if (-not $failureLog) { throw 'Frozen timeout did not retain its exact log identity.' }
-        $snapshotPath = $failureLog + '.processes.json'
-        $record = [IO.File]::ReadAllText($snapshotPath,$utf8) | ConvertFrom-Json
-        if ($record.schema -ne 1 -or $record.owned_group -le 1 -or @($record.processes).Count -eq 0) { throw 'Actual macOS timeout snapshot is missing or empty.' }
-        if (@($record.processes | Where-Object { $_.pgid -ne $record.owned_group }).Count -ne 0 -or @($record.processes | Where-Object { $_.pid -eq $record.owned_group -and $_.executable -eq 'pwsh' }).Count -ne 1) { throw 'Actual macOS snapshot did not identify the owned root/group.' }
-    }
     $stalledCode = @'
 for($i=0;$i -lt 12;$i++) {
     [Console]::WriteLine("stream-progress=$i")

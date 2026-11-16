@@ -89,27 +89,6 @@
         "sha256": "ef6206fa8d6975878d93a97035d280240ce5764c126a7430e5427e18923316d5",
         "bytes": 85806468
       }
-    },
-    {
-      "id": "macos-x64",
-      "runner": "macos-15-intel",
-      "target": "x86_64-apple-darwin",
-      "os": "macos",
-      "arch": "x64",
-      "triplet": "x64-osx",
-      "package_formats": [
-        "app",
-        "dmg",
-        "tar.gz"
-      ],
-      "minimum_os": "macOS13",
-      "features": [],
-      "required": true,
-      "release_status": "development-unqualified",
-      "ort": {
-        "source_build": true,
-        "source_tag": "v1.31.0"
-      }
     }
   ]
 }

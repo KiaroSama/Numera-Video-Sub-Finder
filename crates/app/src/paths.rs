@@ -37,12 +37,6 @@ impl Paths {
                 if sibling.is_dir() {
                     return sibling;
                 }
-                #[cfg(target_os = "macos")]
-                if dir.file_name().is_some_and(|n| n == "MacOS")
-                    && let Some(contents) = dir.parent()
-                {
-                    return contents.join("Resources/runtimes");
-                }
                 #[cfg(target_os = "linux")]
                 if let Some(prefix) = dir.parent() {
                     let installed = prefix.join("lib/Numera Video Sub Finder/runtimes");

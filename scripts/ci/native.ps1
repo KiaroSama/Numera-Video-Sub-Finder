@@ -1,7 +1,7 @@
 #requires -Version 7.4
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)][ValidatePattern('^(linux|windows|macos)-(x64|arm64)$')][string]$TargetId,
+    [Parameter(Mandatory)][ValidatePattern('^(linux|windows)-(x64|arm64)$')][string]$TargetId,
     [switch]$StageMediaAdapter
 )
 $ErrorActionPreference = 'Stop'
@@ -15,7 +15,7 @@ $targets = Get-Content -LiteralPath (Join-Path $root 'ci/targets.json') -Raw -En
 $matches = @($targets.targets | Where-Object id -eq $TargetId)
 if ($targets.scope -ne 'desktop-only' -or $matches.Count -ne 1) { throw 'Unknown or ambiguous required desktop target.' }
 $target = $matches[0]
-$hostOs = if ($IsWindows) { 'windows' } elseif ($IsMacOS) { 'macos' } else { 'linux' }
+$hostOs = if ($IsWindows) { 'windows' } elseif ($IsLinux) { 'linux' } else { throw 'Only Windows and Linux hosted runners are supported.' }
 $hostArch = [Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture.ToString().ToLowerInvariant()
 if ($target.os -ne $hostOs -or $target.arch -ne $hostArch) { throw 'Native target does not match the hosted runner process OS/architecture.' }
 $work = Join-Path $root '.ci-work/native'
@@ -84,10 +84,6 @@ function Get-PeMachine([string]$Path) {
         return $reader.ReadUInt16()
     } finally { $reader.Dispose() }
 }
-function Get-MacDependencies([string]$Path) {
-    $output = Invoke-NativeCommand -Name 'macho-dependencies' -Executable 'otool' -Arguments @('-L', $Path) -Capture
-    return @($output -split "`n" | Select-Object -Skip 1 | ForEach-Object { ($_ -split '\s+\(')[0].Trim() } | Where-Object { $_ })
-}
 function Repair-NativeClosure([string[]]$Seeds) {
     if ($IsWindows) {
         $vsRoot = [Environment]::GetEnvironmentVariable('VCPKG_VISUAL_STUDIO_PATH', 'Process')
@@ -135,38 +131,6 @@ function Repair-NativeClosure([string[]]$Seeds) {
         . (Join-Path $PSScriptRoot 'notices.ps1')
         $null = Copy-VisualStudioNotices (Join-Path $vsRoot 'Licenses') (Join-Path $notices 'microsoft/visual-studio')
         [IO.File]::WriteAllText((Join-Path $notices 'microsoft/visual-cpp-runtime.txt'), "Imported release CRT members staged from Visual Studio Redist/MSVC/$($versions[0].Name)/$($target.arch). Redistribution remains subject to Microsoft Software License Terms and licensed-user rights, not qualified by hosted execution.`nhttps://learn.microsoft.com/en-us/cpp/windows/redistributing-visual-cpp-files`n", $utf8)
-    } elseif ($IsMacOS) {
-        $queue = [Collections.Generic.Queue[string]]::new()
-        if (-not $Seeds) { $Seeds = @(Get-ChildItem -LiteralPath $runtimes -File -Filter '*.dylib' | ForEach-Object FullName) }
-        foreach ($path in $Seeds) { $queue.Enqueue($path) }
-        $visited = [Collections.Generic.HashSet[string]]::new()
-        while ($queue.Count -gt 0) {
-            if ($visited.Count -gt 512) { throw 'Native Mach-O dependency closure exceeded its file bound.' }
-            $library = $queue.Dequeue()
-            if (-not $visited.Add($library)) { continue }
-            foreach ($dep in Get-MacDependencies $library) {
-                if ($dep.StartsWith('/usr/lib/') -or $dep.StartsWith('/System/Library/')) { continue }
-                $basename = [IO.Path]::GetFileName($dep)
-                $packaged = Join-Path $runtimes $basename
-                if (-not (Test-Path -LiteralPath $packaged -PathType Leaf)) {
-                    $local = Join-Path (Join-Path $prefix 'lib') $basename
-                    if (-not (Test-Path -LiteralPath $local -PathType Leaf)) { throw "Unresolved non-system Mach-O dependency: $dep." }
-                    Copy-NativeFile (Get-Item -LiteralPath $local) $runtimes
-                    $queue.Enqueue($packaged)
-                }
-                if ($basename -ne [IO.Path]::GetFileName($library)) {
-                    Invoke-NativeCommand -Name 'macho-relocate' -Executable 'install_name_tool' -Arguments @('-change', $dep, "@loader_path/$basename", $library)
-                }
-            }
-            Invoke-NativeCommand -Name 'macho-id' -Executable 'install_name_tool' -Arguments @('-id', ("@rpath/" + [IO.Path]::GetFileName($library)), $library)
-            Invoke-NativeCommand -Name 'macho-adhoc-sign' -Executable 'codesign' -Arguments @('--force', '--sign', '-', $library)
-            $identity = Invoke-NativeCommand -Name 'macho-id-verify' -Executable 'otool' -Arguments @('-D', $library) -Capture
-            if (($identity -split "`n" | Select-Object -Last 1).Trim() -ne ("@rpath/" + [IO.Path]::GetFileName($library))) { throw 'Relocated Mach-O install identity verification failed.' }
-            foreach ($dep in Get-MacDependencies $library) {
-                if ($dep.StartsWith('/usr/lib/') -or $dep.StartsWith('/System/Library/') -or $dep -eq ("@rpath/" + [IO.Path]::GetFileName($library))) { continue }
-                if ($dep -ne ("@loader_path/" + [IO.Path]::GetFileName($dep)) -or -not (Test-Path -LiteralPath (Join-Path $runtimes ([IO.Path]::GetFileName($dep))) -PathType Leaf)) { throw "Unrelocated Mach-O dependency: $dep." }
-            }
-        }
     } elseif ($IsLinux) {
         if (-not $Seeds) { $Seeds = @(Get-ChildItem -LiteralPath $runtimes -File | Where-Object Name -match '\.so(\.[0-9.]+)?$' | ForEach-Object FullName) }
         foreach ($library in $Seeds) {
@@ -188,7 +152,6 @@ function Write-NativeInventory([hashtable]$Record) {
     [IO.File]::WriteAllText((Join-Path $notices 'native-inventory.json'), (ConvertTo-Json $Record -Depth 8), $utf8)
 }
 $baseline = 'e456309491fd875487bf02b8a0dca76c1b1b00cc'
-$ortCommit = '402979ac1bef89dcd55add41eaa7277c407599eb'
 try {
     $nativeLock = [IO.File]::ReadAllText((Join-Path $root 'ci/native-lock.json'), $utf8) | ConvertFrom-Json
     $tesseractPort = [IO.File]::ReadAllText((Join-Path $root 'ci/ports/tesseract/vcpkg.json'), $utf8) | ConvertFrom-Json
@@ -217,15 +180,12 @@ try {
             if ($prior.PSIsContainer -or ($prior.Attributes -band [IO.FileAttributes]::ReparsePoint) -or $prior.Length -ne $entry.bytes -or (Get-FileHash -LiteralPath $prior.FullName -Algorithm SHA256).Hash.ToLowerInvariant() -ne $entry.sha256) { throw 'Provisioned native bytes changed before media adapter admission.' }
         }
         if (@(Get-ChildItem -LiteralPath $runtimes -Force).Count -ne $known.Count) { throw 'Uninventoried native files exist before media adapter admission.' }
-        $name = if ($IsWindows) { 'nvsf_media_native.dll' } elseif ($IsMacOS) { 'libnvsf_media_native.dylib' } else { 'libnvsf_media_native.so' }
+        $name = if ($IsWindows) { 'nvsf_media_native.dll' } else { 'libnvsf_media_native.so' }
         $artifact = Join-Path $root "target/$($target.target)/release/$name"
         $file = Get-Item -LiteralPath $artifact -ErrorAction Stop
         if ($file.PSIsContainer -or $file.Length -eq 0 -or ($file.Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Media adapter must be a nonempty regular same-target Cargo release artifact.' }
         if ($IsWindows) {
             if ((Get-PeMachine $artifact) -ne $(if ($target.arch -eq 'arm64') { 0xAA64 } else { 0x8664 })) { throw 'Media adapter PE architecture mismatch.' }
-        } elseif ($IsMacOS) {
-            $arch = Invoke-NativeCommand -Name 'media-architecture' -Executable 'lipo' -Arguments @('-archs', $artifact) -Wall 15 -Idle 5 -Capture
-            if ($arch -ne $(if ($target.arch -eq 'arm64') { 'arm64' } else { 'x86_64' })) { throw 'Media adapter Mach-O architecture mismatch.' }
         } else {
             $reader = [IO.BinaryReader]::new([IO.File]::OpenRead($artifact))
             try {
@@ -239,7 +199,7 @@ try {
         Copy-NativeFile $file $runtimes
         Repair-NativeClosure @($destination)
         $tool = if ($IsWindows) { 'dumpbin' } else { 'nm' }
-        $arguments = if ($IsWindows) { @('/NOLOGO', '/EXPORTS', $destination) } elseif ($IsMacOS) { @('-gU', $destination) } else { @('-D', '--defined-only', $destination) }
+        $arguments = if ($IsWindows) { @('/NOLOGO', '/EXPORTS', $destination) } else { @('-D', '--defined-only', $destination) }
         $exports = Invoke-NativeCommand -Name 'media-exports' -Executable $tool -Arguments $arguments -Wall 30 -Idle 10 -Capture
         foreach ($symbol in @('nvsf_media_probe_v1', 'nvsf_media_decode_v1', 'nvsf_media_health_v1')) {
             if ($exports -notmatch "(?m)\b_?$symbol\s*$") { throw "Required native media C ABI export absent: $symbol." }
@@ -395,15 +355,14 @@ foreach (`$name in @('PATH','INCLUDE','LIB','LIBPATH','VCINSTALLDIR','VCToolsIns
         if (-not $pkgConfig) { throw 'Native pkg-config/pkgconf prerequisite is unavailable after vcpkg bootstrap.' }
         $pkgPath = if ($pkgConfig -is [Management.Automation.CommandInfo]) { $pkgConfig.Source } else { $pkgConfig.FullName }
         Export-CiEnvironment 'PKG_CONFIG' $pkgPath
-        if ($IsMacOS) { Export-CiEnvironment 'LIBRARY_PATH' (Join-Path $prefix 'lib') }
         if ($IsLinux) {
             # FFmpeg uses explicit FFMPEG_DIR; the GTK/WebKit stack must resolve its matching system font libraries.
             Invoke-NativeCommand -Name 'system-gui-libraries' -Executable $pkgPath -Arguments @('--libs', '--cflags', 'gdk-3.0', 'gtk+-3.0', 'webkit2gtk-4.1') -Wall 30 -Idle 15
             Write-NativeLog 'INFO' 'System GTK/WebKit dependency closure verified; owned media headers/libraries remain explicit.'
         }
-        Export-CiEnvironment $(if ($IsMacOS) { 'DYLD_LIBRARY_PATH' } else { 'LD_LIBRARY_PATH' }) ("$runtimes$separator" + (Join-Path $prefix 'lib'))
+        Export-CiEnvironment 'LD_LIBRARY_PATH' ("$runtimes$separator" + (Join-Path $prefix 'lib'))
         $rustKey = 'CARGO_TARGET_' + $target.target.Replace('-', '_').ToUpperInvariant() + '_RUSTFLAGS'
-        $rpath = if ($IsMacOS) { '-C link-arg=-Wl,-rpath,@executable_path/runtimes' } else { '-C link-arg=-Wl,-rpath,$ORIGIN/runtimes' }
+        $rpath = '-C link-arg=-Wl,-rpath,$ORIGIN/runtimes'
         $previous = [Environment]::GetEnvironmentVariable($rustKey)
         Export-CiEnvironment $rustKey ("$previous $rpath".Trim())
     }
@@ -416,48 +375,30 @@ foreach (`$name in @('PATH','INCLUDE','LIB','LIBPATH','VCINSTALLDIR','VCToolsIns
         }
     }
     $nativeDir = Join-Path $prefix $(if ($IsWindows) { 'bin' } else { 'lib' })
-    foreach ($file in Get-ChildItem -LiteralPath $nativeDir -File | Where-Object { $_.Name -match '\.dll$|\.dylib$|\.so(\.[0-9.]+)?$' }) { Copy-NativeFile $file $runtimes }
-    $ortSourceBuild = $target.ort.PSObject.Properties.Name -contains 'source_build' -and $target.ort.source_build
-    if ($ortSourceBuild) {
-        if (-not $IsMacOS -or $target.arch -ne 'x64' -or $target.ort.source_tag -ne 'v1.31.0') { throw 'Unexpected ONNX source-build target.' }
-        $source = Join-Path $work 'ort-source'
-        if (-not (Test-Path -LiteralPath $source)) {
-            [IO.Directory]::CreateDirectory($source) | Out-Null
-            Invoke-NativeCommand -Name 'ort-init' -Executable 'git' -Arguments @('-C', $source, 'init')
-            Invoke-NativeCommand -Name 'ort-fetch' -Executable 'git' -Arguments @('-C', $source, 'fetch', '--depth=1', 'https://github.com/microsoft/onnxruntime.git', $ortCommit) -Wall 900 -Idle 180
-            Invoke-NativeCommand -Name 'ort-checkout' -Executable 'git' -Arguments @('-C', $source, 'checkout', '--detach', 'FETCH_HEAD')
-        }
-        $actual = Invoke-NativeCommand -Name 'ort-revision' -Executable 'git' -Arguments @('-C', $source, 'rev-parse', 'HEAD') -Capture
-        if ($actual -ne $ortCommit -or (Get-Content -LiteralPath (Join-Path $source 'VERSION_NUMBER') -Raw -Encoding utf8).Trim() -ne '1.31.0') { throw 'ONNX source revision/version verification failed.' }
-        Invoke-NativeCommand -Name 'ort-submodules' -Executable 'git' -Arguments @('-C', $source, 'submodule', 'update', '--init', '--recursive', '--jobs', '2') -Wall 900 -Idle 180
-        Invoke-NativeCommand -Name 'ort-source-build' -Executable 'python3' -Arguments @((Join-Path $source 'tools/ci_build/build.py'), '--build_dir', (Join-Path $work 'ort-build'), '--config', 'Release', '--update', '--build', '--build_shared_lib', '--parallel', '2', '--skip_tests', '--skip_submodule_sync', '--no_telemetry', '--cmake_extra_defines', 'CMAKE_OSX_DEPLOYMENT_TARGET=13.0', 'CMAKE_OSX_ARCHITECTURES=x86_64', 'onnxruntime_BUILD_UNIT_TESTS=OFF') -Wall 6600 -Idle 900
-        $ortRoot = $source
-        $ortLibraries = @(Get-ChildItem -LiteralPath (Join-Path $work 'ort-build/Release') -File | Where-Object Name -match '^libonnxruntime.*\.dylib$')
+    foreach ($file in Get-ChildItem -LiteralPath $nativeDir -File | Where-Object { $_.Name -match '\.dll$|\.so(\.[0-9.]+)?$' }) { Copy-NativeFile $file $runtimes }
+    $uri = [Uri]$target.ort.url
+    if ($uri.Scheme -ne 'https' -or $uri.Host -ne 'github.com' -or -not $uri.AbsolutePath.StartsWith('/microsoft/onnxruntime/releases/download/v1.31.0/')) { throw 'ONNX download is not an approved pinned official release URL.' }
+    if ($target.ort.sha256 -notmatch '^[0-9a-f]{64}$' -or $target.ort.bytes -lt 1) { throw 'ONNX archive pin is invalid.' }
+    $archive = Join-Path $work ([IO.Path]::GetFileName($uri.AbsolutePath))
+    Invoke-NativeCommand -Name 'ort-download' -Executable 'curl' -Arguments @('--fail', '--location', '--proto', '=https', '--proto-redir', '=https', '--connect-timeout', '30', '--max-time', '180', '--output', $archive, $uri.AbsoluteUri) -Wall 210 -Idle 60
+    if ((Get-Item -LiteralPath $archive).Length -ne $target.ort.bytes -or (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant() -ne $target.ort.sha256) { throw 'ONNX archive bytes/SHA256 mismatch.' }
+    $unpack = Join-Path $work 'ort-unpack'
+    [IO.Directory]::CreateDirectory($unpack) | Out-Null
+    if ($archive.EndsWith('.zip')) {
+        $zip = [IO.Compression.ZipFile]::OpenRead($archive)
+        try {
+            foreach ($entry in $zip.Entries) { if ($entry.FullName -match '(^[/\\]|(^|[/\\])\.\.([/\\]|$)|^[A-Za-z]:)') { throw 'ONNX archive contains an unsafe entry path.' } }
+        } finally { $zip.Dispose() }
+        Expand-Archive -LiteralPath $archive -DestinationPath $unpack -Force
     } else {
-        $uri = [Uri]$target.ort.url
-        if ($uri.Scheme -ne 'https' -or $uri.Host -ne 'github.com' -or -not $uri.AbsolutePath.StartsWith('/microsoft/onnxruntime/releases/download/v1.31.0/')) { throw 'ONNX download is not an approved pinned official release URL.' }
-        if ($target.ort.sha256 -notmatch '^[0-9a-f]{64}$' -or $target.ort.bytes -lt 1) { throw 'ONNX archive pin is invalid.' }
-        $archive = Join-Path $work ([IO.Path]::GetFileName($uri.AbsolutePath))
-        Invoke-NativeCommand -Name 'ort-download' -Executable 'curl' -Arguments @('--fail', '--location', '--proto', '=https', '--proto-redir', '=https', '--connect-timeout', '30', '--max-time', '180', '--output', $archive, $uri.AbsoluteUri) -Wall 210 -Idle 60
-        if ((Get-Item -LiteralPath $archive).Length -ne $target.ort.bytes -or (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant() -ne $target.ort.sha256) { throw 'ONNX archive bytes/SHA256 mismatch.' }
-        $unpack = Join-Path $work 'ort-unpack'
-        [IO.Directory]::CreateDirectory($unpack) | Out-Null
-        if ($archive.EndsWith('.zip')) {
-            $zip = [IO.Compression.ZipFile]::OpenRead($archive)
-            try {
-                foreach ($entry in $zip.Entries) { if ($entry.FullName -match '(^[/\\]|(^|[/\\])\.\.([/\\]|$)|^[A-Za-z]:)') { throw 'ONNX archive contains an unsafe entry path.' } }
-            } finally { $zip.Dispose() }
-            Expand-Archive -LiteralPath $archive -DestinationPath $unpack -Force
-        } else {
-            $entries = Invoke-NativeCommand -Name 'ort-archive-list' -Executable 'tar' -Arguments @('-tzf', $archive) -Capture
-            foreach ($entry in $entries -split "`n") { if ($entry -match '(^/|(^|/)\.\.(/|$)|^[A-Za-z]:)') { throw 'ONNX archive contains an unsafe entry path.' } }
-            Invoke-NativeCommand -Name 'ort-extract' -Executable 'tar' -Arguments @('-xzf', $archive, '-C', $unpack)
-        }
-        $ortRoots = @(Get-ChildItem -LiteralPath $unpack -Directory)
-        if ($ortRoots.Count -ne 1) { throw 'ONNX archive must contain one exact release root.' }
-        $ortRoot = $ortRoots[0].FullName
-        $ortLibraries = @(Get-ChildItem -LiteralPath (Join-Path $ortRoot 'lib') -File | Where-Object Name -match '^onnxruntime.*\.dll$|^libonnxruntime.*\.(so|dylib)(\.[0-9.]+)?$')
+        $entries = Invoke-NativeCommand -Name 'ort-archive-list' -Executable 'tar' -Arguments @('-tzf', $archive) -Capture
+        foreach ($entry in $entries -split "`n") { if ($entry -match '(^/|(^|/)\.\.(/|$)|^[A-Za-z]:)') { throw 'ONNX archive contains an unsafe entry path.' } }
+        Invoke-NativeCommand -Name 'ort-extract' -Executable 'tar' -Arguments @('-xzf', $archive, '-C', $unpack)
     }
+    $ortRoots = @(Get-ChildItem -LiteralPath $unpack -Directory)
+    if ($ortRoots.Count -ne 1) { throw 'ONNX archive must contain one exact release root.' }
+    $ortRoot = $ortRoots[0].FullName
+    $ortLibraries = @(Get-ChildItem -LiteralPath (Join-Path $ortRoot 'lib') -File | Where-Object Name -match '^onnxruntime.*\.dll$|^libonnxruntime.*\.so(\.[0-9.]+)?$')
     if ($ortLibraries.Count -eq 0) { throw 'ONNX provision produced no actual native shared library.' }
     foreach ($file in $ortLibraries) { Copy-NativeFile $file $runtimes }
     $ortNotices = Join-Path $notices 'onnxruntime'
@@ -473,11 +414,11 @@ foreach (`$name in @('PATH','INCLUDE','LIB','LIBPATH','VCINSTALLDIR','VCToolsIns
             if ((Get-PeMachine $file.FullName) -ne $machine) { throw "Native runtime architecture mismatch: $($file.Name)." }
         }
     } else {
-        $extension = if ($IsMacOS) { 'dylib' } else { 'so' }
+        $extension = 'so'
         foreach ($base in @('avcodec', 'avformat', 'avutil', 'swscale', 'tesseract', 'onnxruntime')) {
             $canonical = Join-Path $runtimes "lib$base.$extension"
             if (-not (Test-Path -LiteralPath $canonical)) {
-                $versioned = @(Get-ChildItem -LiteralPath $runtimes -File | Where-Object Name -match $(if ($IsMacOS) { "^lib$base\.[0-9.]+\.dylib$" } else { "^lib$base\.so\.[0-9.]+$" })) | Select-Object -First 1
+                $versioned = @(Get-ChildItem -LiteralPath $runtimes -File | Where-Object Name -match "^lib$base\.so\.[0-9.]+$") | Select-Object -First 1
                 if (-not $versioned) { throw "Native library missing: $base." }
                 Copy-Item -LiteralPath $versioned.FullName -Destination $canonical
             }
@@ -514,7 +455,6 @@ foreach (`$name in @('PATH','INCLUDE','LIB','LIBPATH','VCINSTALLDIR','VCToolsIns
         $configure += @('-A', $(if ($target.arch -eq 'arm64') { 'ARM64' } else { 'x64' }), '-T', 'ClangCL')
         if ($target.arch -eq 'arm64') { $configure += '-DGGML_CPU_ARM_ARCH=armv8-a' }
     }
-    elseif ($IsMacOS) { $configure += @('-DCMAKE_OSX_DEPLOYMENT_TARGET=13.0', $(if ($target.arch -eq 'arm64') { '-DCMAKE_OSX_ARCHITECTURES=arm64' } else { '-DCMAKE_OSX_ARCHITECTURES=x86_64' })) }
     Invoke-NativeCommand -Name 'llama-configure' -Executable 'cmake' -Arguments $configure -Wall 300 -Idle 120
     Invoke-NativeCommand -Name 'llama-build' -Executable 'cmake' -Arguments @('--build', $llamaBuild, '--config', 'Release', '--target', 'llama-mtmd-cli', 'nvsf-llama-bf16', '--parallel', '2') -Wall 3600 -Idle 600
     $kernelWitness = Join-Path $llamaBuild $(if ($IsWindows) { 'witness-bin/nvsf-llama-bf16.exe' } else { 'witness-bin/nvsf-llama-bf16' })
@@ -537,14 +477,8 @@ foreach (`$name in @('PATH','INCLUDE','LIB','LIBPATH','VCINSTALLDIR','VCToolsIns
         Copy-Item -LiteralPath $licenseFile.FullName -Destination $destination -Force
     }
     if ($IsWindows -and (Get-PeMachine (Join-Path $runtimes $llamaName)) -ne $machine) { throw 'Native visual-helper PE architecture mismatch.' }
-    if ($IsMacOS) {
-        foreach ($dependency in Get-MacDependencies (Join-Path $runtimes $llamaName)) {
-            if (-not $dependency.StartsWith('/usr/lib/') -and -not $dependency.StartsWith('/System/Library/')) { throw "Unexpected dynamic visual-helper dependency: $dependency." }
-        }
-        Invoke-NativeCommand -Name 'llama-adhoc-sign' -Executable 'codesign' -Arguments @('--force', '--sign', '-', (Join-Path $runtimes $llamaName))
-    }
     Invoke-NativeCommand -Name 'llama-help' -Executable (Join-Path $runtimes $llamaName) -Arguments @('--help') -Wall 30 -Idle 10
-    $record = @{ schema = 1; target = $TargetId; source_sha = $env:GITHUB_SHA; rust_target = $target.target; cargo_lock_sha256 = (Get-FileHash -LiteralPath (Join-Path $root 'Cargo.lock') -Algorithm SHA256).Hash.ToLowerInvariant(); vcpkg_commit = $baseline; tesseract_version = $nativeLock.tesseract; tesseract_source_commit = '7e548e6eff172f38f97664afe7f7ce40db36c8d6'; overlay_port_inputs = $overlayInputs; ort_version = '1.31.0'; ort_source_commit = $(if ($ortSourceBuild) { $ortCommit } else { $null }); overlay_triplet = $target.triplet; linkage = 'dynamic'; build_type = 'release'; llama_tag_object = $llamaTagObject; llama_source_commit = $llamaCommit; llama_patch_sha256 = $llamaPatchHash; llama_bf16_reference = $kernelEvidence; llama_cli_status = 'EXPERIMENTAL_MODEL_NOT_LOADED'; media_adapter = $null; runtime_execution = 'NOT_RUN'; final_package_closure = 'PENDING_HOSTED_TEST' }
+    $record = @{ schema = 1; target = $TargetId; source_sha = $env:GITHUB_SHA; rust_target = $target.target; cargo_lock_sha256 = (Get-FileHash -LiteralPath (Join-Path $root 'Cargo.lock') -Algorithm SHA256).Hash.ToLowerInvariant(); vcpkg_commit = $baseline; tesseract_version = $nativeLock.tesseract; tesseract_source_commit = '7e548e6eff172f38f97664afe7f7ce40db36c8d6'; overlay_port_inputs = $overlayInputs; ort_version = '1.31.0'; overlay_triplet = $target.triplet; linkage = 'dynamic'; build_type = 'release'; llama_tag_object = $llamaTagObject; llama_source_commit = $llamaCommit; llama_patch_sha256 = $llamaPatchHash; llama_bf16_reference = $kernelEvidence; llama_cli_status = 'EXPERIMENTAL_MODEL_NOT_LOADED'; media_adapter = $null; runtime_execution = 'NOT_RUN'; final_package_closure = 'PENDING_HOSTED_TEST' }
     Write-NativeInventory $record
     Write-NativeLog 'INFO' "Provisioning complete target=$TargetId runtime_files=$($record.runtime_files.Count); media adapter staging and actual package/model inference remain later required CI gates."
 } catch {

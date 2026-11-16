@@ -315,11 +315,7 @@ pub async fn check(current: &str, target: &str) -> Result<Option<Manifest>> {
 }
 
 pub fn target(format: &str) -> String {
-    let os = if cfg!(target_os = "macos") {
-        "darwin"
-    } else {
-        std::env::consts::OS
-    };
+    let os = std::env::consts::OS;
     format!("{os}-{}-{format}", std::env::consts::ARCH)
 }
 

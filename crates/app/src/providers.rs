@@ -12,7 +12,7 @@ use std::path::Path;
 pub mod profiles;
 
 pub(crate) fn cpu(builder: SessionBuilder) -> Result<SessionBuilder> {
-    // rc.14's default MaxEfficiency can silently choose CoreML even for a CPU-labeled session.
+    // Override rc.14's default MaxEfficiency policy for a CPU-labeled session.
     builder
         .with_auto_device(AutoDevicePolicy::PreferCPU)
         .map_err(|e| AppError::Provider(e.to_string()))
@@ -39,8 +39,6 @@ pub(crate) fn session_profiled(
     let selected = if requested == "auto" {
         if cfg!(feature = "cuda") {
             "cuda"
-        } else if cfg!(feature = "coreml") {
-            "coreml"
         } else if cfg!(feature = "directml") {
             "directml"
         } else {
@@ -96,17 +94,6 @@ fn build(
                 .with_memory_pattern(false)
                 .map_err(|e| fail(e.to_string()))?
                 .with_execution_providers([ort::ep::DirectML::default().build().error_on_failure()])
-                .map_err(|e| AppError::Provider(e.to_string()))?;
-        }
-        #[cfg(feature = "coreml")]
-        "coreml" => {
-            if required {
-                return Err(AppError::Provider(
-                    "CoreML OS-managed placement cannot establish strict GPU-only execution".into(),
-                ));
-            }
-            builder = builder
-                .with_execution_providers([ort::ep::CoreML::default().build().error_on_failure()])
                 .map_err(|e| AppError::Provider(e.to_string()))?;
         }
         _ => {

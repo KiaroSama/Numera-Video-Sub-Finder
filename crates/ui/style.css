@@ -18,7 +18,7 @@
   --error: #9b1723;
   --error-bg: #fff0f0;
   --shadow: 0 8px 26px rgb(25 35 55 / 4%);
-  font-family: "Segoe UI Variable", "Segoe UI", -apple-system, BlinkMacSystemFont, "Noto Sans", "Noto Sans Arabic", "Noto Sans JP", sans-serif;
+  font-family: "Segoe UI Variable", "Segoe UI", "Noto Sans", "Noto Sans Arabic", "Noto Sans JP", sans-serif;
   font-size: 14px;
   line-height: 1.5;
 }

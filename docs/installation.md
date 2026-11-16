@@ -1,6 +1,6 @@
 # Installation and first setup
 
-**Current status: development source, not a completed release.** All five native target checks and platform-signing gates must pass before a ready-build prerelease is published. Do not treat an Actions log, an unsigned intermediate or an empty release as an installer. See [validation](validation.md) for exact observed results and open qualification.
+**Current status: development source, not a completed release.** All four native target checks and platform-signing gates must pass before a ready-build prerelease is published. Do not treat an Actions log, an unsigned intermediate or an empty release as an installer. See [validation](validation.md) for exact observed results and open qualification.
 
 ## 1. Choose the correct build
 
@@ -10,8 +10,6 @@ Use only the project's [official Releases](https://github.com/KiaroSama/Numera-V
 |---|---|---|---|
 | Windows | x64 | current-user NSIS setup or portable ZIP | Windows 10 1809+ declared; system WebView2 |
 | Windows | ARM64 | ARM64 application NSIS setup or portable ZIP | native ARM64 Windows; system WebView2 |
-| macOS Intel | x64 | DMG / `.app` archive | macOS 13+ declared |
-| macOS Apple Silicon | ARM64 | DMG / `.app` archive | macOS 13+ declared |
 | Linux | x64 | AppImage, deb, rpm or portable tar.gz | Ubuntu 24.04/glibc 2.39 build baseline; WebKitGTK 4.1/system graphics libraries |
 | Linux | ARM64 | ARM64 AppImage, deb, rpm or portable tar.gz | same declared Linux baseline on ARM64 |
 
@@ -20,10 +18,10 @@ Check your operating system's **About/System information** screen before downloa
 ## 2. Verify and install
 
 1. Download only your target's asset, accompanying checksum/provenance/signature information and required notices. Compare the exact file size and SHA-256 with the published inventory. A checksum detects byte changes; authenticity also requires the approved signature/trust path.
-2. Windows development executables/installers require the exact pinned self-signed Authenticode identity described below; this does **not** make the publisher publicly trusted. macOS final applications still require Apple signing/notarization, currently blocked by missing Apple credentials. Linux packages remain unsigned at the native package level; check their published inventory and any separately supplied updater/detached authentication according to its documented purpose. The existing updater key/signatures are unchanged and are not Authenticode, Apple notarization or native deb/rpm signatures. Do not install when required signatures are absent, unexpected, expired or invalid.
+2. Windows development executables/installers require the exact pinned self-signed Authenticode identity described below; this does **not** make the publisher publicly trusted. Linux packages remain unsigned at the native package level; check their published inventory and any separately supplied updater/detached authentication according to its documented purpose. The existing updater key/signatures are unchanged and are not Authenticode or native deb/rpm signatures. Do not install when required signatures are absent, unexpected, expired or invalid.
 3. NSIS: run the verified current-user setup. It may fetch Microsoft's WebView2 bootstrapper if WebView2 is missing. Portable ZIP: extract the complete directory into a writable location; do not run directly inside the ZIP or separate the GUI, `nvsf.exe`, `runtimes`, data and notices.
-4. macOS: open the verified DMG and move the application to Applications, or extract its verified `.app` archive. Linux: use your distribution's normal package installer for deb/rpm, or mark the verified AppImage executable and run it. Extract portable tar.gz completely before launching. System-library compatibility must match the build baseline.
-5. Keep OS security enabled. Do not disable Gatekeeper, SmartScreen, signature checks or quarantine controls to make an unverified package run. Missing Apple credentials still block macOS signed publication; Windows self-signing does not remove that blocker.
+4. Linux: use your distribution's normal package installer for deb/rpm, or mark the verified AppImage executable and run it. Extract portable tar.gz completely before launching. System-library compatibility must match the build baseline.
+5. Keep OS security enabled. Do not disable SmartScreen or signature checks to make an unverified package run.
 
 Minimum-OS and clean-install behavior remain unqualified until their dedicated tests pass. A successful development-runner launch is not proof of those scenarios.
 
@@ -58,7 +56,7 @@ There is **no timestamp**; signatures stop validating after certificate expiry. 
 
 ### Embedded application logo
 
-The Windows GUI uses the existing `tauri-build` icon resource; the CLI adds a native resource through `tauri-winres 0.3.7`. Final PE resource checks compare the generated ICO with actual GUI/CLI/setup/uninstaller group-icon descriptors and image bytes. Native package checks resolve macOS `.app` `CFBundleIconFile` to `icon.icns`, Linux hicolor PNGs and desktop `Icon=`, plus AppImage `.DirIcon`. These checks are implemented pending hosted verification; adjacent logo files or Explorer's cached thumbnail alone are not proof of correct embedding.
+The Windows GUI uses the existing `tauri-build` icon resource; the CLI adds a native resource through `tauri-winres 0.3.7`. Final PE resource checks compare the generated ICO with actual GUI/CLI/setup/uninstaller group-icon descriptors and image bytes. Native package checks resolve Linux hicolor PNGs and desktop `Icon=`, plus AppImage `.DirIcon`. These checks are implemented pending hosted verification; adjacent logo files or Explorer's cached thumbnail alone are not proof of correct embedding.
 
 ## 3. First launch and native resources
 
@@ -106,7 +104,7 @@ The language dropdown contains **123 official Tesseract language and vertical va
 
 The admitted Chinese/English/Japanese and Arabic-family Paddle models are used only for their compatible languages. Other catalog languages use Tesseract CPU recognition plus the native detector; strict required-acceleration mode therefore cannot pass for those recognizers. `osd`, `equ`, arbitrary paths and combined expressions such as `eng+fra` are not selectable language IDs.
 
-GPU node profiling (T112) and a separate Windows x64 CUDA build variant (T113) are in progress, not verified downloads or performance claims. The five CPU baseline products remain distinct. Physical RTX 4070 Ti qualification (T114) will use only exact CI-built artifacts; no physical execution, speedup or other-provider/hardware qualification is claimed.
+GPU node profiling (T112) and a separate Windows x64 CUDA build variant (T113) are in progress, not verified downloads or performance claims. The four CPU baseline products remain distinct. Physical RTX 4070 Ti qualification (T114) will use only exact CI-built artifacts; no physical execution, speedup or other-provider/hardware qualification is claimed.
 
 **Pack availability and hash verification do not measure subtitle accuracy.** Original English/Persian/Japanese accuracy/timing gates remain open; other languages are explicitly unmeasured. See [OCR contracts](ocr-models.md).
 
@@ -129,10 +127,10 @@ Review source frames and uncertain cues before exporting. Save a review project 
 ## Updates, data and troubleshooting
 
 - **Settings → Application updates** controls automatic stable-release metadata checks, a persistent disable option and manual checks. Checks run at startup and at most daily while open; video/subtitles are not uploaded. Downloads and installation have separate explicit approvals bound to the offered version. Development prereleases are never served by the stable feed.
-- Automatic replacement is intended only for installed Windows, macOS `.app` and Linux AppImage. Portable archives/deb/rpm provide a verified saved download and require their normal installation procedure. Jobs, previews, resource operations, closing and unsaved edits block installation; do not terminate the app to force it through.
+- Automatic replacement is intended only for installed Windows and Linux AppImage. Portable archives/deb/rpm provide a verified saved download and require their normal installation procedure. Jobs, previews, resource operations, closing and unsaved edits block installation; do not terminate the app to force it through.
 - Writable models/projects/cache/logs use OS local application data under `Numera Video Sub Finder`. `--data-root` / `NVSF_DATA_ROOT` selects another location. A portable package's `portable.flag` uses sibling `data`. Preserve that data during an update; do not delete it to diagnose a runtime issue.
 - Run `doctor` or the resource checks for exact errors. Logs are UTF-8 under the selected data root's `logs` directory; redact private paths/context before voluntarily sharing a log. Missing hardware/quality evidence is not a runtime-install error. See [troubleshooting](troubleshooting.md), [models](models.md) and [validation](validation.md).
 
 ## Source builds
 
-Build and test **only in GitHub Actions**. On the authorized repository, manually run **Final verification** (`verify.yml`) for the completed pushed source. It invokes reusable `ci.yml` for the five native targets and the portable/security/source-analysis children once. No local Cargo/Trunk/Tauri compilation or local application-test fallback is part of this project's workflow. The new Windows development signing/icon implementation still needs its own exact-SHA hosted verification; Apple signing/notarization remains blocked, and final release publication still needs all required evidence.
+Build and test **only in GitHub Actions**. On the authorized repository, manually run **Final verification** (`verify.yml`) for the completed pushed source. It invokes reusable `ci.yml` for the four native targets and the portable/security/source-analysis children once. No local Cargo/Trunk/Tauri compilation or local application-test fallback is part of this project's workflow. The new Windows development signing/icon implementation still needs its own exact-SHA hosted verification, and final release publication still needs all required evidence.

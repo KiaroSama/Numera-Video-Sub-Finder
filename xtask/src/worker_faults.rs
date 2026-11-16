@@ -222,7 +222,7 @@ impl Actor {
                 return Ok(true);
             }
             match std::io::Error::last_os_error().raw_os_error() {
-                Some(3) => Ok(false), // ESRCH on Linux and macOS.
+                Some(3) => Ok(false), // ESRCH on Linux.
                 _ => Err(std::io::Error::last_os_error().into()),
             }
         }

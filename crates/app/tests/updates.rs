@@ -63,7 +63,16 @@ fn signed_metadata_and_payloads_refuse_invalid_signatures_formats_and_architectu
     assert!(validate(&elf, "linux-x86_64-appimage").is_ok());
     assert!(validate(&elf, "linux-aarch64-appimage").is_err());
     assert!(validate(&elf, "windows-x86_64-nsis").is_err());
-    assert!(validate(&elf, "darwin-aarch64-app").is_err());
+    assert_eq!(
+        validate(&elf, "darwin-aarch64-app")
+            .unwrap_err()
+            .to_string(),
+        "Operation failed: Unsupported update target"
+    );
+    assert!(validate(b"PK\x03\x04", "darwin-x86_64-portable").is_err());
+    for target in ["linux-x86_64-portable", "windows-aarch64-portable"] {
+        assert!(validate(b"PK\x03\x04", target).is_ok());
+    }
     assert!(validate(&elf, "linux-x86_64-unknown").is_err());
     let mut pe = vec![0; 70];
     pe[..2].copy_from_slice(b"MZ");
@@ -77,65 +86,6 @@ fn signed_metadata_and_payloads_refuse_invalid_signatures_formats_and_architectu
     );
     pe[60..64].copy_from_slice(&u32::MAX.to_le_bytes());
     assert!(validate(&pe, "windows-x86_64-nsis").is_err());
-}
-
-#[test]
-fn macos_update_archive_checks_real_headers_and_forbids_wrong_target_or_links() {
-    use std::io::Write;
-    let archive = |wrong_arch: bool, link: bool| {
-        let mut gzip = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
-        {
-            let mut tar = tar::Builder::new(&mut gzip);
-            for name in ["numera-video-sub-finder", "nvsf"] {
-                let mut executable = [0u8; 32];
-                executable[..4].copy_from_slice(b"\xcf\xfa\xed\xfe");
-                executable[4..8].copy_from_slice(
-                    &(if wrong_arch {
-                        0x0100000cu32
-                    } else {
-                        0x01000007u32
-                    })
-                    .to_le_bytes(),
-                );
-                executable[12..16].copy_from_slice(&2u32.to_le_bytes());
-                let mut header = tar::Header::new_gnu();
-                header.set_size(executable.len() as u64);
-                header.set_mode(0o755);
-                header.set_cksum();
-                tar.append_data(
-                    &mut header,
-                    format!("Numera.app/Contents/MacOS/{name}"),
-                    executable.as_slice(),
-                )
-                .unwrap();
-            }
-            if link {
-                let mut header = tar::Header::new_gnu();
-                header.set_entry_type(tar::EntryType::Symlink);
-                header.set_size(0);
-                header.set_mode(0o777);
-                tar.append_link(&mut header, "Numera.app/Contents/link", "../../outside")
-                    .unwrap();
-            }
-            tar.finish().unwrap();
-        }
-        gzip.flush().unwrap();
-        gzip.finish().unwrap()
-    };
-    let valid = archive(false, false);
-    assert!(nvsf_app::update_payload::validate(&valid, "darwin-x86_64-app").is_ok());
-    assert!(
-        nvsf_app::update_payload::validate(&archive(true, false), "darwin-x86_64-app").is_err()
-    );
-    assert!(
-        nvsf_app::update_payload::validate(&archive(false, true), "darwin-x86_64-app").is_err()
-    );
-    assert!(
-        nvsf_app::update_payload::validate(&valid[..valid.len() - 8], "darwin-x86_64-app").is_err()
-    );
-    let mut trailing = valid.clone();
-    trailing.extend_from_slice(b"trailing");
-    assert!(nvsf_app::update_payload::validate(&trailing, "darwin-x86_64-app").is_err());
 }
 
 #[test]

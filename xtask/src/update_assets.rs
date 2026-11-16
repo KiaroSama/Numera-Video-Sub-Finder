@@ -16,7 +16,6 @@ fn asset_target(target: &str, format: &str) -> Result<String> {
         ("windows", "zip") => ("windows", "portable"),
         ("linux", "appimage" | "deb" | "rpm") => ("linux", format),
         ("linux", "tar.gz") => ("linux", "portable"),
-        ("macos", "tar.gz") => ("darwin", "app"),
         _ => return Err("Unsupported update package format".into()),
     };
     Ok(format!("{os}-{arch}-{format}"))
@@ -34,14 +33,13 @@ mod tests {
             ("linux-arm64", "appimage", "linux-aarch64-appimage"),
             ("linux-x64", "deb", "linux-x86_64-deb"),
             ("linux-x64", "tar.gz", "linux-x86_64-portable"),
-            ("macos-x64", "tar.gz", "darwin-x86_64-app"),
         ] {
             assert_eq!(asset_target(target, format).unwrap(), expected);
         }
         for (target, format) in [
             ("linux-arm64", "nsis"),
             ("windows-x86", "zip"),
-            ("macos-x64", "dmg"),
+            ("unsupported-x64", "tar.gz"),
         ] {
             assert!(asset_target(target, format).is_err());
         }
@@ -108,9 +106,6 @@ pub fn generate(target: &str, packages: &Path) -> Result<()> {
     let mut platforms = BTreeMap::new();
     for row in rows {
         let format = row["format"].as_str().ok_or("Missing package format")?;
-        if matches!(format, "app" | "dmg") {
-            continue;
-        }
         let identity = asset_target(target, format)?;
         let relative = row["file"].as_str().ok_or("Missing package asset path")?;
         let expected_prefix = format!("installers/{target}/");
@@ -178,7 +173,7 @@ pub fn generate(target: &str, packages: &Path) -> Result<()> {
     } else if target.starts_with("linux-") {
         4
     } else {
-        1
+        return Err("Unsupported native update target".into());
     };
     if platforms.len() != expected {
         return Err("Native update candidate format inventory is incomplete".into());
@@ -201,7 +196,7 @@ pub fn generate(target: &str, packages: &Path) -> Result<()> {
     if std::fs::read_dir(&output)?.count() != manifest.platforms.len() * 2 + 2 {
         return Err("Candidate output contains undeclared assets".into());
     }
-    let result = serde_json::json!({"schema":1,"source_sha":source,"target":target,"passed":true,"tests":manifest.platforms.len()+1,"failed":0,"skipped":0,"status":"candidate-not-for-publication","proof":["actual package inventory bytes","payload signatures and signed version with wrong-version refusal","actual format/header admission","authenticated candidate metadata"],"not_proved":["platform-native signing/notarization","public stable feed","install/update/uninstall lifecycle"]});
+    let result = serde_json::json!({"schema":1,"source_sha":source,"target":target,"passed":true,"tests":manifest.platforms.len()+1,"failed":0,"skipped":0,"status":"candidate-not-for-publication","proof":["actual package inventory bytes","payload signatures and signed version with wrong-version refusal","actual format/header admission","authenticated candidate metadata"],"not_proved":["platform-native signing","public stable feed","install/update/uninstall lifecycle"]});
     let path = packages
         .join("reports")
         .join(format!("{target}-update-assets.json"));

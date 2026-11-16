@@ -32,8 +32,6 @@
     "active": true,
     "targets": [
       "nsis",
-      "app",
-      "dmg",
       "appimage",
       "deb",
       "rpm"
@@ -42,7 +40,6 @@
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
-      "icons/icon.icns",
       "icons/icon.ico"
     ],
     "resources": {
@@ -52,9 +49,6 @@
     "createUpdaterArtifacts": false,
     "license": "GPL-3.0-or-later",
     "licenseFile": "../../LICENSE",
-    "macOS": {
-      "minimumSystemVersion": "13.0"
-    },
     "windows": {
       "allowDowngrades": false,
       "webviewInstallMode": {
