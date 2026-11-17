@@ -277,6 +277,20 @@ fn ico_entries(icon: &[u8]) -> Result<Vec<(&[u8], &[u8])>> {
     Ok(result)
 }
 
+/// Compares an RT_GROUP_ICON entry with its source ICO directory entry.
+/// Width, height, palette count, reserved byte, bit count and byte size must
+/// match exactly. The planes field is the one exception: `image`'s ICO encoder
+/// writes 0 while the Windows resource compiler stores 1, so only that exact
+/// normalization is accepted.
+fn same_descriptor(linked: &[u8], source: &[u8]) -> bool {
+    let planes = |d: &[u8]| u16::from_le_bytes([d[4], d[5]]);
+    linked.len() == 12
+        && source.len() == 12
+        && linked[..4] == source[..4]
+        && linked[6..] == source[6..]
+        && (planes(linked) == planes(source) || (planes(source) == 0 && planes(linked) == 1))
+}
+
 fn compare(binary: &[u8], icon: &[u8]) -> Result<Value> {
     let expected = ico_entries(icon)?;
     let mut tree = Tree {
@@ -335,7 +349,7 @@ fn compare(binary: &[u8], icon: &[u8]) -> Result<Value> {
         for (index, (descriptor, payload)) in expected.iter().enumerate() {
             let entry = bytes(group, 6 + index * 14, 14)?;
             let id = u16_at(entry, 12)?;
-            if !ids.insert(id) || &entry[..12] != *descriptor {
+            if !ids.insert(id) || !same_descriptor(&entry[..12], descriptor) {
                 return Err("Linked icon dimensions/format differ from source ICO".into());
             }
             let actual = images
@@ -466,6 +480,23 @@ mod tests {
         assert_eq!(proof["images"], 1);
         assert_eq!(proof["languages"], serde_json::json!([1033]));
         pe[0x2c0] = b'X';
+        assert!(compare(&pe, &ico).is_err());
+    }
+
+    #[test]
+    fn accepts_only_resource_compiler_planes_normalization() {
+        let (pe, mut ico) = fixture();
+        // Source written by the image crate (planes 0) vs linked group (planes 1).
+        put16(&mut ico, 10, 0);
+        assert!(compare(&pe, &ico).is_ok());
+        // Any other planes mismatch is still rejected.
+        put16(&mut ico, 10, 2);
+        assert!(compare(&pe, &ico).is_err());
+        let (mut pe, ico) = fixture();
+        put16(&mut pe, 0x2da, 0);
+        assert!(compare(&pe, &ico).is_err());
+        let (mut pe, ico) = fixture();
+        put16(&mut pe, 0x2dc, 24);
         assert!(compare(&pe, &ico).is_err());
     }
 
