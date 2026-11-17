@@ -160,7 +160,12 @@ fn fallback_names_are_bounded_and_transfers_are_not_compute_fallback() {
         FALLBACK_LIMIT + 4
     );
     assert_eq!(record.detector.cpu_fallback_nodes[0], "cpu-0_kernel_time");
-    assert!(build_record("cuda", true, &files(), &mixed, &mixed).is_err());
+    // Strict GPU admits ORT-forced CPU shape operators but not other CPU compute.
+    assert!(build_record("cuda", true, &files(), &mixed, &mixed).is_ok());
+    let mut compute = events.clone();
+    compute[1]["args"]["op_name"] = json!("MatMul");
+    let compute = serde_json::to_vec(&compute).unwrap_or_else(|error| panic!("{error}"));
+    assert!(build_record("cuda", true, &files(), &compute, &mixed).is_err());
     for invalid_name in [
         json!(null),
         json!(""),
