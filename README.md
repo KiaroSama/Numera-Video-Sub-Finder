@@ -83,7 +83,7 @@ nvsf languages install fra
 nvsf dependencies
 ```
 
-`dependencies --repair --consent` requests a matching signed application-local native pack when a component is missing or incompatible; it never installs system FFmpeg or changes PATH. A matching published pack is required. Restart after repair. `doctor` reports actual native API/version checks, not proven operator placement. `--gpu-required` / `--accelerator-required` fail when the requested execution policy cannot be established. `auto` may use CPU only with a reported fallback; an ordinary CPU package does not contain CUDA/DirectML runtime qualification. Device options are `cpu`, `auto`, `cuda` and `directml`.
+`dependencies --repair --consent` requests a matching signed application-local native pack when a component is missing or incompatible; it never installs system FFmpeg or changes PATH. A matching published pack is required. Restart after repair. `doctor` reports actual native API/version checks, not proven operator placement. `--gpu-required` / `--accelerator-required` fail when the requested execution policy cannot be established; only ONNX Runtime's forced CPU shape operators may run on CPU. `auto` may use CPU only with a reported fallback; an ordinary CPU package does not contain CUDA/DirectML runtime qualification. Device options are `cpu`, `auto`, `cuda` and `directml`.
 
 `batch`, `resume`, `export`, and `benchmark` share the native application service. Run each subcommand's `--help` for exact options. Benchmark elapsed time is a measurement of that run, not a universal speed or quality claim.
 
