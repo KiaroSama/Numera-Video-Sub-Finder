@@ -6,7 +6,8 @@ function Copy-VisualStudioNotices([string]$Source, [string]$Destination) {
     $pending.Enqueue($root)
     $files = [Collections.Generic.List[object]]::new()
     $names = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
-    $deadline = [DateTime]::UtcNow.AddSeconds(30)
+    # Hosted Windows runners can take ~50 s on a cold Visual Studio Licenses tree; the count cap stays the real bound.
+    $deadline = [DateTime]::UtcNow.AddSeconds(120)
     $total = 0L
     $count = 0
     while ($pending.Count) {
@@ -14,7 +15,8 @@ function Copy-VisualStudioNotices([string]$Source, [string]$Destination) {
         if ($directory.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Visual Studio notices may not contain links.' }
         foreach ($item in Get-ChildItem -LiteralPath $directory.FullName -Force) {
             $count++
-            if ($count -gt 4096 -or [DateTime]::UtcNow -ge $deadline) { throw 'Visual Studio notice discovery exceeds its budget.' }
+            if ($count -gt 4096) { throw 'Visual Studio notice discovery exceeds its entry budget.' }
+            if ([DateTime]::UtcNow -ge $deadline) { throw 'Visual Studio notice discovery exceeds its time budget.' }
             if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Visual Studio notices may not contain links.' }
             $relative = [IO.Path]::GetRelativePath($root, $item.FullName).Replace('\', '/')
             if ($relative.Split('/').Count -gt 16 -or $relative.Length -gt 512) { throw 'Unexpected Visual Studio notice path.' }

@@ -192,10 +192,16 @@ namespace Nvsf {
             if (p[2] == 0) throw new InvalidDataException("Embedded signature is missing.");
             byte[] result=new byte[p[4]];
             Array.Copy(b,p[2]+8,result,0,result.Length);
-            // DER outer SEQUENCE length must consume exactly the certificate payload.
+            // DER outer SEQUENCE must consume the payload; SignTool may count the 8-byte
+            // alignment inside dwLength, so only fewer than 8 trailing zero bytes are tolerated.
             int cursor=0; ReadDer(result,ref cursor,0x30);
-            if (cursor != result.Length) throw new InvalidDataException("Trailing CMS bytes are not permitted.");
-            return result;
+            if (result.Length-cursor >= 8) throw new InvalidDataException("Trailing CMS bytes are not permitted.");
+            for (int i=cursor;i<result.Length;i++)
+                if (result[i] != 0) throw new InvalidDataException("Trailing CMS bytes are not permitted.");
+            if (cursor == result.Length) return result;
+            byte[] der=new byte[cursor];
+            Array.Copy(result,der,cursor);
+            return der;
         }
         static byte[] ReadDer(byte[] b, ref int cursor, int tag) {
             Range(b,cursor,2);
