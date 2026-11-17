@@ -23,8 +23,8 @@ tempfile.workspace = true
 fs2.workspace = true
 reqwest.workspace = true
 ndarray.workspace = true
-ort = { version = "=2.0.0-rc.14", default-features = false, features = ["std", "ndarray", "load-dynamic", "api-31"] }
-libloading = "=0.9.0"
+ort = { version = "=2.0.0-rc.15", default-features = false, features = ["std", "ndarray", "load-dynamic", "api-31"] }
+libloading = "=0.9.1"
 minisign-verify = "=0.3.0"
 base64 = { version = "=0.23.1", default-features = false, features = ["std"] }
 serde_yaml_ng = "=0.10.0"
