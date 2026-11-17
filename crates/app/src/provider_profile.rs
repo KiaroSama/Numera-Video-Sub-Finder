@@ -60,7 +60,8 @@ fn provider(requested: &str) -> Result<&'static str> {
     }
 }
 
-/// Requires actual requested-provider compute; strict mode rejects all other compute.
+/// Requires actual requested-provider compute; strict mode rejects other compute except
+/// ORT-forced CPU shape operators (`providers::CPU_SHAPE_OPS`).
 /// Transfer counts reflect observed trace events, not proof of absent uninstrumented transfers.
 pub fn parse(bytes: &[u8], requested: &str, strict: bool) -> Result<Placement> {
     let requested = provider(requested)?;
@@ -80,6 +81,7 @@ pub fn parse(bytes: &[u8], requested: &str, strict: bool) -> Result<Placement> {
         providers: BTreeMap::new(),
         nodes: Vec::new(),
     };
+    let mut disallowed = 0usize;
     for event in events {
         if event["cat"] != "Node" {
             continue;
@@ -114,6 +116,9 @@ pub fn parse(bytes: &[u8], requested: &str, strict: bool) -> Result<Placement> {
             result.requested_compute += 1;
         } else {
             result.other_compute += 1;
+            if !(actual == "CPUExecutionProvider" && super::cpu_admitted(operation)) {
+                disallowed += 1;
+            }
         }
         result.duration_us += duration;
         if !result.duration_us.is_finite() {
@@ -127,7 +132,7 @@ pub fn parse(bytes: &[u8], requested: &str, strict: bool) -> Result<Placement> {
             transfer,
         });
     }
-    if result.requested_compute == 0 || (strict && result.other_compute != 0) {
+    if result.requested_compute == 0 || (strict && disallowed != 0) {
         return Err(fail(
             "Execution profile does not prove requested compute placement",
         ));

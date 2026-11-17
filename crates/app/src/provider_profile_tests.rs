@@ -28,15 +28,22 @@ fn both_stages_require_actual_requested_compute_not_registration_or_transfers() 
 }
 
 #[test]
-fn mixed_placement_is_reported_but_cannot_qualify_strict_gpu() {
-    let mixed = serde_json::to_vec(&vec![
+fn strict_gpu_admits_cpu_shape_operators_but_not_cpu_compute() {
+    let shape = serde_json::to_vec(&vec![
         node("CUDAExecutionProvider", "Conv", 1.0),
         node("CPUExecutionProvider", "Shape", 0.0),
+        node("CPUExecutionProvider", "Slice", 0.0),
     ])
     .unwrap();
-    let summary = parse(&mixed, "cuda", false).unwrap();
+    let summary = parse(&shape, "cuda", true).unwrap();
     assert_eq!(summary.requested_compute, 1);
-    assert_eq!(summary.other_compute, 1);
+    assert_eq!(summary.other_compute, 2);
+    let mixed = serde_json::to_vec(&vec![
+        node("CUDAExecutionProvider", "Conv", 1.0),
+        node("CPUExecutionProvider", "MatMul", 0.0),
+    ])
+    .unwrap();
+    assert_eq!(parse(&mixed, "cuda", false).unwrap().other_compute, 1);
     assert!(parse(&mixed, "cuda", true).is_err());
     let cpu = serde_json::to_vec(&vec![node("CPUExecutionProvider", "Conv", 1.0)]).unwrap();
     assert!(parse(&cpu, "cuda", false).is_err());
