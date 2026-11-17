@@ -4,6 +4,6 @@
   "ffmpeg": "9.0.2",
   "tesseract": "5.5.4",
   "onnxruntime": "1.31.0",
-  "ort": "2.0.0-rc.14",
+  "ort": "2.0.0-rc.15",
   "telemetry": false
 }

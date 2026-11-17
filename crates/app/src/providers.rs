@@ -12,7 +12,7 @@ use std::path::Path;
 pub mod profiles;
 
 pub(crate) fn cpu(builder: SessionBuilder) -> Result<SessionBuilder> {
-    // Override rc.14's default MaxEfficiency policy for a CPU-labeled session.
+    // Override ort's default MaxEfficiency policy for a CPU-labeled session.
     builder
         .with_auto_device(AutoDevicePolicy::PreferCPU)
         .map_err(|e| AppError::Provider(e.to_string()))
