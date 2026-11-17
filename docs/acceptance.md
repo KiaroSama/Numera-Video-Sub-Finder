@@ -4,7 +4,7 @@ The desktop specification has 34 requirement groups, including the confirmed mai
 
 | IDs | Scope | Implementation / required proof |
 |---|---|---|
-| FR-001,024 | Six native GUI/CLI targets and packages | ci/targets.json, native workflow, xtask package/standalone; installers/ABI/min-OS remain required |
+| FR-001,024 | Four native GUI/CLI targets and packages (D-018: Windows and Linux, x64 and ARM64) | ci/targets.json, native workflow, xtask package/standalone; installers/ABI/min-OS remain required |
 | FR-002,003,005 | Visible OCR/source timing/coverage modes | app media/extraction/inference; real decode + annotated frame timelines |
 | FR-004,006,007 | Subtitle regions/appearances/crops | app regions/vision/extraction, core tracking; gaps/numeric/scene/multi-track real fixtures |
 | FR-008,009 | Priority languages/fallback/specialist/Unicode | pinned ONNX/Tesseract/JA metadata; actual en/fa/ja and vertical/script fixtures |
@@ -22,6 +22,6 @@ The desktop specification has 34 requirement groups, including the confirmed mai
 | FR-031 | Consent-gated updates | core policy/app signed metadata/desktop updater/UI; hosted signed download/install/cancel and active-job/edit evidence required |
 | FR-032 | Reachable native diagnosis and app-local repair | media cdylib/selected Paths/Pack/CLI/Settings; missing-native bootstrap witness and signed candidate assets supplement, not replace, actual repair/restart |
 | FR-033 | Official multilingual catalog | 123 measured packs/shared aliases/explicit recognizer policy/CLI/UI; actual representative script OCR and original priority quality remain required |
-| FR-034 | Repository, setup and development publication | Topics/setup guide/manual final CI; six same-source signed native asset sets required before experimental prerelease, never stable-feed promotion |
+| FR-034 | Repository, setup and development publication | Topics/setup guide/manual final CI; four same-source signed native asset sets required before experimental prerelease, never stable-feed promotion |
 
 CT-01–CT-30 are catalogued in ci/test-inventory.json. CT-23 is owner-cancelled mobile scope, not a passing mobile test. Real-language quality thresholds, source coverage and mutation floors are retained unchanged; any incomplete lane is explicitly reported and blocks full release qualification.
