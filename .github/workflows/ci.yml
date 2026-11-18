@@ -140,7 +140,8 @@ jobs:
           # Opt-in GPU variant only; the four CPU baseline products and their caches stay unchanged.
           $lock = [IO.File]::ReadAllText('ci/gpu-lock.json', [Text.Encoding]::UTF8) | ConvertFrom-Json
           $pin = $lock.variants.'windows-x64-cuda12'
-          if ($lock.schema -ne 1 -or $pin.url -notmatch '^https://github\.com/microsoft/onnxruntime/releases/download/') { throw 'GPU runtime pin is invalid' }
+          # Microsoft's official CUDA 12 NuGet feed; the GitHub release origin returned HTTP 404 from 2026-11-17.
+          if ($lock.schema -ne 1 -or $pin.url -cne 'https://aiinfra.pkgs.visualstudio.com/2692857e-05ef-43b4-ba9c-ccf1c22c437c/_packaging/9387c3aa-d9ad-4513-968c-383f6f7f53b8/nuget/v3/flat2/microsoft.ml.onnxruntime.gpu.windows/1.31.0/microsoft.ml.onnxruntime.gpu.windows.1.31.0.nupkg' -or $pin.native -cne 'runtimes/win-x64/native') { throw 'GPU runtime pin is invalid' }
           $work = Join-Path $env:GITHUB_WORKSPACE '.ci-work/cuda'
           New-Item -ItemType Directory -Force -Path $work | Out-Null
           $archive = Join-Path $work $pin.asset
@@ -152,9 +153,9 @@ jobs:
           New-Item -ItemType Directory -Force -Path $runtimes | Out-Null
           $zip = [IO.Compression.ZipFile]::OpenRead($archive)
           try {
-            # Match by exact one-level root folder plus member path; the root folder name is not assumed.
-            foreach ($name in @('lib/onnxruntime.dll','lib/onnxruntime_providers_shared.dll','lib/onnxruntime_providers_cuda.dll','LICENSE','ThirdPartyNotices.txt')) {
-              $found = @($zip.Entries | Where-Object { $_.FullName -match ('^[^/]+/' + [regex]::Escape($name) + '$') })
+            # Match exact package member paths; TensorRT and import libraries are not shipped.
+            foreach ($name in @("$($pin.native)/onnxruntime.dll","$($pin.native)/onnxruntime_providers_shared.dll","$($pin.native)/onnxruntime_providers_cuda.dll",'LICENSE','ThirdPartyNotices.txt')) {
+              $found = @($zip.Entries | Where-Object { $_.FullName -ceq $name })
               if ($found.Count -ne 1) { throw "CUDA runtime member missing or ambiguous: $name" }
               $entry = $found[0]
               if ($entry.Length -lt 1 -or $entry.Length -gt 1073741824) { throw "CUDA runtime member unbounded: $name" }
@@ -166,7 +167,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'CUDA CLI variant build failed' }
           Copy-Item -LiteralPath (Join-Path $env:CARGO_TARGET_DIR 'release/nvsf.exe') -Destination (Join-Path $variant 'nvsf.exe')
           $files = @(Get-ChildItem -LiteralPath $variant -File -Recurse | ForEach-Object { [ordered]@{ file = [IO.Path]::GetRelativePath($variant, $_.FullName).Replace('\','/'); bytes = $_.Length; sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant() } })
-          $manifest = [ordered]@{ schema = 1; variant = 'windows-x64-cuda12'; source_sha = $env:GITHUB_SHA; status = 'development-unqualified-gpu'; onnxruntime = $lock.onnxruntime; ort_archive_sha256 = $pin.sha256; host_requirements = 'NVIDIA driver with CUDA 12 runtime, cuBLAS and cuDNN 9 supplied by the host; not bundled'; files = $files }
+          $manifest = [ordered]@{ schema = 1; variant = 'windows-x64-cuda12'; source_sha = $env:GITHUB_SHA; status = 'development-unqualified-gpu'; onnxruntime = $lock.onnxruntime; ort_package_sha256 = $pin.sha256; host_requirements = 'NVIDIA driver with CUDA 12 runtime, cuBLAS and cuDNN 9 supplied by the host; not bundled'; files = $files }
           [IO.File]::WriteAllText((Join-Path $variant 'gpu-variant.json'), ($manifest | ConvertTo-Json -Depth 4), [Text.UTF8Encoding]::new($false))
           Remove-Item -LiteralPath $env:CARGO_TARGET_DIR -Recurse -Force
       - name: Upload separate CUDA variant

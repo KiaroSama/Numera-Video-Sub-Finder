@@ -376,30 +376,36 @@ foreach (`$name in @('PATH','INCLUDE','LIB','LIBPATH','VCINSTALLDIR','VCToolsIns
     }
     $nativeDir = Join-Path $prefix $(if ($IsWindows) { 'bin' } else { 'lib' })
     foreach ($file in Get-ChildItem -LiteralPath $nativeDir -File | Where-Object { $_.Name -match '\.dll$|\.so(\.[0-9.]+)?$' }) { Copy-NativeFile $file $runtimes }
+    # Official Microsoft NuGet package (the GitHub release origin returned HTTP 404 from 2026-11-17).
     $uri = [Uri]$target.ort.url
-    if ($uri.Scheme -ne 'https' -or $uri.Host -ne 'github.com' -or -not $uri.AbsolutePath.StartsWith('/microsoft/onnxruntime/releases/download/v1.31.0/')) { throw 'ONNX download is not an approved pinned official release URL.' }
-    if ($target.ort.sha256 -notmatch '^[0-9a-f]{64}$' -or $target.ort.bytes -lt 1) { throw 'ONNX archive pin is invalid.' }
+    if ($uri.Scheme -ne 'https' -or $uri.Host -ne 'api.nuget.org' -or $uri.AbsolutePath -ne '/v3-flatcontainer/microsoft.ml.onnxruntime/1.31.0/microsoft.ml.onnxruntime.1.31.0.nupkg') { throw 'ONNX download is not the approved pinned official NuGet package URL.' }
+    if ($target.ort.sha256 -notmatch '^[0-9a-f]{64}$' -or $target.ort.bytes -lt 1 -or $target.ort.native -notmatch '^runtimes/(win|linux)-(x64|arm64)/native$') { throw 'ONNX package pin is invalid.' }
     $archive = Join-Path $work ([IO.Path]::GetFileName($uri.AbsolutePath))
-    Invoke-NativeCommand -Name 'ort-download' -Executable 'curl' -Arguments @('--fail', '--location', '--proto', '=https', '--proto-redir', '=https', '--connect-timeout', '30', '--max-time', '180', '--output', $archive, $uri.AbsoluteUri) -Wall 210 -Idle 60
-    if ((Get-Item -LiteralPath $archive).Length -ne $target.ort.bytes -or (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant() -ne $target.ort.sha256) { throw 'ONNX archive bytes/SHA256 mismatch.' }
-    $unpack = Join-Path $work 'ort-unpack'
-    [IO.Directory]::CreateDirectory($unpack) | Out-Null
-    if ($archive.EndsWith('.zip')) {
-        $zip = [IO.Compression.ZipFile]::OpenRead($archive)
-        try {
-            foreach ($entry in $zip.Entries) { if ($entry.FullName -match '(^[/\\]|(^|[/\\])\.\.([/\\]|$)|^[A-Za-z]:)') { throw 'ONNX archive contains an unsafe entry path.' } }
-        } finally { $zip.Dispose() }
-        Expand-Archive -LiteralPath $archive -DestinationPath $unpack -Force
-    } else {
-        $entries = Invoke-NativeCommand -Name 'ort-archive-list' -Executable 'tar' -Arguments @('-tzf', $archive) -Capture
-        foreach ($entry in $entries -split "`n") { if ($entry -match '(^/|(^|/)\.\.(/|$)|^[A-Za-z]:)') { throw 'ONNX archive contains an unsafe entry path.' } }
-        Invoke-NativeCommand -Name 'ort-extract' -Executable 'tar' -Arguments @('-xzf', $archive, '-C', $unpack)
+    Invoke-NativeCommand -Name 'ort-download' -Executable 'curl' -Arguments @('--fail', '--location', '--proto', '=https', '--proto-redir', '=https', '--connect-timeout', '30', '--max-time', '300', '--output', $archive, $uri.AbsoluteUri) -Wall 330 -Idle 90
+    if ((Get-Item -LiteralPath $archive).Length -ne $target.ort.bytes -or (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant() -ne $target.ort.sha256) { throw 'ONNX package bytes/SHA256 mismatch.' }
+    $ortRoot = Join-Path $work 'ort-unpack'
+    $ortLib = Join-Path $ortRoot 'lib'
+    [IO.Directory]::CreateDirectory($ortLib) | Out-Null
+    $prefixPath = $target.ort.native + '/'
+    $zip = [IO.Compression.ZipFile]::OpenRead($archive)
+    try {
+        # Extract only the selected RID's shared libraries plus the two legal notices, by exact member path.
+        foreach ($entry in $zip.Entries) {
+            $name = $entry.FullName
+            $keep = ($name.StartsWith($prefixPath, [StringComparison]::Ordinal) -and $name.Substring($prefixPath.Length) -match '^(onnxruntime[A-Za-z0-9_]*\.dll|libonnxruntime[A-Za-z0-9_]*\.so)$') -or $name -in @('LICENSE', 'ThirdPartyNotices.txt')
+            if (-not $keep) { continue }
+            if ($entry.Length -lt 1 -or $entry.Length -gt 1073741824) { throw "ONNX package member unbounded: $name" }
+            $destination = if ($name -in @('LICENSE', 'ThirdPartyNotices.txt')) { Join-Path $ortRoot $name } else { Join-Path $ortLib ([IO.Path]::GetFileName($name)) }
+            [IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $destination, $true)
+        }
+    } finally { $zip.Dispose() }
+    if (-not $IsWindows) {
+        # The package ships unversioned libonnxruntime.so whose SONAME is libonnxruntime.so.1; provide that name too.
+        $soname = Join-Path $ortLib 'libonnxruntime.so.1'
+        if (-not (Test-Path -LiteralPath $soname)) { Copy-Item -LiteralPath (Join-Path $ortLib 'libonnxruntime.so') -Destination $soname }
     }
-    $ortRoots = @(Get-ChildItem -LiteralPath $unpack -Directory)
-    if ($ortRoots.Count -ne 1) { throw 'ONNX archive must contain one exact release root.' }
-    $ortRoot = $ortRoots[0].FullName
-    $ortLibraries = @(Get-ChildItem -LiteralPath (Join-Path $ortRoot 'lib') -File | Where-Object Name -match '^onnxruntime.*\.dll$|^libonnxruntime.*\.so(\.[0-9.]+)?$')
-    if ($ortLibraries.Count -eq 0) { throw 'ONNX provision produced no actual native shared library.' }
+    $ortLibraries = @(Get-ChildItem -LiteralPath $ortLib -File | Where-Object Name -match '^onnxruntime.*\.dll$|^libonnxruntime.*\.so(\.[0-9.]+)?$')
+    if (-not ($ortLibraries.Name -match '^(onnxruntime\.dll|libonnxruntime\.so)$')) { throw 'ONNX provision produced no actual native shared library.' }
     foreach ($file in $ortLibraries) { Copy-NativeFile $file $runtimes }
     $ortNotices = Join-Path $notices 'onnxruntime'
     [IO.Directory]::CreateDirectory($ortNotices) | Out-Null
