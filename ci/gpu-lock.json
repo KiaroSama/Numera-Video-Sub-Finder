@@ -4,11 +4,12 @@
   "variants": {
     "windows-x64-cuda12": {
       "target": "x86_64-pc-windows-msvc",
-      "asset": "onnxruntime-win-x64-gpu_cuda12-1.31.0.zip",
-      "url": "https://github.com/microsoft/onnxruntime/releases/download/v1.31.0/onnxruntime-win-x64-gpu_cuda12-1.31.0.zip",
-      "bytes": 392994831,
-      "sha256": "fa79097fa478961cbd31c297671ac169eb0d3f1dfdc9e8481e091850f8c4810b",
-      "digest_source": "https://api.github.com/repos/microsoft/onnxruntime/releases/tags/v1.31.0"
+      "asset": "microsoft.ml.onnxruntime.gpu.windows.1.31.0.nupkg",
+      "url": "https://aiinfra.pkgs.visualstudio.com/2692857e-05ef-43b4-ba9c-ccf1c22c437c/_packaging/9387c3aa-d9ad-4513-968c-383f6f7f53b8/nuget/v3/flat2/microsoft.ml.onnxruntime.gpu.windows/1.31.0/microsoft.ml.onnxruntime.gpu.windows.1.31.0.nupkg",
+      "bytes": 250527586,
+      "sha256": "4b87823350911df5e6f97dfda54db70dfee0b4004b2070add0c0977f5bc9b9b9",
+      "native": "runtimes/win-x64/native",
+      "digest_source": "Microsoft onnxruntime-cuda-12 public NuGet feed (aiinfra PublicPackages), Authenticode Microsoft Corporation, nuspec commit 402979a"
     }
   }
 }

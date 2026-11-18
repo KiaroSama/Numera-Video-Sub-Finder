@@ -20,9 +20,10 @@
       "required": true,
       "release_status": "development-unqualified",
       "ort": {
-        "url": "https://github.com/microsoft/onnxruntime/releases/download/v1.31.0/onnxruntime-linux-x64-1.31.0.tgz",
-        "sha256": "cc5c72baf5ae5c8238a6841f0897227be2d02826b9cf98eaf02fdefaeeb03a57",
-        "bytes": 11408003
+        "url": "https://api.nuget.org/v3-flatcontainer/microsoft.ml.onnxruntime/1.31.0/microsoft.ml.onnxruntime.1.31.0.nupkg",
+        "sha256": "7e35fdb4f5adb62f01e60798e2e5ed05108f5fbbe1cca03fbcc37903cf7c5e3b",
+        "bytes": 159626085,
+        "native": "runtimes/linux-x64/native"
       }
     },
     {
@@ -43,9 +44,10 @@
       "required": true,
       "release_status": "development-unqualified",
       "ort": {
-        "url": "https://github.com/microsoft/onnxruntime/releases/download/v1.31.0/onnxruntime-linux-aarch64-1.31.0.tgz",
-        "sha256": "c5b8b3cca31f3d643a3b313b8f42e2d0f16a4fcefd02cda343d97bd5306afaab",
-        "bytes": 10331104
+        "url": "https://api.nuget.org/v3-flatcontainer/microsoft.ml.onnxruntime/1.31.0/microsoft.ml.onnxruntime.1.31.0.nupkg",
+        "sha256": "7e35fdb4f5adb62f01e60798e2e5ed05108f5fbbe1cca03fbcc37903cf7c5e3b",
+        "bytes": 159626085,
+        "native": "runtimes/linux-arm64/native"
       }
     },
     {
@@ -64,9 +66,10 @@
       "required": true,
       "release_status": "development-unqualified",
       "ort": {
-        "url": "https://github.com/microsoft/onnxruntime/releases/download/v1.31.0/onnxruntime-win-x64-1.31.0.zip",
-        "sha256": "3958d8a44984160692c1b4ffd0de3cb48f8c39f9d34bb31e433db06e30b82195",
-        "bytes": 82887349
+        "url": "https://api.nuget.org/v3-flatcontainer/microsoft.ml.onnxruntime/1.31.0/microsoft.ml.onnxruntime.1.31.0.nupkg",
+        "sha256": "7e35fdb4f5adb62f01e60798e2e5ed05108f5fbbe1cca03fbcc37903cf7c5e3b",
+        "bytes": 159626085,
+        "native": "runtimes/win-x64/native"
       }
     },
     {
@@ -85,9 +88,10 @@
       "required": true,
       "release_status": "development-unqualified",
       "ort": {
-        "url": "https://github.com/microsoft/onnxruntime/releases/download/v1.31.0/onnxruntime-win-arm64-1.31.0.zip",
-        "sha256": "ef6206fa8d6975878d93a97035d280240ce5764c126a7430e5427e18923316d5",
-        "bytes": 85806468
+        "url": "https://api.nuget.org/v3-flatcontainer/microsoft.ml.onnxruntime/1.31.0/microsoft.ml.onnxruntime.1.31.0.nupkg",
+        "sha256": "7e35fdb4f5adb62f01e60798e2e5ed05108f5fbbe1cca03fbcc37903cf7c5e3b",
+        "bytes": 159626085,
+        "native": "runtimes/win-arm64/native"
       }
     }
   ]
