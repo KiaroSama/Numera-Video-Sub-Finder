@@ -9,6 +9,8 @@ mod evidence;
 #[cfg(target_arch = "wasm32")]
 mod extract;
 #[cfg(target_arch = "wasm32")]
+mod glimm;
+#[cfg(target_arch = "wasm32")]
 mod ipc;
 #[cfg(target_arch = "wasm32")]
 mod languages;

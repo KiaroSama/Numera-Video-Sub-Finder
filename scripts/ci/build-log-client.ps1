@@ -4,8 +4,9 @@ function Start-BuildLogObserver([string]$Directory,[string]$Contract,[string]$As
     $state=@{process=$process;job=$null;group=$null;started=$false;assigned=$false;read=$null;error=$null;ready=$false;baseline=$false;phase='starting';pid=0}
     try {
         $info=[Diagnostics.ProcessStartInfo]::new()
-        $pwsh=(Get-Command pwsh -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
-        $args=@('-NoLogo','-NoProfile','-NonInteractive','-File',(Join-Path $PSScriptRoot 'build-log-observer.ps1'),'-Directory',$Directory,'-Checkout',$root,'-Assembly',$Assembly,'-Contract',$Contract)
+        if (-not $Assembly.StartsWith((Join-Path $root '.ci-work/observer-assembly-'),[StringComparison]::Ordinal) -or (Get-Item -LiteralPath $Assembly -Force).LinkType) { throw 'Invalid observer binary path.' }
+        $pwsh=$Assembly
+        $args=@('--directory',$Directory,'--checkout',$root,'--contract',$Contract)
         $info.WorkingDirectory=$root
         $info.UseShellExecute=$false
         $info.CreateNoWindow=$true

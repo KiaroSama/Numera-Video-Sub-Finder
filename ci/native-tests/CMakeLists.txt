@@ -8,13 +8,13 @@ if(BUILD_SHARED_LIBS OR GGML_BACKEND_DL OR GGML_CPU_ALL_VARIANTS)
     message(FATAL_ERROR "Kernel witness requires the same single static ggml-cpu backend as the packaged helper")
 endif()
 
-# Upstream owns its complete target definitions/compiler options; do not copy vec.cpp into this target.
+# Upstream owns its complete target definitions and compiler options; do not copy vec.cpp into this target.
 add_subdirectory("${NVSF_LLAMA_SOURCE}" llama)
-if(NOT TARGET ggml-cpu OR NOT TARGET llama-mtmd-cli)
-    message(FATAL_ERROR "Expected actual ggml-cpu and packaged mtmd targets")
+if(NOT TARGET ggml-cpu OR NOT TARGET ggml-base OR NOT TARGET llama-mtmd-cli)
+    message(FATAL_ERROR "Expected actual ggml-cpu, ggml-base and packaged mtmd targets")
 endif()
 if(NVSF_REQUIRE_ARM_NEON)
-    set(neon_guard "${CMAKE_CURRENT_BINARY_DIR}/require-arm-neon.h")
+    set(neon_guard "${CMAKE_CURRENT_BINARY_DIR}/require_arm_neon.h")
     file(WRITE "${neon_guard}" "#if !defined(__aarch64__) || !defined(__ARM_NEON)\n#error Required ARM64 NEON kernel branch is unavailable\n#endif\n")
     if(MSVC)
         target_compile_options(ggml-cpu PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:/FI${neon_guard}>")
@@ -22,12 +22,32 @@ if(NVSF_REQUIRE_ARM_NEON)
         target_compile_options(ggml-cpu PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:-include>" "$<$<COMPILE_LANGUAGE:CXX>:${neon_guard}>")
     endif()
 endif()
-add_executable(nvsf-llama-bf16 llama_bf16.cpp)
-target_compile_features(nvsf-llama-bf16 PRIVATE cxx_std_17)
-target_include_directories(nvsf-llama-bf16 PRIVATE "${NVSF_LLAMA_SOURCE}/ggml/include")
-target_link_libraries(nvsf-llama-bf16 PRIVATE ggml-cpu ggml-base)
-# Upstream uses the top-level CMAKE_BINARY_DIR/bin for helpers; witness has its own directory.
-set_target_properties(nvsf-llama-bf16 PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/witness-bin")
-foreach(config DEBUG RELEASE RELWITHDEBINFO MINSIZEREL)
-    set_target_properties(nvsf-llama-bf16 PROPERTIES "RUNTIME_OUTPUT_DIRECTORY_${config}" "${CMAKE_BINARY_DIR}/witness-bin")
-endforeach()
+
+find_program(NVSF_RUSTC rustc REQUIRED)
+set(NVSF_WITNESS_DIR "${CMAKE_BINARY_DIR}/witness-bin")
+set(NVSF_WITNESS_OUT "${NVSF_WITNESS_DIR}/nvsf-llama-bf16${CMAKE_EXECUTABLE_SUFFIX}")
+set(NVSF_WITNESS_SRC "${CMAKE_CURRENT_SOURCE_DIR}/llama_bf16.rs")
+
+if(WIN32)
+    set(NVSF_CXX_RUNTIME_LIBS -l dylib=advapi32)
+else()
+    set(NVSF_CXX_RUNTIME_LIBS -l dylib=stdc++ -l dylib=m -l dylib=pthread -l dylib=dl)
+endif()
+
+add_custom_command(
+    OUTPUT "${NVSF_WITNESS_OUT}"
+    COMMAND "${CMAKE_COMMAND}" -E make_directory "${NVSF_WITNESS_DIR}"
+    COMMAND "${NVSF_RUSTC}"
+        --edition 2024
+        -O
+        "${NVSF_WITNESS_SRC}"
+        -o "${NVSF_WITNESS_OUT}"
+        -L "native=$<TARGET_FILE_DIR:ggml-cpu>"
+        -L "native=$<TARGET_FILE_DIR:ggml-base>"
+        -l static=ggml-cpu
+        -l static=ggml-base
+        ${NVSF_CXX_RUNTIME_LIBS}
+    DEPENDS ggml-cpu ggml-base "${NVSF_WITNESS_SRC}"
+    VERBATIM
+)
+add_custom_target(nvsf-llama-bf16 DEPENDS "${NVSF_WITNESS_OUT}")

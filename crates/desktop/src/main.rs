@@ -69,7 +69,10 @@ fn ui_ready(
     Ok(())
 }
 
+const EMBEDDED_LOGO_SVG: &[u8] = include_bytes!("../../../assets/logo.svg");
+
 fn main() {
+    std::hint::black_box(EMBEDDED_LOGO_SVG);
     let started = std::time::Instant::now();
     eprintln!(
         "[INFO] [DESKTOP] phase=paths-start pid={}",

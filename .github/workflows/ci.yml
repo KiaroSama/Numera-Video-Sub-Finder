@@ -46,7 +46,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable action source
         with:
-          toolchain: 1.99.1
+          toolchain: 1.100.0
           components: rustfmt, clippy, llvm-tools-preview
           targets: wasm32-unknown-unknown
       - name: Project-owned working directories
@@ -181,7 +181,10 @@ jobs:
       - name: Native Windows ARM frontend helpers
         if: matrix.id == 'windows-arm64'
         timeout-minutes: 30
-        run: ./scripts/ci/frontend-tools.ps1
+        run: |
+          $ext = if ($IsWindows) { '.exe' } else { '' }
+          & "$env:GITHUB_WORKSPACE/target/release/xtask$ext" frontend-tools
+          if ($LASTEXITCODE -ne 0) { throw 'Native Windows ARM frontend helpers failed' }
       - name: Instrumented native GUI build
         run: |
           ./scripts/ci/frontend.ps1 -E2e
@@ -200,7 +203,12 @@ jobs:
           }
       - name: All required Rust contract suites and nonzero evidence
         timeout-minutes: 45
-        run: ./scripts/ci/tests.ps1 -TargetId '${{ matrix.id }}'
+        env:
+          TARGET_ID: ${{ matrix.id }}
+        run: |
+          $ext = if ($IsWindows) { '.exe' } else { '' }
+          & "$env:GITHUB_WORKSPACE/target/release/xtask$ext" ci-tests --target-id $env:TARGET_ID
+          if ($LASTEXITCODE -ne 0) { throw 'Required Rust contract suites failed' }
       - name: Actual Rust media FFI AddressSanitizer admission
         if: matrix.id == 'linux-x64'
         timeout-minutes: 19
@@ -322,7 +330,7 @@ jobs:
           $gui = "$env:GITHUB_WORKSPACE/.ci-work/relocated/Numera 日本 portable ${{ matrix.id }}/$name"
           $args = @('production','--gui',$gui,'--data-root','.ci-work/production-data','--output','.ci-work/production-evidence')
           if ($IsLinux) {
-            ./scripts/ci/guard.ps1 -Name production-gui -WallSeconds 90 -IdleSeconds 30 -Executable xvfb-run -Arguments @('-a','dbus-run-session','--','pwsh','-NoProfile','-File','scripts/ci/virtual-desktop.ps1','-Executable',"$env:GITHUB_WORKSPACE/target/release/xtask$ext",'-ArgumentsJson',($args | ConvertTo-Json -Compress))
+            ./scripts/ci/guard.ps1 -Name production-gui -WallSeconds 90 -IdleSeconds 30 -Executable xvfb-run -Arguments @('-a','dbus-run-session','--',"$env:GITHUB_WORKSPACE/target/release/xtask$ext",'virtual-desktop','--executable',"$env:GITHUB_WORKSPACE/target/release/xtask$ext",'--arguments-json',($args | ConvertTo-Json -Compress))
           } else {
             ./scripts/ci/guard.ps1 -Name production-gui -WallSeconds 90 -IdleSeconds 30 -Executable "$env:GITHUB_WORKSPACE/target/release/xtask$ext" -Arguments $args
           }

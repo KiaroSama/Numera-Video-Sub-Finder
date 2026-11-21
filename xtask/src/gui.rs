@@ -253,10 +253,27 @@ pub fn smoke(gui: &Path, fixtures: &Path, data: &Path, output: &Path) -> Result<
         )?;
         driver.click("[data-testid=e2e-load-fixture]")?;
         driver.wait("return !!document.querySelector('.source-frame')?.naturalWidth && !document.querySelector('#extract-start')?.disabled;", 30)?;
-        for theme in ["dark", "light", "system"] {
-            driver.select("#header-theme", theme)?;
+        let initial = driver.script(
+            "return {theme:document.documentElement.dataset.theme,saved:localStorage.getItem('nvsf-theme')};",
+        )?;
+        if !matches!(initial["theme"].as_str(), Some("dark" | "light"))
+            || !initial["saved"].is_null()
+        {
+            return Err(
+                format!("Unexpected initial theme state before user toggle: {initial}").into(),
+            );
+        }
+        if initial["theme"] == "dark" {
+            driver.click("#header-theme")?;
+            driver.wait(
+                "return document.documentElement.dataset.theme === 'light' && localStorage.getItem('nvsf-theme') === 'light' && !document.documentElement.hasAttribute('data-glimm-transition');",
+                5,
+            )?;
+        }
+        for theme in ["dark", "light"] {
+            driver.click("#header-theme")?;
             let expected = format!(
-                "return document.documentElement.dataset.theme === '{theme}' && localStorage.getItem('nvsf-theme') === '{theme}';"
+                "return document.documentElement.dataset.theme === '{theme}' && localStorage.getItem('nvsf-theme') === '{theme}' && !document.documentElement.hasAttribute('data-glimm-transition');"
             );
             driver.wait(&expected, 5)?;
             crate::gui_visual::theme(&driver, output, theme)?;
