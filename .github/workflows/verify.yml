@@ -8,6 +8,45 @@ concurrency:
   group: final-verification-${{ github.ref }}
   cancel-in-progress: false
 jobs:
+  announce:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    permissions:
+      contents: read
+      statuses: write
+    steps:
+      - name: Publish pending commit statuses for all 14 main checks
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          run_url="https://github.com/${REPO}/actions/runs/${RUN_ID}"
+          contexts=(
+            "Final verification / native / inventory"
+            "Final verification / native / native (windows-x64, windows-2025, x86_64-pc-windows-msvc, windows, x64, x64-windows)"
+            "Final verification / native / native (windows-arm64, windows-11-arm, aarch64-pc-windows-msvc, windows, arm64, arm64-windows)"
+            "Final verification / native / native (linux-x64, ubuntu-24.04, x86_64-unknown-linux-gnu, linux, x64, x64-linux)"
+            "Final verification / native / native (linux-arm64, ubuntu-24.04-arm, aarch64-unknown-linux-gnu, linux, arm64, arm64-linux)"
+            "Final verification / native / required"
+            "Final verification / portable / mutation"
+            "Final verification / portable / loom"
+            "Final verification / portable / fuzz"
+            "Final verification / portable / miri"
+            "Final verification / dependencies / dependencies"
+            "Final verification / source-analysis / analyze (rust)"
+            "Final verification / source-analysis / analyze (actions)"
+            "Final verification / required"
+          )
+          for ctx in "${contexts[@]}"; do
+            gh api --method POST "repos/${REPO}/statuses/${SOURCE_SHA}" \
+              -f state="pending" \
+              -f context="$ctx" \
+              -f target_url="$run_url" \
+              -f description="Exact-SHA verification running" >/dev/null
+          done
   native:
     uses: ./.github/workflows/ci.yml
     secrets:
@@ -22,20 +61,85 @@ jobs:
     uses: ./.github/workflows/codeql.yml
   required:
     if: always()
-    needs: [native, portable, dependencies, source-analysis]
+    needs: [announce, native, portable, dependencies, source-analysis]
     runs-on: ubuntu-24.04
-    timeout-minutes: 2
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      contents: read
+      statuses: write
     steps:
       - name: Require every exact-source verification lane
         env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          SOURCE_SHA: ${{ github.sha }}
           NATIVE: ${{ needs.native.result }}
           PORTABLE: ${{ needs.portable.result }}
           DEPENDENCIES: ${{ needs.dependencies.result }}
           SOURCE_ANALYSIS: ${{ needs.source-analysis.result }}
-          SOURCE_SHA: ${{ github.sha }}
         run: |
-          test "$NATIVE" = success
-          test "$PORTABLE" = success
-          test "$DEPENDENCIES" = success
-          test "$SOURCE_ANALYSIS" = success
-          printf 'All required lanes passed for %s\n' "$SOURCE_SHA"
+          set -euo pipefail
+          run_json="$(gh api "repos/${REPO}/actions/runs/${RUN_ID}")"
+          head_sha="$(jq -r '.head_sha' <<<"$run_json")"
+          run_url="$(jq -r '.html_url' <<<"$run_json")"
+          test "$head_sha" = "$SOURCE_SHA"
+
+          jobs_lines="$(gh api --paginate "repos/${REPO}/actions/runs/${RUN_ID}/jobs" --jq '.jobs[] | @base64')"
+          child_count=0
+          child_failures=0
+          req_url="$run_url"
+
+          while IFS= read -r encoded; do
+            [ -z "$encoded" ] && continue
+            job="$(base64 --decode <<<"$encoded")"
+            j_name="$(jq -r '.name' <<<"$job")"
+            j_url="$(jq -r '.html_url' <<<"$job")"
+            if [ "$j_name" = "announce" ]; then
+              continue
+            fi
+            if [ "$j_name" = "required" ]; then
+              req_url="$j_url"
+              continue
+            fi
+            j_conclusion="$(jq -r '.conclusion // "none"' <<<"$job")"
+            child_count=$((child_count + 1))
+            if [ "$j_conclusion" = "success" ]; then
+              st="success"
+              desc="Exact-SHA verification job passed"
+            else
+              st="failure"
+              desc="Exact-SHA verification conclusion: ${j_conclusion}"
+              child_failures=$((child_failures + 1))
+            fi
+            gh api --method POST "repos/${REPO}/statuses/${SOURCE_SHA}" \
+              -f state="$st" \
+              -f context="Final verification / ${j_name}" \
+              -f target_url="$j_url" \
+              -f description="${desc:0:140}" >/dev/null
+          done <<<"$jobs_lines"
+
+          overall="failure"
+          if [ "$NATIVE" = "success" ] \
+            && [ "$PORTABLE" = "success" ] \
+            && [ "$DEPENDENCIES" = "success" ] \
+            && [ "$SOURCE_ANALYSIS" = "success" ] \
+            && [ "$child_count" -eq 13 ] \
+            && [ "$child_failures" -eq 0 ]; then
+            overall="success"
+          fi
+
+          if [ "$overall" = "success" ]; then
+            req_desc="All 14 exact-source verification jobs passed"
+          else
+            req_desc="Verification failed or incomplete (children=${child_count}, failed=${child_failures})"
+          fi
+          gh api --method POST "repos/${REPO}/statuses/${SOURCE_SHA}" \
+            -f state="$overall" \
+            -f context="Final verification / required" \
+            -f target_url="$req_url" \
+            -f description="${req_desc:0:140}" >/dev/null
+
+          test "$overall" = "success"
+          printf 'All required lanes passed and commit statuses published for %s\n' "$SOURCE_SHA"

@@ -21,7 +21,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249
         with:
-          toolchain: 1.99.1
+          toolchain: 1.100.0
       - name: Project-owned mutation state
         run: |
           foreach ($dir in 'temp','logs','captures','cargo','tools','mutation') { New-Item -ItemType Directory -Force -Path ".ci-work/$dir" | Out-Null }
@@ -60,7 +60,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249
         with:
-          toolchain: 1.99.1
+          toolchain: 1.100.0
       - name: Project-owned model state
         run: |
           foreach ($dir in 'temp','logs','cargo') { New-Item -ItemType Directory -Force -Path ".ci-work/$dir" | Out-Null }
@@ -74,7 +74,13 @@ jobs:
           LOOM_MAX_DURATION: '0'
           LOOM_MAX_PREEMPTIONS: '0'
           LOOM_CHECKPOINT_FILE: '.ci-work/loom/untrusted-checkpoint'
-        run: ./scripts/ci/loom.ps1
+        run: |
+          New-Item -ItemType Directory -Force -Path .ci-work/bin | Out-Null
+          $ext = if ($IsWindows) { '.exe' } else { '' }
+          ./scripts/ci/guard.ps1 -Name loom-runner-build -WallSeconds 120 -IdleSeconds 60 -Executable rustc -Arguments @('--edition','2024','-O','scripts/ci/loom_runner.rs','-o',".ci-work/bin/loom-runner$ext")
+          if ($LASTEXITCODE -ne 0) { throw 'Loom runner compilation failed' }
+          & "./.ci-work/bin/loom-runner$ext"
+          if ($LASTEXITCODE -ne 0) { throw 'Bounded Loom admission failed' }
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         if: always()
         with:

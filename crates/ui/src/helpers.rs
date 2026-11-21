@@ -104,11 +104,62 @@ pub fn replace_proposal_text(cues: &mut [Cue], id: u64, text: String) -> nvsf_co
     Ok(())
 }
 
-pub fn theme_value(value: &str) -> &'static str {
+pub fn parse_saved_theme(value: Option<&str>) -> Option<&'static str> {
     match value {
-        "light" => "light",
-        "dark" => "dark",
-        _ => "system",
+        Some("light") => Some("light"),
+        Some("dark") => Some("dark"),
+        _ => None,
+    }
+}
+
+pub fn resolve_theme(saved: Option<&str>, os_prefers_dark: bool) -> &'static str {
+    parse_saved_theme(saved).unwrap_or(if os_prefers_dark { "dark" } else { "light" })
+}
+
+pub fn opposite_theme(current: &str) -> &'static str {
+    if current == "dark" { "light" } else { "dark" }
+}
+
+pub fn theme_value(value: &str) -> &'static str {
+    if value == "light" { "light" } else { "dark" }
+}
+
+pub fn ease_sweep(progress: f64) -> f64 {
+    let x = progress.clamp(0.0, 1.0);
+    if x <= 0.0 || x >= 1.0 {
+        return x;
+    }
+    // CSS ease cubic-bezier(0.25, 0.1, 0.25, 1.0) solved via Newton-Raphson.
+    let (x1, y1, x2, y2) = (0.25_f64, 0.1_f64, 0.25_f64, 1.0_f64);
+    let bez = |t: f64, p1: f64, p2: f64| -> f64 {
+        let u = 1.0 - t;
+        3.0 * u * u * t * p1 + 3.0 * u * t * t * p2 + t * t * t
+    };
+    let bez_dx = |t: f64| -> f64 {
+        let u = 1.0 - t;
+        3.0 * u * u * x1 + 6.0 * u * t * (x2 - x1) + 3.0 * t * t * (1.0 - x2)
+    };
+    let mut t = x;
+    for _ in 0..8 {
+        let dx = bez(t, x1, x2) - x;
+        if dx.abs() < 1e-6 {
+            break;
+        }
+        let d = bez_dx(t);
+        if d.abs() < 1e-6 {
+            break;
+        }
+        t = (t - dx / d).clamp(0.0, 1.0);
+    }
+    bez(t, y1, y2).clamp(0.0, 1.0)
+}
+
+pub fn sweep_clip_inset(progress: f64, rtl: bool) -> String {
+    let edge = ((-0.2 + progress.clamp(0.0, 1.0) * 1.4) * 100.0).clamp(0.0, 100.0);
+    if rtl {
+        format!("inset(0 {edge:.3}% 0 0)")
+    } else {
+        format!("inset(0 0 0 {edge:.3}%)")
     }
 }
 
@@ -121,7 +172,7 @@ mod tests {
         assert!(window_range(100_000, 0).len() <= WINDOW_ROWS);
         assert_eq!(window_range(0, usize::MAX), 0..0);
         for ms in [0, 1, 59_999, 3_600_000, 360_123_456] {
-            assert_eq!(parse_time(&time_label(ms)).unwrap(), ms);
+            assert_eq!(parse_time(&time_label(ms)), Ok(ms));
         }
         for text in [
             "00:60:00.000",
@@ -131,13 +182,27 @@ mod tests {
         ] {
             assert!(parse_time(text).is_err());
         }
-        let mut cue = Cue::new(1, 0, 0, 10, "سلام 日本 <b>text</b>".into()).unwrap();
+        let mut cue = Cue::new(1, 0, 0, 10, "سلام 日本 <b>text</b>".into()).expect("valid cue");
         assert!(matches(&cue, "日本", "unreviewed"));
         cue.reviewed = true;
         assert!(!matches(&cue, "", "unreviewed"));
         assert_eq!(route_value("#review"), Some("Review"));
         assert_eq!(route_value("#main-content"), None);
-        assert_eq!(theme_value("invalid"), "system");
+        assert_eq!(theme_value("light"), "light");
+        assert_eq!(theme_value("dark"), "dark");
+        assert_eq!(theme_value("invalid"), "dark");
+        assert_eq!(resolve_theme(None, true), "dark");
+        assert_eq!(resolve_theme(None, false), "light");
+        assert_eq!(resolve_theme(Some("system"), false), "light");
+        assert_eq!(resolve_theme(Some("light"), true), "light");
+        assert_eq!(resolve_theme(Some("dark"), false), "dark");
+        assert_eq!(opposite_theme("dark"), "light");
+        assert_eq!(opposite_theme("light"), "dark");
+        assert_eq!(ease_sweep(0.0), 0.0);
+        assert_eq!(ease_sweep(1.0), 1.0);
+        assert!(ease_sweep(0.5) > 0.7 && ease_sweep(0.5) < 0.9);
+        assert_eq!(sweep_clip_inset(0.0, true), "inset(0 0.000% 0 0)");
+        assert_eq!(sweep_clip_inset(1.0, false), "inset(0 0 0 100.000%)");
         assert!(region_style(Rect::default()).contains("top:70%"));
     }
     #[test]
@@ -162,12 +227,12 @@ mod tests {
 
     #[test]
     fn explicit_visual_replacement_keeps_original_evidence_and_time() {
-        let mut cue = Cue::new(8, 2, 1200, 2200, "Original 日本".into()).unwrap();
+        let mut cue = Cue::new(8, 2, 1200, 2200, "Original 日本".into()).expect("valid cue");
         cue.crop = Some("original-crop".into());
         cue.confidence = Some(0.5);
         let before = cue.clone();
         let mut cues = vec![cue];
-        replace_proposal_text(&mut cues, 8, "Corrected فارسی".into()).unwrap();
+        replace_proposal_text(&mut cues, 8, "Corrected فارسی".into()).expect("valid replacement");
         assert_eq!(
             (cues[0].start_ms, cues[0].end_ms, cues[0].track),
             (1200, 2200, 2)

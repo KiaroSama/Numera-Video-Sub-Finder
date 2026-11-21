@@ -173,7 +173,10 @@ fn config(args: ExtractArgs, root: Option<&Path>) -> Result<ExtractConfig> {
         .map_err(|error| AppError::InvalidConfig(error.to_string()))?;
     Ok(config)
 }
+const EMBEDDED_LOGO_SVG: &[u8] = include_bytes!("../../../assets/logo.svg");
+
 fn main() {
+    std::hint::black_box(EMBEDDED_LOGO_SVG);
     let cli = match Cli::try_parse() {
         Ok(cli) => cli,
         Err(error) => {

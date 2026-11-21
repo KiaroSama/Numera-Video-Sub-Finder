@@ -11,11 +11,13 @@ use serde_json::json;
 use wasm_bindgen::{JsCast, closure::Closure};
 
 pub fn mount() {
-    let theme = web_sys::window()
+    let saved = web_sys::window()
         .and_then(|w| w.local_storage().ok().flatten())
-        .and_then(|s| s.get_item("nvsf-theme").ok().flatten())
-        .unwrap_or_else(|| "system".into());
-    let theme = helpers::theme_value(&theme).to_string();
+        .and_then(|s| s.get_item("nvsf-theme").ok().flatten());
+    let os_dark = web_sys::window()
+        .and_then(|w| w.match_media("(prefers-color-scheme: dark)").ok().flatten())
+        .map_or(true, |m| m.matches());
+    let theme = helpers::resolve_theme(saved.as_deref(), os_dark).to_string();
     if let Some(root) = web_sys::window()
         .and_then(|w| w.document())
         .and_then(|d| d.document_element())
@@ -84,7 +86,7 @@ fn App(initial_theme: String) -> impl IntoView {
                     .iter()
                     .any(|row| row.state != "verified")
                 {
-                    ui.notice.set("A native dependency is missing or incompatible. Open Settings → Resources and diagnostics to review and approve application-local repair.".into());
+                    ui.notice.set("A native dependency is missing or incompatible. Open Settings (Resources and diagnostics) to review and approve application-local repair.".into());
                 }
                 ui.diagnostics.set(Some(report));
             }
@@ -224,9 +226,10 @@ fn App(initial_theme: String) -> impl IntoView {
                     }}</p></div>
                     <div class="topbar-actions"><Show when=move ||ui.busy.get()><span role="status" class="muted">"Native operation in progress…"</span></Show>
                         <button title="Open a saved review project" disabled=move ||ui.busy.get()||ui.active() on:click={move |_|ui.request::<Option<nvsf_core::Project>>("pick_project",json!({}),move |p|if let Some(p)=p{ui.load(p);})}>"Open project"</button>
-                        <label class="sr-only" for="header-theme">"Workspace theme"</label><select id="header-theme" class="theme-select" prop:value=move ||ui.theme.get() on:change=move |e|ui.set_theme(event_target_value(&e))>
-                            <option value="system">"System"</option><option value="dark">"Dark"</option><option value="light">"Light"</option>
-                        </select>
+                        <button id="header-theme" type="button" class="theme-toggle" aria-label=move ||if ui.theme.get()=="dark"{"Switch to light theme"}else{"Switch to dark theme"} aria-pressed=move ||if ui.theme.get()=="light"{"true"}else{"false"} title=move ||if ui.theme.get()=="dark"{"Switch workspace to light theme"}else{"Switch workspace to dark theme"} on:click=move |_|ui.toggle_theme()>
+                            <svg viewBox="0 0 24 24" aria-hidden="true"><path d=move ||if ui.theme.get()=="dark"{"M12 3v2 M12 19v2 M4.93 4.93l1.41 1.41 M17.66 17.66l1.41 1.41 M3 12h2 M19 12h2 M4.93 19.07l1.41-1.41 M17.66 6.34l1.41-1.41 M16 12a4 4 0 1 1-8 0 4 4 0 0 1 8 0z"}else{"M21 12.79A9 9 0 1 1 11.21 3a7 7 0 0 0 9.79 9.79z"}/></svg>
+                            <span>{move ||if ui.theme.get()=="dark"{"Light"}else{"Dark"}}</span>
+                        </button>
                     </div>
                 </header>
                 <main id="main-content" tabindex="-1" node_ref=main>
@@ -241,7 +244,7 @@ fn App(initial_theme: String) -> impl IntoView {
                     <div hidden=move ||ui.route.get()!="History"><History ui/></div>
                     <div hidden=move ||ui.route.get()!="Settings"><Settings ui/></div>
                 </main>
-                <footer class="statusbar"><span>"Local processing · optional release checks · approved downloads"</span><span>{move ||if ui.active(){"Job active — checkpoints preserved"}else{"No active extraction"}}</span></footer>
+                <footer class="statusbar"><span>"Local processing · optional release checks · approved downloads"</span><span>{move ||if ui.active(){"Job active, checkpoints preserved"}else{"No active extraction"}}</span></footer>
             </div>
         </div>
     }

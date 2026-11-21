@@ -1,3 +1,4 @@
+mod ci_tasks;
 mod coverage_scope;
 mod executable_icons;
 mod extraction_witness;
@@ -17,6 +18,7 @@ mod production;
 mod production_supervisor;
 mod quality;
 mod runtime_pack;
+mod source_policy;
 mod specialist_witness;
 mod subtitle_interop;
 mod update_assets;
@@ -193,6 +195,18 @@ enum Cmd {
         #[arg(long)]
         data_root: PathBuf,
     },
+    SourcePolicy,
+    CiTests {
+        #[arg(long)]
+        target_id: String,
+    },
+    VirtualDesktop {
+        #[arg(long)]
+        executable: PathBuf,
+        #[arg(long)]
+        arguments_json: String,
+    },
+    FrontendTools,
 }
 fn main() {
     if let Err(e) = run() {
@@ -301,6 +315,13 @@ fn run() -> Result<(), Box<dyn Error>> {
         } => gate::release(&reports, &source_sha),
         Cmd::RuntimeModels { data_root } => fixture::provision_models(&data_root),
         Cmd::VisualModels { data_root } => visual_witness::provision(&data_root),
+        Cmd::SourcePolicy => source_policy::verify(),
+        Cmd::CiTests { target_id } => ci_tasks::ci_tests(&target_id),
+        Cmd::VirtualDesktop {
+            executable,
+            arguments_json,
+        } => ci_tasks::virtual_desktop(&executable, &arguments_json),
+        Cmd::FrontendTools => ci_tasks::frontend_tools(),
     };
     writeln!(
         log,

@@ -25,6 +25,9 @@ pub fn assemble(
     if !cli.is_file() || !gui.is_file() || !runtimes.is_dir() {
         return Err("Missing actual native package executable/runtime".into());
     }
+    let approved_logo = std::fs::read("assets/logo.svg")?;
+    verify_embedded_logo(cli, &approved_logo)?;
+    verify_embedded_logo(gui, &approved_logo)?;
     let source = std::env::var("GITHUB_SHA")?;
     let provenance = Path::new(".ci-work/native-notices/native-inventory.json");
     if provenance.metadata()?.len() > 8_388_608 {
@@ -211,9 +214,40 @@ pub(crate) fn validate_media_inventory(
     Ok(())
 }
 
+pub(crate) fn verify_embedded_logo(binary: &Path, approved_logo: &[u8]) -> Result<()> {
+    if approved_logo.is_empty() {
+        return Err("Approved logo source is empty".into());
+    }
+    let bytes = std::fs::read(binary)?;
+    if !bytes
+        .windows(approved_logo.len())
+        .any(|w| w == approved_logo)
+    {
+        return Err(format!(
+            "Compiled binary lacks embedded approved logo: {}",
+            binary.display()
+        )
+        .into());
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod media_inventory_tests {
     use super::*;
+
+    #[test]
+    fn verifies_embedded_logo_bytes_and_rejects_unbranded_binaries() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let logo = b"<svg>numera-logo</svg>";
+        let branded = dir.path().join("branded.bin");
+        let unbranded = dir.path().join("unbranded.bin");
+        std::fs::write(&branded, b"ELF\0prefix<svg>numera-logo</svg>suffix").expect("write");
+        std::fs::write(&unbranded, b"ELF\0without_brand_payload").expect("write");
+        assert!(verify_embedded_logo(&branded, logo).is_ok());
+        assert!(verify_embedded_logo(&unbranded, logo).is_err());
+        assert!(verify_embedded_logo(&branded, b"").is_err());
+    }
 
     #[test]
     fn rejected_package_member_reports_only_escaped_relative_path() {

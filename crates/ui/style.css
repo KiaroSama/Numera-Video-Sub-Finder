@@ -1,66 +1,47 @@
 /* Evidence images stay unfiltered; cue rows match helpers::ROW_HEIGHT. */
-:root {
+:root, :root[data-theme="light"] {
   color-scheme: light;
-  --bg: #edf0f4;
+  --bg: #f4f4f6;
   --surface: #ffffff;
-  --surface-alt: #f5f7fa;
-  --input: #f5f7fa;
-  --sidebar: #f8f9fc;
-  --text: #202634;
-  --muted: #566176;
-  --border: #d9dfe9;
-  --strong-border: #79869c;
-  --accent: #bd2638;
-  --accent-hover: #a21d2e;
-  --accent-soft: #fcecef;
-  --on-accent: #ffffff;
-  --focus: #b31e36;
-  --error: #9b1723;
-  --error-bg: #fff0f0;
-  --shadow: 0 8px 26px rgb(25 35 55 / 4%);
-  font-family: "Segoe UI Variable", "Segoe UI", "Noto Sans", "Noto Sans Arabic", "Noto Sans JP", sans-serif;
+  --surface-alt: #f1f1f4;
+  --input: #f7f7f9;
+  --sidebar: #f8f8fa;
+  --text: #18181b;
+  --muted: #52525b;
+  --border: #e4e4e7;
+  --strong-border: #71717a;
+  --accent: #18181b;
+  --accent-hover: #27272a;
+  --accent-soft: #e4e4e7;
+  --on-accent: #fafafa;
+  --focus: #27272a;
+  --error: #b91c1c;
+  --error-bg: #fef2f2;
+  --shadow: 0 8px 24px rgb(9 9 11 / 5%);
+  --radius: 10px;
+  font-family: "Segoe UI Variable", "Segoe UI", "Vazirmatn", "Noto Sans", "Noto Sans Arabic", "Noto Sans JP", sans-serif;
   font-size: 14px;
   line-height: 1.5;
 }
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --bg: #111319;
-  --surface: #1b1f28;
-  --surface-alt: #242a35;
-  --input: #151922;
-  --sidebar: #161920;
-  --text: #eef1f8;
-  --muted: #a9b3c7;
-  --border: #343d4d;
-  --strong-border: #75839c;
-  --accent: #c72d42;
-  --accent-hover: #b32438;
-  --accent-soft: #39232d;
-  --focus: #ff9cab;
-  --error: #ffa8b6;
-  --error-bg: #38212b;
-  --shadow: 0 10px 30px rgb(0 0 0 / 10%);
-}
-@media (prefers-color-scheme: dark) {
-  :root[data-theme="system"] {
-    color-scheme: dark;
-    --bg: #111319;
-    --surface: #1b1f28;
-    --surface-alt: #242a35;
-    --input: #151922;
-    --sidebar: #161920;
-    --text: #eef1f8;
-    --muted: #a9b3c7;
-    --border: #343d4d;
-    --strong-border: #75839c;
-    --accent: #c72d42;
-    --accent-hover: #b32438;
-    --accent-soft: #39232d;
-    --focus: #ff9cab;
-    --error: #ffa8b6;
-    --error-bg: #38212b;
-    --shadow: 0 10px 30px rgb(0 0 0 / 10%);
-  }
+  --bg: #09090b;
+  --surface: #111114;
+  --surface-alt: #18181c;
+  --input: #141418;
+  --sidebar: #0c0c0f;
+  --text: #fafafa;
+  --muted: #a1a1aa;
+  --border: #27272a;
+  --strong-border: #71717a;
+  --accent: #e4e4e7;
+  --accent-hover: #f4f4f5;
+  --accent-soft: #27272a;
+  --on-accent: #09090b;
+  --focus: #d4d4d8;
+  --error: #fca5a5;
+  --error-bg: #2a1215;
+  --shadow: 0 10px 28px rgb(0 0 0 / 28%);
 }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--text); }
@@ -74,7 +55,7 @@ button:disabled, input:disabled, select:disabled { opacity: .52; cursor: not-all
 button.primary { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
 button.primary:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); }
 button.danger { color: var(--error); border-color: var(--error); }
-:focus-visible, select:focus { outline: 3px solid var(--focus); outline-offset: 3px; }
+:focus-visible, select:focus, .theme-toggle:focus { outline: 3px solid var(--focus); outline-offset: 3px; }
 main:focus { outline: none; }
 input:not([type="checkbox"]):not([type="range"]), select, textarea { color: var(--text); background: var(--input); border: 1px solid var(--strong-border); border-radius: 8px; padding: 10px 12px; width: 100%; }
 textarea { resize: vertical; min-height: 110px; line-height: 1.65; }
@@ -115,7 +96,7 @@ nav { display: flex; flex-direction: column; gap: 5px; }
 .workspace { min-width: 0; display: flex; flex-direction: column; }
 .topbar { display: flex; justify-content: space-between; align-items: center; gap: 20px; min-height: 132px; padding: 26px 30px; }
 .topbar-actions { display: flex; align-items: center; gap: 12px; }
-.theme-select { max-width: 102px; }
+.theme-toggle { min-height: 44px; min-width: 44px; padding: 9px 14px; border-radius: var(--radius); background: linear-gradient(180deg, var(--surface) 0%, var(--surface-alt) 100%); border: 1px solid var(--strong-border); white-space: nowrap; }
 main { flex: 1; padding: 0 30px 30px; }
 .statusbar { min-height: 35px; padding: 9px 30px; display: flex; justify-content: space-between; gap: 16px; font-size: 10px; color: var(--muted); border-top: 1px solid var(--border); }
 .panel { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 24px; box-shadow: var(--shadow); min-width: 0; }
@@ -316,5 +297,19 @@ input:not([type="checkbox"]):not([type="range"]), select, textarea { min-width: 
 @media (forced-colors: active) {
   button, input, select, textarea, .state-chip { border-color: ButtonText; }
   .nav-item.active, .cue-row.selected { outline: 2px solid Highlight; outline-offset: -3px; }
-  :focus-visible, select:focus { outline-color: Highlight; }
+  :focus-visible, select:focus, .theme-toggle:focus { outline-color: Highlight; }
 }
+
+html[data-glimm-transition] { view-transition-name: root !important; }
+html[data-glimm-transition] * { view-transition-name: none !important; }
+html[data-glimm-transition] [data-glimm-layer] { view-transition-name: glimm-layer !important; }
+@keyframes glimm-snapshot-hold { from { opacity: 1; } to { opacity: 1; } }
+html[data-glimm-transition]::view-transition { pointer-events: auto; }
+html[data-glimm-transition]::view-transition-group(*) { animation: glimm-snapshot-hold 86400s linear both; }
+html[data-glimm-transition]::view-transition-image-pair(*) { isolation: auto; }
+html[data-glimm-transition]::view-transition-old(*),
+html[data-glimm-transition]::view-transition-new(*) { animation: none; mix-blend-mode: normal; opacity: 1; }
+html[data-glimm-transition]::view-transition-old(root) { z-index: 2; clip-path: var(--glimm-old-clip, inset(0)); }
+html[data-glimm-transition]::view-transition-new(root) { z-index: 1; }
+html[data-glimm-transition]::view-transition-group(glimm-layer) { z-index: 2147483647; }
+html[data-glimm-transition]::view-transition-old(glimm-layer) { display: none; }

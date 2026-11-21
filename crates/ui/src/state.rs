@@ -403,14 +403,14 @@ impl Ui {
             self.busy.set(false);
         });
     }
+    pub fn toggle_theme(self) {
+        let next = helpers::opposite_theme(&self.theme.get_untracked()).to_string();
+        self.set_theme(next);
+    }
     pub fn set_theme(self, value: String) {
         let value = helpers::theme_value(&value).to_string();
+        let previous = self.theme.get_untracked();
         if let Some(window) = web_sys::window() {
-            if let Some(document) = window.document() {
-                if let Some(root) = document.document_element() {
-                    let _ = root.set_attribute("data-theme", &value);
-                }
-            }
             match window.local_storage() {
                 Ok(Some(storage)) => {
                     if let Err(e) = storage.set_item("nvsf-theme", &value) {
@@ -424,6 +424,7 @@ impl Ui {
             }
         }
         self.theme.set(value.clone());
+        crate::glimm::sweep_theme(&previous, &value);
         spawn_local(async move {
             if let Err(e) = ipc::call::<()>("ui_ready", json!({"theme": value})).await {
                 self.error.set(Some(e));

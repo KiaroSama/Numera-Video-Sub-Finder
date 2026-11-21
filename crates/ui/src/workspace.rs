@@ -80,9 +80,8 @@ pub fn Settings(ui: Ui) -> impl IntoView {
         });
     };
     view! {<div class="workspace-column"><section class="panel"><span class="eyebrow">"WORKSPACE PREFERENCES"</span><h2>"Appearance"</h2>
-        <label for="theme">"Color theme"</label><select id="theme" prop:value=move ||ui.theme.get() on:change=move |e|ui.set_theme(event_target_value(&e))>
-            <option value="system">"System · follows OS changes"</option><option value="dark">"Dark"</option><option value="light">"Light"</option></select>
-        <p class="hint">"The saved preference is applied before this window appears. Reduced motion follows the operating system; original frame pixels are never recolored."</p>
+        <div class="button-row"><button id="theme" type="button" class="theme-toggle" aria-label=move ||if ui.theme.get()=="dark"{"Switch to light theme"}else{"Switch to dark theme"} aria-pressed=move ||if ui.theme.get()=="light"{"true"}else{"false"} on:click=move |_|ui.toggle_theme()><svg viewBox="0 0 24 24" aria-hidden="true"><path d=move ||if ui.theme.get()=="dark"{"M12 3v2 M12 19v2 M4.93 4.93l1.41 1.41 M17.66 17.66l1.41 1.41 M3 12h2 M19 12h2 M4.93 19.07l1.41-1.41 M17.66 6.34l1.41-1.41 M16 12a4 4 0 1 1-8 0 4 4 0 0 1 8 0z"}else{"M21 12.79A9 9 0 1 1 11.21 3a7 7 0 0 0 9.79 9.79z"}/></svg><span>{move ||if ui.theme.get()=="dark"{"Switch to Light"}else{"Switch to Dark"}}</span></button></div>
+        <p class="hint">"First launch follows the operating system color scheme until you toggle it here or in the header. Reduced motion skips the sweep animation; original frame pixels are never recolored."</p>
         <h3>"Keyboard and text"</h3><dl class="shortcut-list"><dt>"Ctrl/Cmd + S"</dt><dd>"Save current review project"</dd><dt>"Ctrl/Cmd + Z / Shift + Z"</dt><dd>"Undo / redo cue edits (outside text fields)"</dd><dt>"Tab / Shift + Tab"</dt><dd>"Navigate every control"</dd></dl>
         <p class="hint">"Persian text is kept in logical Unicode with direction determined by its content. Japanese composition is not intercepted. Timestamps use ASCII digits."</p>
     </section><section class="panel"><div class="panel-heading"><h2>"Resources and diagnostics"</h2><button data-testid="native-diagnostics" disabled=move ||ui.busy.get() on:click={move |_|ui.request::<Doctor>("doctor",json!({}),move |d|ui.diagnostics.set(Some(d)))}>"Run resource checks"</button></div>

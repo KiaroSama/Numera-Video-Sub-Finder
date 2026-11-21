@@ -24,4 +24,4 @@ The desktop specification has 34 requirement groups, including the confirmed mai
 | FR-033 | Official multilingual catalog | 123 measured packs/shared aliases/explicit recognizer policy/CLI/UI; actual representative script OCR and original priority quality remain required |
 | FR-034 | Repository, setup and development publication | Topics/setup guide/manual final CI; four same-source signed native asset sets required before experimental prerelease, never stable-feed promotion |
 
-CT-01–CT-30 are catalogued in ci/test-inventory.json. CT-23 is owner-cancelled mobile scope, not a passing mobile test. Real-language quality thresholds, source coverage and mutation floors are retained unchanged; any incomplete lane is explicitly reported and blocks full release qualification.
+CT-01 to CT-30 are catalogued in ci/test-inventory.json. CT-23 is owner-cancelled mobile scope, not a passing mobile test. Real-language quality thresholds, source coverage and mutation floors are retained unchanged; any incomplete lane is explicitly reported and blocks full release qualification.

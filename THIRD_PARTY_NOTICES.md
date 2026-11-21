@@ -4,14 +4,14 @@ Application-owned code is GPL-3.0-or-later; see LICENSE. Native dependencies, mo
 
 | Dependency/artifact | Pinned source | Declared license / obligations |
 |---|---|---|
-| Rust / Rust standard library | rust-toolchain.toml 1.99.1 | MIT / Apache-2.0; preserve notices |
+| Rust / Rust standard library | rust-toolchain.toml 1.100.0 | MIT / Apache-2.0; preserve notices |
 | Tauri 2 / Leptos 0.8 | Cargo.lock and crate manifests | MIT / Apache-2.0 families; preserve exact package licenses |
 | FFmpeg 9.0.2 | vcpkg baseline e456309491fd875487bf02b8a0dca76c1b1b00cc, vcpkg.json features | Applicable LGPL/GPL terms depend on exact features; nonfree disabled; preserve configuration and corresponding source |
 | Tesseract 5.5.4 / Leptonica | Tesseract tag5.5.4 commit7e548e6eff172f38f97664afe7f7ce40db36c8d6 via ci/ports/tesseract; Leptonica at the unchanged vcpkg baseline | Apache-2.0 / BSD-style; preserve native notices |
 | Tesseract vcpkg overlay recipe and patches | Adapted from Microsoft vcpkg e456309491fd875487bf02b8a0dca76c1b1b00cc; source archive SHA512 pinned in portfile.cmake; redundant upstream-included MSVC patch omitted | MIT; Microsoft copyright/license retained in ci/ports/tesseract/LICENSE.vcpkg.txt and native package notices |
-| ONNX Runtime 1.31.0 | ci/targets.json official release hashes/source tag | MIT; preserve notices, runtime licenses and exact build provenance |
+| ONNX Runtime 1.31.0 | ci/targets.json and ci/gpu-lock.json official Microsoft NuGet package hashes | MIT; preserve notices, runtime licenses and exact build provenance |
 | glib 0.18.5 (security-patched) | patches/glib-0.18.5, crates.io 0.18.5 plus the upstream glib 0.20.0 fix for GHSA-wrw7-89jp-8q8g (see patches/glib-0.18.5/PATCHED.md) | MIT; LICENSE and COPYRIGHT kept in the patched copy |
-| ort 2.0.0-rc.14 | Cargo.lock | MIT / Apache-2.0; exact prerelease explicitly approved |
+| ort 2.0.0-rc.15 | Cargo.lock | MIT / Apache-2.0; exact prerelease explicitly approved |
 | webpki-root-certs 1.0.9 trust-anchor data | Cargo.lock; rustls/webpki-roots tag v/1.0.9 | CDLA-Permissive-2.0; full agreement in licenses/data/CDLA-Permissive-2.0.md is included with distributed data |
 | PaddleOCR v5 ONNX models | ci/models.json immutable official PaddlePaddle Hub revisions | Declared Apache-2.0; hashes identify bytes, not benchmark quality |
 | Tesseract language packs | ci/tessdata.json immutable tessdata_best revision | Apache-2.0 |
@@ -20,6 +20,7 @@ Application-owned code is GPL-3.0-or-later; see LICENSE. Native dependencies, mo
 | llama.cpp native helper | stable v0.6.0 peeled commit d81235049384534c167caea52b85a694f6103d14 plus exact15-line ARM BF16 backport from open PR30432/head1e2669d64def085bde50d8fa13db065281aa2eb1 | MIT and preserved vendor notices; stored patch/provenance included with native notices; unmerged backport and experimental CLI not release-qualified |
 | tauri-plugin-webdriver 0.2.3 | Optional test-only upstream commit 50e7509073ca47dbf2f42a965d8161c198b96ac3, Windows COM compatibility correction | MIT; absent from production application profiles |
 | Noto Sans / Arabic / Devanagari / KR fixture fonts | google/fonts commit 1d0e46c7933245c8180fe83e47917961c913bbdb; exact bytes in xtask/src/multilingual.rs | SIL Open Font License 1.1; unmodified font bytes and original per-font copyright/license retained in hosted fixture resources, not application packages |
+| glimm shader sweep (Rust/WASM port) | crates/ui/src/glimm.rs ported from glimm 0.3.1/0.4.1 (Noman Ijaz, https://glimm.dev) | MIT; Copyright (c) 2026 Noman Ijaz, permission notice preserved |
 | Official project logo | Supplied by project owner | Owner-authorized project branding; no unrelated proprietary logo copied |
 
 The native build preserves vcpkg copyright files and ONNX release/source LICENSE/notices with the package. The Rust lockfile and native/model manifests identify inputs. A release must ship an actual dependency/license inventory and provide corresponding source/configuration required by the selected licenses; this document is not a substitute for collecting exact package notices.
