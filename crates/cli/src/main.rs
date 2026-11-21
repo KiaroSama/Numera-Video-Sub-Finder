@@ -1,151 +1,31 @@
+mod bulk;
+mod cli;
+mod media_cmd;
 mod preflight;
+mod project;
+mod project_ops;
 mod provider_profile;
+mod queue_cmd;
 mod status;
+mod updates_cmd;
+mod worker_cmd;
 
-use clap::{Parser, Subcommand};
+pub(crate) use cli::*;
+
+use clap::Parser;
 use nvsf_app::{AppError, Control, Paths, Result, logging::Log, media, models, storage, worker};
 use nvsf_core::{ExtractConfig, Rect};
-use std::{
-    io::Write,
-    path::{Path, PathBuf},
-    sync::atomic::Ordering,
-};
+use std::{path::Path, sync::atomic::Ordering};
 
-#[derive(Parser)]
-#[command(version, about = "Extract visible video subtitles locally")]
-struct Cli {
-    #[arg(long, global = true)]
-    data_root: Option<PathBuf>,
-    #[command(subcommand)]
-    command: Commands,
+pub(crate) fn utf8_path(path: &Path) -> Result<String> {
+    path.to_str().map(str::to_owned).ok_or_else(|| {
+        AppError::InvalidConfig(
+            "This operation requires a valid UTF-8 path; rename the input or select another destination".into(),
+        )
+    })
 }
-#[derive(Subcommand)]
-enum Commands {
-    Extract(ExtractArgs),
-    Probe {
-        input: PathBuf,
-    },
-    Doctor {
-        #[arg(long, default_value = "json", value_parser=["json"])]
-        format: String,
-    },
-    /// Verify native APIs or repair this application without changing system software.
-    Dependencies {
-        #[arg(long)]
-        repair: bool,
-        #[arg(long, requires = "repair")]
-        consent: bool,
-    },
-    Models {
-        #[command(subcommand)]
-        command: ModelCommand,
-    },
-    Languages {
-        #[command(subcommand)]
-        command: LanguageCommand,
-    },
-    Resume {
-        project: PathBuf,
-    },
-    Export {
-        project: PathBuf,
-        output: PathBuf,
-        #[arg(long, default_value = "srt")]
-        format: String,
-        #[arg(long)]
-        overwrite: bool,
-        #[arg(long)]
-        bom: bool,
-        #[arg(long)]
-        crlf: bool,
-    },
-    Batch {
-        #[arg(required = true)]
-        inputs: Vec<PathBuf>,
-        #[arg(long)]
-        output_dir: PathBuf,
-        #[arg(long, default_value = "en")]
-        language: String,
-    },
-    Benchmark(ExtractArgs),
-    #[command(hide = true)]
-    NativeRequest {
-        #[arg(long)]
-        request: PathBuf,
-    },
-    #[command(hide = true)]
-    Worker {
-        #[arg(long)]
-        request: PathBuf,
-        #[arg(long)]
-        control: PathBuf,
-        #[arg(long, hide = true)]
-        provider_profile: Option<PathBuf>,
-    },
-}
-#[derive(Subcommand)]
-enum ModelCommand {
-    List,
-    Install {
-        #[arg(long)]
-        id: Option<String>,
-    },
-    Verify,
-    Import {
-        id: String,
-        path: PathBuf,
-    },
-    Export {
-        id: String,
-        path: PathBuf,
-    },
-}
-#[derive(Subcommand)]
-enum LanguageCommand {
-    List,
-    Install { code: String },
-    Verify { code: String },
-    Import { code: String, path: PathBuf },
-    Export { code: String, path: PathBuf },
-}
-#[derive(Clone, clap::Args)]
-struct ExtractArgs {
-    #[arg(long)]
-    input: PathBuf,
-    #[arg(long)]
-    output: PathBuf,
-    #[arg(long, alias = "languages", default_value = "en")]
-    language: String,
-    #[arg(long, default_value = "auto")]
-    device: String,
-    #[arg(long, default_value = "balanced")]
-    quality: String,
-    #[arg(long)]
-    roi: Vec<Rect>,
-    #[arg(long)]
-    exclude: Vec<Rect>,
-    #[arg(long, default_value_t = 0)]
-    start_ms: u64,
-    #[arg(long)]
-    end_ms: Option<u64>,
-    #[arg(long, default_value_t = 2)]
-    threads: usize,
-    #[arg(long)]
-    overwrite: bool,
-    #[arg(long)]
-    normalize_persian: bool,
-    #[arg(long)]
-    gpu_required: bool,
-    #[arg(long)]
-    accelerator_required: bool,
-    /// Record actual two-stage ONNX placement; requires an explicit device and a new absolute directory.
-    #[arg(long, value_name = "ABSOLUTE_NEW_DIR")]
-    provider_profile: Option<PathBuf>,
-}
-fn utf8_path(path: &Path) -> Result<String> {
-    path.to_str().map(str::to_owned).ok_or_else(||AppError::InvalidConfig("This operation requires a valid UTF-8 path; rename the input or select another destination".into()))
-}
-fn config(args: ExtractArgs, root: Option<&Path>) -> Result<ExtractConfig> {
+
+pub(crate) fn config(args: ExtractArgs, root: Option<&Path>) -> Result<ExtractConfig> {
     let config = ExtractConfig {
         input: utf8_path(&args.input)?,
         output: utf8_path(&args.output)?,
@@ -173,6 +53,7 @@ fn config(args: ExtractArgs, root: Option<&Path>) -> Result<ExtractConfig> {
         .map_err(|error| AppError::InvalidConfig(error.to_string()))?;
     Ok(config)
 }
+
 const EMBEDDED_LOGO_SVG: &[u8] = include_bytes!("../../../assets/logo.svg");
 
 fn main() {
@@ -197,6 +78,7 @@ fn main() {
     };
     std::process::exit(code);
 }
+
 fn run(cli: Cli) -> Result<i32> {
     if let Commands::NativeRequest { request } = &cli.command {
         return nvsf_app::native_request::run(request).map(|()| 0);
@@ -207,7 +89,7 @@ fn run(cli: Cli) -> Result<i32> {
         provider_profile,
     } = &cli.command
     {
-        return run_worker(request, control, provider_profile.as_deref()).map(|()| 0);
+        return worker_cmd::run_worker(request, control, provider_profile.as_deref()).map(|()| 0);
     }
     preflight::validate(&cli)?;
     let paths = Paths::new(cli.data_root.as_deref())?;
@@ -357,35 +239,68 @@ fn run(cli: Cli) -> Result<i32> {
             inputs,
             output_dir,
             language,
+            concurrency,
         } => {
             if !output_dir.is_dir() {
                 return Err(AppError::InvalidConfig(
                     "Batch output directory must exist".into(),
                 ));
             }
-            for (i, input) in inputs.iter().enumerate() {
-                let stem = input
-                    .file_stem()
-                    .ok_or_else(|| nvsf_app::fail("Input has no filename"))?
-                    .to_str()
-                    .ok_or_else(|| nvsf_app::fail("Batch filename must be UTF-8"))?;
-                let output = output_dir.join(format!("{stem}-{}.srt", i + 1));
-                let c = ExtractConfig {
-                    input: utf8_path(input)?,
-                    output: utf8_path(&output)?,
-                    language: language.clone(),
-                    data_root: cli.data_root.as_ref().map(|p| utf8_path(p)).transpose()?,
-                    ..Default::default()
-                };
-                let project = nvsf_app::extract(c, &control, |p| {
-                    eprintln!("Batch{} {}ms", i + 1, p.position_ms)
-                })?;
-                exit_code = exit_code.max(status::project(&project));
-                println!(
-                    "{}",
-                    serde_json::json!({"item":i + 1,"completed":project.completed,"cues":project.cues.len(),"review_needed":status::project(&project) == 2})
-                );
+            if concurrency > 1 {
+                exit_code = bulk::run_batch_concurrent(
+                    &inputs,
+                    &output_dir,
+                    &language,
+                    concurrency,
+                    cli.data_root.as_deref(),
+                    &control,
+                )?;
+            } else {
+                for (i, input) in inputs.iter().enumerate() {
+                    let stem = input
+                        .file_stem()
+                        .ok_or_else(|| nvsf_app::fail("Input has no filename"))?
+                        .to_str()
+                        .ok_or_else(|| nvsf_app::fail("Batch filename must be UTF-8"))?;
+                    let output = output_dir.join(format!("{stem}-{}.srt", i + 1));
+                    let c = ExtractConfig {
+                        input: utf8_path(input)?,
+                        output: utf8_path(&output)?,
+                        language: language.clone(),
+                        data_root: cli.data_root.as_ref().map(|p| utf8_path(p)).transpose()?,
+                        ..Default::default()
+                    };
+                    let project = nvsf_app::extract(c, &control, |p| {
+                        eprintln!("Batch{} {}ms", i + 1, p.position_ms)
+                    })?;
+                    exit_code = exit_code.max(status::project(&project));
+                    println!(
+                        "{}",
+                        serde_json::json!({"item":i + 1,"completed":project.completed,"cues":project.cues.len(),"review_needed":status::project(&project) == 2})
+                    );
+                }
             }
+        }
+        Commands::Bulk(args) => {
+            exit_code = bulk::run_bulk(*args, cli.data_root.as_deref(), &control)?;
+        }
+        Commands::Project { command } => {
+            exit_code = project::run(&paths, command, &control)?;
+        }
+        Commands::Regions { command } => {
+            media_cmd::run_regions(&paths, command, &control)?;
+        }
+        Commands::Preview { command } => {
+            media_cmd::run_preview(&paths, command, &control)?;
+        }
+        Commands::Queue { command } => {
+            exit_code = queue_cmd::run(&paths, command, &control)?;
+        }
+        Commands::Updates { command } => {
+            updates_cmd::run_updates(&paths, command, &control)?;
+        }
+        Commands::Preferences { command } => {
+            updates_cmd::run_preferences(&paths, command)?;
         }
         Commands::Worker { .. } | Commands::NativeRequest { .. } => {
             return Err(nvsf_app::fail("Invalid worker invocation"));
@@ -397,100 +312,4 @@ fn run(cli: Cli) -> Result<i32> {
         &format!("Command completed exit_code={exit_code}"),
     );
     Ok(exit_code)
-}
-
-fn run_worker(request: &Path, control_dir: &Path, profile_directory: Option<&Path>) -> Result<()> {
-    nvsf_app::worker::guard_parent_lifetime()?;
-    use worker::protocol;
-    let job_id = protocol::job_id(control_dir)?;
-    let config: ExtractConfig = protocol::read(request, job_id, protocol::CONTROL_LIMIT)?;
-    config.validate()?;
-    if let Some(directory) = profile_directory {
-        provider_profile::validate_options(directory, &config.device, &config.language)?;
-        provider_profile::validate_new_directory(directory)?;
-    }
-    let control = Control::default();
-    control.pause.store(
-        protocol::flag(control_dir, job_id, "pause")?,
-        Ordering::Relaxed,
-    );
-    control.cancel.store(
-        protocol::flag(control_dir, job_id, "cancel")?,
-        Ordering::Relaxed,
-    );
-    let flags = control.clone();
-    let dir = control_dir.to_path_buf();
-    let watcher_job = job_id.to_owned();
-    let stopped = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let done = stopped.clone();
-    let watcher = std::thread::spawn(move || -> Result<()> {
-        while !done.load(Ordering::Relaxed) {
-            let update = (|| -> Result<()> {
-                if protocol::flag(&dir, &watcher_job, "cancel")? {
-                    flags.cancel.store(true, Ordering::Relaxed);
-                }
-                flags.pause.store(
-                    protocol::flag(&dir, &watcher_job, "pause")?,
-                    Ordering::Relaxed,
-                );
-                Ok(())
-            })();
-            if let Err(error) = update {
-                flags.cancel.store(true, Ordering::Relaxed);
-                return Err(error);
-            }
-            std::thread::park_timeout(std::time::Duration::from_millis(50));
-        }
-        Ok(())
-    });
-    let mut emission_error = None;
-    let progress = |p| {
-        if emission_error.is_none()
-            && let Err(error) = emit(job_id, &worker::Event::Progress(p))
-        {
-            emission_error = Some(error);
-            control.cancel.store(true, Ordering::Relaxed);
-        }
-    };
-    let output = if let Some(directory) = profile_directory {
-        let requested_device = config.device.clone();
-        let strict = config.gpu_required || config.accelerator_required;
-        nvsf_app::extraction::run_profiled(config, &control, progress, directory).and_then(
-            |(project, files)| {
-                provider_profile::write_evidence(directory, &requested_device, strict, &files)?;
-                Ok(project)
-            },
-        )
-    } else {
-        nvsf_app::extraction::run(config, &control, progress)
-    };
-    stopped.store(true, Ordering::Relaxed);
-    watcher.thread().unpark();
-    watcher
-        .join()
-        .map_err(|_| nvsf_app::fail("Worker control watcher failed"))??;
-    if let Some(error) = emission_error {
-        return Err(error);
-    }
-    match output {
-        Ok(p) => {
-            emit(job_id, &worker::Event::Completed(Box::new(p)))?;
-            Ok(())
-        }
-        Err(e) => {
-            emit(
-                job_id,
-                &worker::Event::Failure(protocol::Failure::from_error(&e)),
-            )?;
-            Err(e)
-        }
-    }
-}
-fn emit(job_id: &str, event: &worker::Event) -> Result<()> {
-    let bytes = worker::protocol::encode(job_id, event, worker::protocol::EVENT_LIMIT - 1)?;
-    let mut stdout = std::io::stdout().lock();
-    stdout.write_all(&bytes)?;
-    stdout.write_all(b"\n")?;
-    stdout.flush()?;
-    Ok(())
 }

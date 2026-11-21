@@ -404,6 +404,50 @@ pub fn smoke(gui: &Path, fixtures: &Path, data: &Path, output: &Path) -> Result<
         {
             return Err("Actual GUI correction absent from exported Unicode SRT".into());
         }
+        // Verify Review search/filter, Persian RTL + Japanese text match, empty state, and layout reflow.
+        driver.fill(".review-toolbar input[type=search]", "سلام")?;
+        driver.wait(
+            "return document.querySelectorAll('.cue-row').length >= 1 && !document.querySelector('.review-toolbar .muted')?.textContent.trim().startsWith('0 ');",
+            5,
+        )?;
+        driver.fill(".review-toolbar input[type=search]", "日本語")?;
+        driver.wait(
+            "return document.querySelectorAll('.cue-row').length >= 1;",
+            5,
+        )?;
+        driver.fill(
+            ".review-toolbar input[type=search]",
+            "no-such-subtitle-match-xyz",
+        )?;
+        driver.wait(
+            "return document.querySelectorAll('.cue-row').length === 0 && document.querySelector('.review-toolbar .muted')?.textContent.includes('0 matches');",
+            5,
+        )?;
+        driver.script(
+            "const e=document.querySelector('.review-toolbar input[type=search]');e.value='';e.dispatchEvent(new Event('input',{bubbles:true}));return e.value;",
+        )?;
+        driver.wait(
+            "return document.querySelectorAll('.cue-row').length >= 1;",
+            5,
+        )?;
+        driver.select(".review-toolbar select", "edited")?;
+        driver.wait(
+            "return document.querySelectorAll('.cue-row').length >= 1;",
+            5,
+        )?;
+        driver.select(".review-toolbar select", "all")?;
+        driver.wait(
+            "return document.querySelectorAll('.cue-row').length >= 1;",
+            5,
+        )?;
+        let overflow = driver.script(
+            "return {scrollW:document.documentElement.scrollWidth,innerW:window.innerWidth};",
+        )?;
+        if overflow["scrollW"].as_u64() > overflow["innerW"].as_u64() {
+            return Err(
+                format!("Horizontal overflow detected on Review workspace: {overflow}").into(),
+            );
+        }
         let source = driver.request(reqwest::Method::GET, "/source", json!({}))?;
         std::fs::write(
             output.join("actual-page.html"),

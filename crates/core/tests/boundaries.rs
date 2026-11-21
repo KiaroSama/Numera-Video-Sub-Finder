@@ -180,3 +180,27 @@ fn history_availability_follows_undo_redo_and_new_edit_transitions() {
     assert!(!history.can_redo());
     assert!(!history.redo(&mut cues));
 }
+
+#[test]
+fn boundary_refinement_and_coverage_summary_enforce_monotonic_bounds() {
+    use nvsf_core::{CoverageSummary, refine_boundary_ms};
+
+    assert_eq!(
+        refine_boundary_ms(None, 1000, 2000, None).unwrap(),
+        (1000, 2000)
+    );
+    assert_eq!(
+        refine_boundary_ms(Some(800), 1000, 2000, Some(2400)).unwrap(),
+        (900, 2200)
+    );
+    assert!(refine_boundary_ms(None, 2000, 2000, None).is_err());
+    assert!(refine_boundary_ms(Some(1000), 1000, 2000, None).is_err());
+    assert!(refine_boundary_ms(None, 1000, 2000, Some(2000)).is_err());
+
+    let empty = CoverageSummary::from_counts(0, 0, 0).unwrap();
+    assert_eq!(empty.declared_coverage_ppm, 0);
+    let partial = CoverageSummary::from_counts(200, 50, 12).unwrap();
+    assert_eq!(partial.declared_coverage_ppm, 250_000);
+    assert_eq!(partial.emitted_cues, 12);
+    assert!(CoverageSummary::from_counts(10, 11, 1).is_err());
+}

@@ -15,8 +15,8 @@
   },
   "evidence": {
     "real_corpus_annotation": {"state": "BLOCKED", "reason": "Licensed real candidates exist; independent visible-text/frame-PTS annotations are not yet admitted for fa/ja"},
-    "physical_gpu": {"state": "BLOCKED", "reason": "Only standard public hosted runners authorized; no physical device runner available"},
-    "signing": {"state": "BLOCKED", "reason": "Windows development Authenticode is self-signed (untrusted root, untimestamped); macOS support removed by D-018; the authorized updater key does not establish native platform trust"},
-    "six_native_cpu": {"state": "NOT_RUN", "reason": "Source and workflow authored; exact source SHA results pending"}
+    "physical_gpu": {"state": "PARTIAL", "reason": "Windows x64 CUDA 12 physical qualification passed on T121 (f259561); hosted Actions runners remain CPU-only"},
+    "signing": {"state": "PARTIAL", "reason": "Owner self-signed Windows Authenticode identity (D-014, thumbprint B2A45C4E8257197BBF067ED94F83E626AC6CE1C5) actively signs and verifies Windows x64/arm64 binaries and NSIS installers; public CA trust remains separate"},
+    "four_native_cpu": {"state": "PASS", "reason": "All four 64-bit targets (windows-x64, windows-arm64, linux-x64, linux-arm64) plus portable, dependency, and security lanes passed on exact main SHA af4917ceedf31d23c27b14743be9b5f4926ab9f1 (run 44866722797)"}
   }
 }

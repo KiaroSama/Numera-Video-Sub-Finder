@@ -84,7 +84,13 @@ nvsf dependencies
 
 `dependencies --repair --consent` requests a matching signed application-local native pack when a component is missing or incompatible; it never installs system FFmpeg or changes PATH. A matching published pack is required. Restart after repair. `doctor` reports actual native API and version checks, not proven operator placement. `--gpu-required` and `--accelerator-required` fail when the requested execution policy cannot be established; only ONNX Runtime's forced CPU shape operators may run on CPU. `auto` may use CPU only with a reported fallback; an ordinary CPU package does not contain CUDA or DirectML runtime qualification. Device options are `cpu`, `auto`, `cuda` and `directml`.
 
-`batch`, `resume`, `export`, and `benchmark` share the native application service. Run each subcommand's `--help` for exact options. Benchmark elapsed time measures that run only, not universal speed or quality.
+`batch`, `bulk`, `resume`, `export`, `benchmark`, `project`, `regions`, `preview`, `queue`, `updates`, and `preferences` share the native application service and emit structured JSON for non-interactive automation and AI agents. Run concurrent multi-video extraction with `bulk` (or `batch --concurrency`):
+
+```bash
+nvsf bulk --input-dir "./videos" --output-dir "./subtitles" --language en --concurrency 2
+```
+
+An installable AI Agent Skill covering every CLI subcommand, exit code, and JSON workflow lives in [skills/numera-video-sub-finder/SKILL.md](skills/numera-video-sub-finder/SKILL.md) with a full flag reference in [skills/numera-video-sub-finder/references/cli-reference.md](skills/numera-video-sub-finder/references/cli-reference.md). Run any subcommand with `--help` for exact options. Benchmark elapsed time measures that run only, not universal speed or quality.
 
 ## Data and privacy
 

@@ -55,14 +55,55 @@ pub(crate) fn session_profiled(
     let attempt = build(env, path, selected, threads, required, profile);
     match attempt {
         Ok(s) => Ok((s, selected.into())),
-        Err(e) if requested == "auto" && !required => {
-            eprintln!("WARNING: {selected} unavailable ({e}); using CPU");
-            Ok((
-                build(env, path, "cpu", threads, false, profile)?,
-                "cpu".into(),
-            ))
-        }
-        Err(e) => Err(e),
+        Err(e) => match fallback_warning(requested, selected, required, &e.to_string())? {
+            Some(warning) => {
+                eprintln!("{warning}");
+                Ok((
+                    build(env, path, "cpu", threads, false, profile)?,
+                    "cpu".into(),
+                ))
+            }
+            None => Err(e),
+        },
+    }
+}
+
+pub fn is_oom_error(message: &str) -> bool {
+    let lower = message.to_ascii_lowercase();
+    [
+        "out of memory",
+        "cudaerrormemoryallocation",
+        "e_outofmemory",
+        "failed to allocate memory",
+        "bfc_arena",
+        "alloc_failed",
+    ]
+    .iter()
+    .any(|marker| lower.contains(marker))
+}
+
+pub fn fallback_warning(
+    requested: &str,
+    selected: &str,
+    required: bool,
+    error: &str,
+) -> Result<Option<String>> {
+    if required && is_oom_error(error) {
+        return Err(AppError::Provider(format!(
+            "Required GPU out of memory on {selected}; refusing silent CPU fallback ({error})"
+        )));
+    }
+    if requested == "auto" && !required && selected != "cpu" {
+        let kind = if is_oom_error(error) {
+            "gpu_oom_fallback"
+        } else {
+            "gpu_unavailable_fallback"
+        };
+        Ok(Some(format!(
+            "WARNING: event={kind} provider={selected} reason={error}; using CPU"
+        )))
+    } else {
+        Ok(None)
     }
 }
 
@@ -247,5 +288,44 @@ mod tests {
         assert!(error.contains("MatMul") && !error.contains("Slice"));
         assert!(require_accelerated(&nodes(&[(cpu, "Shape"), (cuda, "MemcpyToHost")])).is_err());
         assert!(require_accelerated(&[]).is_err());
+    }
+
+    #[test]
+    fn oom_classification_and_bounded_fallback_policy_fail_closed_when_required() {
+        assert!(is_oom_error(
+            "CUDAExecutionProvider: cudaErrorMemoryAllocation"
+        ));
+        assert!(is_oom_error("DirectML E_OUTOFMEMORY while creating tensor"));
+        assert!(is_oom_error("BFC_ARENA failed to allocate memory"));
+        assert!(!is_oom_error("Missing shared library libcudart.so"));
+
+        let oom_warn = fallback_warning("auto", "cuda", false, "out of memory")
+            .unwrap()
+            .unwrap();
+        assert!(oom_warn.contains("event=gpu_oom_fallback"));
+        let unavail_warn = fallback_warning("auto", "directml", false, "driver unavailable")
+            .unwrap()
+            .unwrap();
+        assert!(unavail_warn.contains("event=gpu_unavailable_fallback"));
+        assert!(
+            fallback_warning("cuda", "cuda", false, "out of memory")
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            fallback_warning("auto", "cpu", false, "out of memory")
+                .unwrap()
+                .is_none()
+        );
+
+        let err = fallback_warning("auto", "cuda", true, "CUDA out of memory")
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("GPU out of memory") && err.contains("refusing silent CPU fallback"));
+        assert!(
+            fallback_warning("cuda", "cuda", true, "driver missing")
+                .unwrap()
+                .is_none()
+        );
     }
 }
