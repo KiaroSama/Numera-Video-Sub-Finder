@@ -5,6 +5,14 @@ use nvsf_core::Recognition;
 use std::ffi::{CStr, CString, c_char, c_int, c_void};
 
 type Handle = *mut c_void;
+
+/// Tesseract OEM_LSTM_ONLY mode (numeric enum value 1 in capi.h).
+pub const OEM_LSTM_ONLY: c_int = 1;
+
+/// Page segmentation mode: single vertical uniform block (5) or single text line (7).
+pub fn psm_for_orientation(vertical: bool) -> c_int {
+    if vertical { 5 } else { 7 }
+}
 #[cfg(not(windows))]
 type Init = unsafe extern "C" fn(Handle, *const c_char, *const c_char, c_int) -> c_int;
 #[cfg(windows)]
@@ -112,7 +120,8 @@ impl Tesseract {
         // Official tessdata_best resources contain only the LSTM engine (OEM_LSTM_ONLY=1).
         #[cfg(not(windows))]
         // SAFETY: nonnull owned handle, initialized C strings remain alive through Init2.
-        let status = unsafe { (result.api.init)(handle, data.as_ptr(), lang.as_ptr(), 1) };
+        let status =
+            unsafe { (result.api.init)(handle, data.as_ptr(), lang.as_ptr(), OEM_LSTM_ONLY) };
         #[cfg(windows)]
         let status = {
             let size = c_int::try_from(data.len())
@@ -124,7 +133,7 @@ impl Tesseract {
                     data.as_ptr().cast(),
                     size,
                     lang.as_ptr(),
-                    1,
+                    OEM_LSTM_ONLY,
                     std::ptr::null_mut(),
                     0,
                     std::ptr::null_mut(),
@@ -150,7 +159,7 @@ impl Tesseract {
         }
         // SAFETY: RGB bytes remain alive throughout recognition, checked dimensions/stride fit i32.
         unsafe {
-            (self.api.set_mode)(self.handle, if vertical { 5 } else { 7 });
+            (self.api.set_mode)(self.handle, psm_for_orientation(vertical));
             (self.api.set_image)(
                 self.handle,
                 image.as_raw().as_ptr(),

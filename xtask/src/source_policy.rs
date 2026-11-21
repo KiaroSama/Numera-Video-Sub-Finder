@@ -193,9 +193,61 @@ pub fn verify() -> Result<(), Box<dyn Error>> {
         }
     }
 
+    for &wf_path in &files {
+        if !wf_path.starts_with(".github/workflows/")
+            || !(wf_path.ends_with(".yml") || wf_path.ends_with(".yaml"))
+        {
+            continue;
+        }
+        let wf = std::fs::read_to_string(wf_path)?;
+        validate_workflow_policy(wf_path, &wf)?;
+    }
+
     println!(
-        "Tracked text/publication boundaries and package CI inventory validated; heuristic secret check is not an exhaustive credential scan."
+        "Tracked text/publication boundaries, workflow policy lint, and package CI inventory validated; heuristic secret check is not an exhaustive credential scan."
     );
+    Ok(())
+}
+
+fn validate_workflow_policy(path: &str, text: &str) -> Result<(), Box<dyn Error>> {
+    if !text.contains("permissions:") {
+        return Err(format!("Workflow lacks explicit least-privilege permissions: {path}").into());
+    }
+    for (idx, line) in text.lines().enumerate() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('#') {
+            continue;
+        }
+        if let Some(rest) = trimmed
+            .strip_prefix("- uses:")
+            .or_else(|| trimmed.strip_prefix("uses:"))
+        {
+            let target = rest.trim().split('#').next().unwrap_or("").trim();
+            if target.starts_with("./") {
+                continue;
+            }
+            let Some((_, reference)) = target.rsplit_once('@') else {
+                return Err(
+                    format!("Unpinned workflow action at {path}:{}: {target}", idx + 1).into(),
+                );
+            };
+            let is_sha = reference.len() == 40 && reference.bytes().all(|b| b.is_ascii_hexdigit());
+            if !is_sha {
+                return Err(format!(
+                    "Workflow action must be pinned to a 40-hex commit SHA at {path}:{}: {target}",
+                    idx + 1
+                )
+                .into());
+            }
+        }
+        if trimmed.contains("macos-") {
+            return Err(format!(
+                "Unrequested macOS runner forbidden by D-018 at {path}:{}",
+                idx + 1
+            )
+            .into());
+        }
+    }
     Ok(())
 }
 
@@ -213,5 +265,26 @@ mod tests {
         let body = extract_job_body(sample, "loom").expect("loom job");
         assert!(body.contains("echo ok"));
         assert!(!body.contains("fuzz:"));
+
+        let good_wf = "name: Ok\npermissions:\n  contents: read\njobs:\n  a:\n    runs-on: ubuntu-24.04\n    steps:\n      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1\n      - uses: ./.github/workflows/ci.yml\n";
+        assert!(validate_workflow_policy(".github/workflows/ok.yml", good_wf).is_ok());
+        assert!(
+            validate_workflow_policy(".github/workflows/no-perm.yml", "name: Bad\njobs: {}\n")
+                .is_err()
+        );
+        assert!(
+            validate_workflow_policy(
+                ".github/workflows/unpinned.yml",
+                "permissions:\n  contents: read\nsteps:\n  - uses: actions/checkout@v4\n"
+            )
+            .is_err()
+        );
+        assert!(
+            validate_workflow_policy(
+                ".github/workflows/mac.yml",
+                "permissions:\n  contents: read\nruns-on: macos-15\n"
+            )
+            .is_err()
+        );
     }
 }

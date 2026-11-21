@@ -41,3 +41,17 @@ fn model_metadata_matches_immutable_manifest_hashes() {
         assert_eq!(actual, spec.metadata_sha256, "{} metadata", spec.id);
     }
 }
+
+#[test]
+fn tesseract_policy_uses_explicit_lstm_mode_and_orientation_psm() {
+    use nvsf_app::tesseract::{OEM_LSTM_ONLY, psm_for_orientation};
+    use nvsf_core::languages;
+
+    assert_eq!(OEM_LSTM_ONLY, 1);
+    assert_eq!(psm_for_orientation(false), 7);
+    assert_eq!(psm_for_orientation(true), 5);
+    assert_eq!(languages::paddle_model("eng"), Some("en-ja"));
+    assert_eq!(languages::paddle_model("fas"), Some("fa"));
+    assert_eq!(languages::paddle_model("jpn"), Some("en-ja"));
+    assert_eq!(languages::paddle_model("deu"), None);
+}

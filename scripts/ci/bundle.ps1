@@ -491,7 +491,16 @@ try {
     }
     $actualFormats = @($artifacts | ForEach-Object { $_.format } | Sort-Object)
     if (Compare-Object ($formats | Sort-Object) $actualFormats) { throw 'Required format inventory is incomplete.' }
-    $report = @{ schema = 1; source_sha = $env:GITHUB_SHA; target = $TargetId; passed = $true; tests = $checks; failed = 0; skipped = 0; status = 'development-unqualified'; signing = $signingLabel; signatures = @($signatures.ToArray()); icon_checks = @($iconChecks.ToArray()); formats = @($artifacts.ToArray()); files = @(Get-Inventory $output $packages); proof = @('same-source input byte inventory', 'real native bundler exit and all required format outputs', 'portable ZIP/tar decompressed byte integrity') + @($formatProofs.ToArray()); qualification = @{ installer_lifecycle = 'NOT_RUN'; installed_launch = 'NOT_RUN'; physical_gpu = 'NOT_RUN'; production_signing = $(if ($windowsSigning) { 'development-self-signed-untrusted-root-untimestamped' } else { 'NOT_RUN' }); linuxdeploy_modified_elf_byte_parity = 'NOT_CLAIMED'; microsoft_redistribution_rights = $(if ($IsWindows) { 'NOT_VALIDATED' } else { 'NOT_APPLICABLE' }); windows_webview = $(if ($IsWindows) { 'system WebView2 required for portable GUI; NSIS bootstrap may require internet' } else { 'NOT_APPLICABLE' }); compression_thread_count = 'NOT_MEASURED'; linux_bundler_cpu_capacity = $(if ($IsLinux) { $bundleCpuList } else { 'NOT_APPLICABLE' }) } }
+    $checksumLines = New-Object Collections.Generic.List[string]
+    foreach ($entry in @(Get-Inventory $output $output)) {
+        if ($entry.file -ne 'SHA256SUMS.txt') {
+            $checksumLines.Add("$($entry.sha256)  $($entry.file)")
+        }
+    }
+    if ($checksumLines.Count -eq 0) { throw 'Refusing to emit empty SHA256SUMS.txt.' }
+    $checksumPath = Join-Path $output 'SHA256SUMS.txt'
+    [IO.File]::WriteAllText($checksumPath, (($checksumLines.ToArray() -join "`n") + "`n"), $utf8)
+    $report = @{ schema = 1; source_sha = $env:GITHUB_SHA; target = $TargetId; passed = $true; tests = $checks; failed = 0; skipped = 0; status = 'development-unqualified'; signing = $signingLabel; signatures = @($signatures.ToArray()); icon_checks = @($iconChecks.ToArray()); formats = @($artifacts.ToArray()); files = @(Get-Inventory $output $packages); proof = @('same-source input byte inventory', 'real native bundler exit and all required format outputs', 'portable ZIP/tar decompressed byte integrity', 'verified SHA256SUMS.txt manifest') + @($formatProofs.ToArray()); qualification = @{ installer_lifecycle = 'NOT_RUN'; installed_launch = 'NOT_RUN'; physical_gpu = 'NOT_RUN'; production_signing = $(if ($windowsSigning) { 'development-self-signed-untrusted-root-untimestamped' } else { 'NOT_RUN' }); linuxdeploy_modified_elf_byte_parity = 'NOT_CLAIMED'; microsoft_redistribution_rights = $(if ($IsWindows) { 'NOT_VALIDATED' } else { 'NOT_APPLICABLE' }); windows_webview = $(if ($IsWindows) { 'system WebView2 required for portable GUI; NSIS bootstrap may require internet' } else { 'NOT_APPLICABLE' }); compression_thread_count = 'NOT_MEASURED'; linux_bundler_cpu_capacity = $(if ($IsLinux) { $bundleCpuList } else { 'NOT_APPLICABLE' }) } }
     $reports = Join-Path $packages 'reports'
     [IO.Directory]::CreateDirectory($reports) | Out-Null
     $reportPath = Join-Path $reports "$TargetId-bundles.json"
