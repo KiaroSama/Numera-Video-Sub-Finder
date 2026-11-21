@@ -1,4 +1,4 @@
-use nvsf_core::{Cue, export_ass, export_vtt};
+use nvsf_core::{Cue, export_ass, export_vtt, parse_srt};
 
 fn cue(start: u64, end: u64, text: &str) -> Cue {
     Cue::new(1, 0, start, end, text.into()).unwrap()
@@ -56,4 +56,10 @@ fn formats_keep_nonwrapping_hours_and_ass_rounding_does_not_overflow_u64() {
             .unwrap()
             .contains("5124095576030:25:51.61,5124095576030:25:51.62")
     );
+}
+
+#[test]
+fn parse_srt_rejects_missing_timecodes_and_invalid_separator() {
+    assert!(parse_srt("1").is_err());
+    assert!(parse_srt("1\n00:00:01,000 -> 00:00:02,000\nhello").is_err());
 }
