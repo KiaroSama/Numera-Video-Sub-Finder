@@ -92,8 +92,10 @@ fn queue_crud_and_run_preserve_desktop_schema() {
     let cleared = clear_records(&mut store, "completed").expect("clear completed");
     assert_eq!(cleared, 1);
     assert!(store.file.records.is_empty());
+    drop(store);
     let reloaded = QueueStore::open(&dir).expect("reopen queue");
     assert_eq!(reloaded.file.schema, 1);
     assert!(reloaded.file.records.is_empty());
+    drop(reloaded);
     let _ = std::fs::remove_dir_all(&dir);
 }
