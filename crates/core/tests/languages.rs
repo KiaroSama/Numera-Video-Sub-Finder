@@ -78,3 +78,31 @@ fn language_validation_rejects_paths_expressions_and_unknown_models() {
         assert!(config.validate().is_ok(), "{code}");
     }
 }
+
+#[test]
+fn short_language_aliases_resolve_to_pinned_catalog_codes() {
+    for (alias, expected) in [
+        ("en", "eng"),
+        ("fa", "fas"),
+        ("ja", "jpn"),
+        ("fr", "fra"),
+        ("de", "deu"),
+        ("es", "spa"),
+        ("it", "ita"),
+        ("pt", "por"),
+        ("ru", "rus"),
+        ("ar", "ara"),
+        ("hi", "hin"),
+        ("ko", "kor"),
+        ("zh", "chi_sim"),
+        ("zh-CN", "chi_sim"),
+        ("zh-TW", "chi_tra"),
+        ("ur", "urd"),
+        ("uk", "ukr"),
+        ("tr", "tur"),
+        ("vi", "vie"),
+    ] {
+        let entry = languages::find(alias).expect("known alias");
+        assert_eq!(entry.code, expected, "{alias}");
+    }
+}

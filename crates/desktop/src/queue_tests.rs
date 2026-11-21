@@ -405,3 +405,56 @@ fn mark_updates_state_and_truncates_worker_errors() {
         1000
     );
 }
+
+#[test]
+fn queue_commands_list_remove_reject_ungranted_add_and_guard_start() {
+    use crate::queue::{queue_add, queue_list, queue_remove, queue_start};
+    use std::sync::atomic::Ordering;
+    use tauri::Manager;
+
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path();
+    let app = tauri::test::mock_builder()
+        .manage(host(root))
+        .build(tauri::test::mock_context(tauri::test::noop_assets()))
+        .unwrap();
+    let state = app.state::<Host>();
+
+    let listed = tauri::async_runtime::block_on(queue_list(state.clone())).unwrap();
+    assert!(listed.is_empty());
+
+    assert!(
+        tauri::async_runtime::block_on(queue_add(
+            state.clone(),
+            "missing-source".into(),
+            "missing-output".into(),
+            ExtractConfig::default(),
+        ))
+        .is_err()
+    );
+
+    let mut running = record(root, "running");
+    running.state = "running".into();
+    let queued = record(root, "queued");
+    {
+        let mut store = lock(&state.inner().0.queue).unwrap();
+        store.file.records.push(running.clone());
+        store.file.records.push(queued.clone());
+        store.save(root).unwrap();
+    }
+
+    assert!(tauri::async_runtime::block_on(queue_remove(state.clone(), "missing".into())).is_err());
+    assert!(
+        tauri::async_runtime::block_on(queue_remove(state.clone(), running.id.clone())).is_err()
+    );
+
+    state.inner().0.unsaved.store(true, Ordering::Release);
+    assert!(tauri::async_runtime::block_on(queue_start(state.clone(), queued.id.clone())).is_err());
+    state.inner().0.unsaved.store(false, Ordering::Release);
+    assert!(tauri::async_runtime::block_on(queue_start(state.clone(), "missing".into())).is_err());
+    assert!(tauri::async_runtime::block_on(queue_start(state.clone(), queued.id.clone())).is_err());
+
+    let after = tauri::async_runtime::block_on(queue_remove(state.clone(), queued.id)).unwrap();
+    assert_eq!(after.len(), 1);
+    assert_eq!(after[0].id, running.id);
+}
