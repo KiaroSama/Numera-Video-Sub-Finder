@@ -150,7 +150,7 @@ fn Regions(ui: Ui) -> impl IntoView {
     view! {
         <details class="regions" open>
             <summary>"Subtitle regions and exclusions"</summary>
-            <p class="hint">"Normalized x,y,width,height (0–1). The initial bottom region is a manual starting point, not a detected subtitle. Draw on the preview or edit coordinates."</p>
+            <p class="hint">"Normalized x,y,width,height (0 to 1). The initial bottom region is a manual starting point, not a detected subtitle. Draw on the preview or edit coordinates."</p>
             <div class="region-list">{move ||ui.config.with(|c|c.regions.iter().copied().enumerate().map(|(i,r)|view!{
                 <label class="region-row"><span>{format!("Region {}",i+1)}</span><input aria-label=format!("Region {} normalized coordinates",i+1) prop:value=format!("{:.4},{:.4},{:.4},{:.4}",r.x,r.y,r.width,r.height)
                     on:change={move |e|match event_target_value(&e).parse::<Rect>(){Ok(r)=>ui.config.update(|c|if let Some(old)=c.regions.get_mut(i){*old=r;}),Err(e)=>ui.error.set(Some(e.to_string()))}}/>

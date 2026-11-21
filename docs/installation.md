@@ -84,7 +84,7 @@ On Windows the executable is `nvsf.exe`. Keep the CLI with its matching applicat
 
 In Models, install the baseline detector/recognizers explicitly, or import their exact checksummed artifacts using the native picker. Bundled verified baseline resources are copied to writable application data when available; inference itself never starts a model download.
 
-The language dropdown contains 123 official Tesseract language and vertical variants, not just English, Persian and Japanese. `eng/fas/jpn` and existing `en/fa/ja` aliases are accepted. Select a language in Additional language packs and download that pack, or import its exact official checksummed `.traineddata`. The default baseline installation does not fetch the entire language catalog.
+The language dropdown contains 123 official Tesseract language and vertical variants, covering English, Persian, Japanese, and 120 other scripts. `eng/fas/jpn` and existing `en/fa/ja` aliases are accepted. Select a language in Additional language packs and download that pack, or import its exact official checksummed `.traineddata`. The default baseline installation does not fetch the entire language catalog.
 
 ```bash
 ./nvsf models install
@@ -122,7 +122,7 @@ SRT, VTT and ASS keep distinct tracks separate. For multiple tracks, the chosen 
 
 Use Zoom (100% to 400%), native scrollbars or the labeled pan buttons to inspect a frame; Reset view restores fit without changing source pixels or normalized regions. In Review, expand Compare original and selected-frame crops and load the content-verified original extraction crop. The candidate shows the unmasked track region at the current source time. A moved/missing cache is reported honestly; it is never replaced with a newly decoded image and labelled original.
 
-Review source frames and uncertain cues before exporting. Save a review project before changing source, starting another job, repairing resources or installing an update. Checkpoints require matching source/configuration/selected-resource identities; installing unrelated language packs does not change that fingerprint. A checkpoint from an incompatible older fingerprint scheme may be refused rather than silently resumed.
+Review source frames and uncertain cues before exporting. Save a review project before changing source, starting another job, repairing resources or installing an update. Checkpoints require matching source/configuration/selected-resource identities; installing unrelated language packs does not change that fingerprint. A checkpoint from an incompatible older fingerprint scheme is refused instead of silently resumed.
 
 ## Updates, data and troubleshooting
 

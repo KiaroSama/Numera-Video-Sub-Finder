@@ -20,4 +20,4 @@ No trust-store import or timestamp is used. The certificate expires 2027-11-03, 
 
 Linux packages remain unsigned at the native level; separate updater signatures are unchanged and do not imply native package trust. Installer/signing/IME/device limitations stay open in [validation](validation.md), not hidden behind a successful compile.
 
-GPU profiling and the separate Windows x64 CUDA variant are still in progress. Physical RTX 4070 Ti qualification has not executed and will use only exact CI-built artifacts. Provider availability or a selected GPU label is not proof of node placement or speedup; retain the strict failure rather than inventing a fallback success.
+GPU profiling and the separate Windows x64 CUDA variant are still in progress. Physical RTX 4070 Ti qualification has not executed and will use only exact CI-built artifacts. Provider availability or a selected GPU label is not proof of node placement or speedup; keep the strict failure instead of faking a fallback pass.
