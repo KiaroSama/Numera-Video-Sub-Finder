@@ -110,7 +110,14 @@ fn updates_download_and_format_validation_fail_closed() {
         .expect("load offer")
         .expect("some");
     assert_eq!(loaded.token, "tok-1");
-    run_updates(&paths, UpdatesCommand::Status, &Control::default()).expect("status with offer");
+    run_updates(
+        &paths,
+        UpdatesCommand::Status {
+            format: "portable".into(),
+        },
+        &Control::default(),
+    )
+    .expect("status with offer");
 
     // Wrong token fails closed.
     assert!(

@@ -412,6 +412,8 @@ mod tests {
         Project {
             schema: 1,
             source_hash: hash,
+            config_hash: "b".repeat(64),
+            model_hash: "c".repeat(64),
             config: cfg,
             media: MediaInfo {
                 width: 1280,
@@ -424,10 +426,10 @@ mod tests {
                 rotation: 0,
             },
             cues: vec![cue],
+            processed_ms: 10_000,
+            active_appearances: Vec::new(),
             completed: true,
-            last_frame_ms: 10_000,
             warnings: Vec::new(),
-            models: Vec::new(),
         }
     }
 
@@ -444,7 +446,7 @@ mod tests {
         let hash = storage::hash_file(&video).expect("hash");
         let proj = sample_project(&video, hash);
         let proj_path = dir.join("clip.nvsf.json");
-        storage::save_project(&proj_path, &proj).expect("save project");
+        storage::save_project(&proj, &proj_path).expect("save project");
 
         verify_source_hash(&proj, &video).expect("matching hash");
         assert!(verify_source_hash(&proj, &other).is_err());

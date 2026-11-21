@@ -121,7 +121,7 @@ fn queue_validation_error_truncation_and_failure_isolation() {
 
     // Failure isolation and fail-fast cancellation.
     let control = Control::default();
-    let (code, summary) = run_records(&mut store, None, 1, true, &control, &|cfg, _| {
+    let (summary, code) = run_records(&mut store, None, 1, true, &control, |cfg, _| {
         if cfg.input.ends_with("v1.mp4") {
             Err(AppError::Provider("gpu unavailable".into()))
         } else {
