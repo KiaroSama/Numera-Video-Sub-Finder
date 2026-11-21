@@ -159,10 +159,8 @@ pub fn validate(cli: &Cli) -> Result<()> {
                     rect.validate().map_err(|e| invalid(e.to_string()))?;
                 }
             }
-            ProjectCommand::VisualRetryInstall { opt_in } => {
-                if !opt_in {
-                    return Err(invalid("Visual retry model installation requires --opt-in"));
-                }
+            ProjectCommand::VisualRetryInstall { opt_in } if !opt_in => {
+                return Err(invalid("Visual retry model installation requires --opt-in"));
             }
             _ => {}
         },
@@ -196,15 +194,15 @@ pub fn validate(cli: &Cli) -> Result<()> {
                     &args.exclude,
                 )?;
             }
-            QueueCommand::Clear { state } => {
+            QueueCommand::Clear { state }
                 if !matches!(
                     state.as_str(),
                     "all" | "queued" | "interrupted" | "completed" | "cancelled" | "failed"
-                ) {
-                    return Err(invalid(
-                        "State filter must be all, queued, interrupted, completed, cancelled or failed",
-                    ));
-                }
+                ) =>
+            {
+                return Err(invalid(
+                    "State filter must be all, queued, interrupted, completed, cancelled or failed",
+                ));
             }
             QueueCommand::Run { concurrency, .. } => {
                 bulk::validate_concurrency(*concurrency)?;
