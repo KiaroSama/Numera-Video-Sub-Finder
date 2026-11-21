@@ -28,7 +28,7 @@ Checks CLI version, build commit SHA, OS/architecture, paths, native runtime dia
 Stdout JSON:
 ```json
 {
-  "version": "0.1.0",
+  "version": "0.2.0",
   "source_sha": "af4917c...",
   "os": "windows",
   "architecture": "x86_64",
@@ -99,9 +99,13 @@ Stdout JSON:
 }
 ```
 
-### `nvsf preview frame --input <VIDEO> --at-ms <MS> --output <PNG> [--crop <X,Y,W,H>] [--overwrite]`
+### `nvsf preview frame --input <VIDEO> --at-ms <MS> --output <PNG> [--crop <X,Y,W,H>] [--grid] [--draw-box <X,Y,W,H>]... [--pixel-box <PX_X,PX_Y,PX_W,PX_H>]... [--overwrite]`
 
-Decodes the frame at `--at-ms` and writes a PNG to `--output`. When `--crop` is given, crops to the normalized `Rect` before PNG encoding.
+Decodes the frame at `--at-ms` and writes a PNG to `--output`. Visual inspection flags let an AI agent inspect any part of the frame and verify exact subtitle capture boxes before extraction:
+- `--grid`: overlays a `0.1..0.9` normalized coordinate grid with edge digit ticks (`1`..`9`) in full-frame coordinates.
+- `--draw-box <X,Y,W,H>` (repeatable): draws high-contrast colored boxes at normalized coordinates (`0..1`).
+- `--pixel-box <PX_X,PX_Y,PX_W,PX_H>` (repeatable): converts frame-pixel boxes into validated normalized `Rect`s, draws them onto the PNG, and prints each box's `region_arg` (`"x,y,w,h"`) ready for `--roi`.
+- `--crop <X,Y,W,H>`: crops to any sub-region of the frame after drawing full-frame grid/box overlays so coordinates stay consistent with `--roi`.
 
 Stdout JSON:
 ```json
@@ -109,14 +113,29 @@ Stdout JSON:
   "input": "video.mp4",
   "at_ms": 12000,
   "output": "frame.png",
+  "frame_width": 1920,
+  "frame_height": 1080,
   "width": 1728,
   "height": 216,
   "crop": { "x": 0.05, "y": 0.75, "width": 0.9, "height": 0.2 },
-  "bytes": 1120000,
-  "cropped": true
+  "crop_pixels": { "x": 96, "y": 810, "width": 1728, "height": 216 },
+  "cropped": true,
+  "grid": true,
+  "boxes": [
+    {
+      "index": 0,
+      "normalized": { "x": 0.05, "y": 0.75, "width": 0.9, "height": 0.2 },
+      "region_arg": "0.0500,0.7500,0.9000,0.2000",
+      "pixels": { "x": 96, "y": 810, "width": 1728, "height": 216 }
+    }
+  ],
+  "bytes": 1120000
 }
 ```
-(`crop` is omitted when `--crop` is not passed.)
+
+### `nvsf preview strip --input <VIDEO> --output-dir <DIR> [--count <1..24>] [--start-ms <MS>] [--end-ms <MS>] [--crop <X,Y,W,H>] [--grid] [--draw-box <X,Y,W,H>]... [--pixel-box <PX_X,PX_Y,PX_W,PX_H>]... [--overwrite]`
+
+Samples `--count` (default `6`, range `1..=24`) evenly spaced frames across `[start_ms, end_ms]` (or the full probed duration), applies the same `--grid`, `--draw-box`, `--pixel-box`, and `--crop` overlays, writes `frame-001-<ms>ms.png`..`frame-NNN-<ms>ms.png` into `--output-dir`, and prints a JSON manifest with `duration_ms`, `frame_width`, `frame_height`, and `frames[]`.
 
 ---
 

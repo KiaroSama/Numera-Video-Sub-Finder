@@ -1,5 +1,6 @@
 mod bulk;
 mod cli;
+mod frame_overlay;
 mod media_cmd;
 mod preflight;
 mod project;

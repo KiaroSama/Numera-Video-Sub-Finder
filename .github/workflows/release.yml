@@ -12,7 +12,7 @@ on:
         default: false
         type: boolean
       prerelease_tag:
-        description: Explicit prerelease tag (e.g. v0.1.0-dev.1) when publish_prerelease is true
+        description: Explicit prerelease tag (e.g. v0.2.0-dev.1) when publish_prerelease is true
         required: false
         default: ''
         type: string

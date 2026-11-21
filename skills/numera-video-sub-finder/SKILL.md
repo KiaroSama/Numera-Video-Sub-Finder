@@ -56,10 +56,17 @@ Pass `--data-root <DIR>` before any subcommand to isolate models, projects, queu
    ```sh
    nvsf regions suggest --input video.mp4 --language en
    ```
-2. Render a verification frame (optionally cropped to a region) as PNG:
-   ```sh
-   nvsf preview frame --input video.mp4 --at-ms 12000 --output frame.png --crop 0.05,0.75,0.9,0.2 --overwrite
-   ```
+2. Visually inspect frames and draw a capture box around subtitles before extracting:
+   - Sample multiple frames across the video with a normalized `0.1..0.9` coordinate grid so you can read exact subtitle coordinates directly from the PNGs:
+     ```sh
+     nvsf preview strip --input video.mp4 --output-dir frames --count 6 --grid --overwrite
+     ```
+   - Draw one or more candidate bounding boxes (`--draw-box` in normalized `0..1`, or `--pixel-box` in frame pixels) and optionally zoom into a sub-region (`--crop`) to confirm tight subtitle framing visually:
+     ```sh
+     nvsf preview frame --input video.mp4 --at-ms 12000 --output check.png --grid --draw-box 0.05,0.75,0.9,0.2 --overwrite
+     nvsf preview frame --input video.mp4 --at-ms 12000 --output zoom.png --crop 0.0,0.65,1.0,0.35 --pixel-box 96,810,1728,216 --overwrite
+     ```
+   - Read `boxes[0].region_arg` from stdout JSON and pass it verbatim to `--roi` in `extract` or `bulk`.
 3. Run extraction (produces `out.srt` and checkpoint `out.nvsf.json`):
    ```sh
    nvsf extract --input video.mp4 --output out.srt --language en --device auto --quality balanced --roi 0.05,0.75,0.9,0.2 --overwrite

@@ -333,6 +333,36 @@ fn queue_and_preferences_and_fail_closed_gates_work_end_to_end() {
     assert_eq!(out.status.code(), Some(3));
     let out = nvsf(&dir, &["bulk", "--concurrency", "9", "--input", "a.mp4"]);
     assert_eq!(out.status.code(), Some(3));
+    let out = nvsf(
+        &dir,
+        &[
+            "preview",
+            "strip",
+            "--input",
+            "a.mp4",
+            "--output-dir",
+            "frames",
+            "--count",
+            "25",
+        ],
+    );
+    assert_eq!(out.status.code(), Some(3));
+    let out = nvsf(
+        &dir,
+        &[
+            "preview",
+            "frame",
+            "--input",
+            "a.mp4",
+            "--at-ms",
+            "0",
+            "--output",
+            "f.png",
+            "--pixel-box",
+            "10,10,0,50",
+        ],
+    );
+    assert_eq!(out.status.code(), Some(3));
 
     let _ = std::fs::remove_dir_all(&dir);
 }

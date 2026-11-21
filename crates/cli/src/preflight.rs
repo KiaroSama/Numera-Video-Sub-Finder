@@ -172,8 +172,36 @@ pub fn validate(cli: &Cli) -> Result<()> {
             }
         },
         Commands::Preview { command } => match command {
-            PreviewCommand::Frame { crop, .. } => {
+            PreviewCommand::Frame { crop, draw_box, .. } => {
                 if let Some(rect) = crop {
+                    rect.validate().map_err(|e| invalid(e.to_string()))?;
+                }
+                for rect in draw_box {
+                    rect.validate().map_err(|e| invalid(e.to_string()))?;
+                }
+            }
+            PreviewCommand::Strip {
+                count,
+                start_ms,
+                end_ms,
+                crop,
+                draw_box,
+                ..
+            } => {
+                if *count == 0 || *count > 24 {
+                    return Err(invalid("Strip frame count must be between 1 and 24"));
+                }
+                if let Some(end) = end_ms
+                    && end < start_ms
+                {
+                    return Err(invalid(
+                        "Strip end_ms must be greater than or equal to start_ms",
+                    ));
+                }
+                if let Some(rect) = crop {
+                    rect.validate().map_err(|e| invalid(e.to_string()))?;
+                }
+                for rect in draw_box {
                     rect.validate().map_err(|e| invalid(e.to_string()))?;
                 }
             }

@@ -6,10 +6,11 @@
 
 [![Final verification](https://github.com/KiaroSama/Numera-Video-Sub-Finder/actions/workflows/verify.yml/badge.svg)](https://github.com/KiaroSama/Numera-Video-Sub-Finder/actions/workflows/verify.yml)
 [![License GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-2563eb)](LICENSE)
+[![Version 0.2.0](https://img.shields.io/badge/version-0.2.0-059669)](Cargo.toml)
 [![Rust 1.100.0 toolchain](https://img.shields.io/badge/rust-1.100.0-8b5cf6)](rust-toolchain.toml)
 [![Runs on Windows and Linux, x64 and ARM64](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%28x64%2C%20ARM64%29-0891b2)](ci/targets.json)
 [![Project guides](https://img.shields.io/badge/docs-project%20guides-1d4ed8)](docs/architecture.md)
-[![Tracked repository working tree size 7.5 MB](https://img.shields.io/badge/repo%20size-7.5%20MB-ca8a04)](docs/installation.md)
+[![Tracked repository working tree size 7.7 MB](https://img.shields.io/badge/repo%20size-7.7%20MB-ca8a04)](docs/installation.md)
 [![Rust edition 2024](https://img.shields.io/badge/edition-2024-ea580c)](Cargo.toml)
 [![Tauri 2 desktop shell](https://img.shields.io/badge/Tauri-2-0d9488)](crates/desktop/Cargo.toml)
 [![Leptos Rust and WebAssembly UI](https://img.shields.io/badge/UI-Leptos%20%7C%20WASM-dc2626)](crates/ui/Cargo.toml)
@@ -26,7 +27,7 @@ An offline-first desktop workspace for extracting visible, burned-in subtitles f
 
 Development; not a qualified release. Source and CI definitions do not prove successful builds or OCR quality. The live CI badge is authoritative for hosted checks. See [validation status](docs/validation.md) for remaining gates. Android and iPhone applications are not included.
 
-The four native 64-bit targets are Windows x64, Windows ARM64, Linux x64 and Linux ARM64. All 32-bit builds are excluded. Hosted CPU CI is separate from real-device accelerator qualification. Final distribution requires verified platform signatures; missing Windows signing inputs currently block publication. The dedicated updater key is not a platform certificate. Source availability does not imply signing, GPU placement or quality certification.
+The four native 64-bit targets are Windows x64, Windows ARM64, Linux x64 and Linux ARM64. All 32-bit builds are excluded. Hosted CPU CI is separate from real-device accelerator qualification. Windows binaries and NSIS installers carry the pinned owner self-signed development Authenticode signature (`D-014`); public CA publisher trust remains separate. The dedicated updater key is not a platform certificate. Source availability does not imply public trust, GPU placement or real-corpus accuracy certification.
 
 ## Installation and setup
 
@@ -87,6 +88,8 @@ nvsf dependencies
 `batch`, `bulk`, `resume`, `export`, `benchmark`, `project`, `regions`, `preview`, `queue`, `updates`, and `preferences` share the native application service and emit structured JSON for non-interactive automation and AI agents. Run concurrent multi-video extraction with `bulk` (or `batch --concurrency`):
 
 ```bash
+nvsf preview strip --input "video.mp4" --output-dir "./frames" --count 6 --grid --overwrite
+nvsf preview frame --input "video.mp4" --at-ms 12000 --output "check.png" --grid --draw-box 0.05,0.75,0.9,0.2 --overwrite
 nvsf bulk --input-dir "./videos" --output-dir "./subtitles" --language en --concurrency 2
 ```
 

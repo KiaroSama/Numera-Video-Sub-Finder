@@ -7,7 +7,16 @@ use nvsf_core::media_abi::{
 #[test]
 fn corrupt_truncated_and_empty_media_files_fail_safely_without_runtime_mutation() {
     let dir = tempfile::tempdir().unwrap();
+    let mut missing_paths = Paths::new(Some(dir.path())).unwrap();
+    missing_paths.runtimes = dir.path().join("missing-runtimes");
+    let missing_err = match MediaRuntime::load(&missing_paths) {
+        Ok(_) => panic!("explicit missing runtime root must not load"),
+        Err(err) => err,
+    };
+    assert!(matches!(missing_err, AppError::Message(_)));
+
     let paths = Paths::new(Some(dir.path())).unwrap();
+    let loaded = MediaRuntime::load(&paths);
     for (name, bytes) in [
         ("empty.mp4", &[][..]),
         (
@@ -21,11 +30,16 @@ fn corrupt_truncated_and_empty_media_files_fail_safely_without_runtime_mutation(
     ] {
         let file = dir.path().join(name);
         std::fs::write(&file, bytes).unwrap();
-        let err = match MediaRuntime::load(&paths) {
-            Ok(_) => panic!("unprovisioned test root must not load a native runtime"),
-            Err(err) => err,
-        };
-        assert!(matches!(err, AppError::Message(_)));
+        if let Ok(runtime) = &loaded {
+            assert!(
+                runtime.probe(&file).is_err(),
+                "corrupt media probe must fail for {name}"
+            );
+            assert!(
+                runtime.decode(&file, 0, None, |_| Ok(true)).is_err(),
+                "corrupt media decode must fail for {name}"
+            );
+        }
         assert_eq!(std::fs::read(&file).unwrap(), bytes);
     }
 }

@@ -1,6 +1,8 @@
 # Validation status
 
-Updated: 2026-11-17. NOT a release acceptance report. Hosted observations below refer to the exact named SHA; current signing/icon implementation and GPU work have not run in CI.
+Updated: 2026-11-21 (version `0.2.0`). NOT a full public-release acceptance report. Hosted observations below refer to exact named commit SHAs.
+
+2026-11-21, D-020 verified green on exact `af4917ceedf31d23c27b14743be9b5f4926ab9f1` ([run 44866722797](https://github.com/KiaroSama/Numera-Video-Sub-Finder/actions/runs/44866722797)): all 15/15 Final verification jobs, 14/14 commit statuses, and 17/17 check runs (including Gitleaks and Socket Security) passed across all four 64-bit targets (`windows-x64`, `windows-arm64`, `linux-x64`, `linux-arm64`) on Rust `1.100.0`. D-021 (`0.2.0`) adds full desktop-to-CLI agent parity, concurrent `bulk` extraction, visual frame grid/box-drawing (`preview frame --grid --draw-box --pixel-box`, `preview strip`), the tracked AI Agent Skill under `skills/numera-video-sub-finder/`, GPU OOM fallback, boundary refinement, workflow policy linting, `SHA256SUMS.txt`, and four-target `release.yml`.
 
 2026-11-17, owner decision D-018: support is limited to Windows x64, Windows ARM64, Linux x64 and Linux ARM64. Apple signing/notarization and macOS screenshot obligations are withdrawn, not blocked. Earlier macOS results and pending descriptions remain historical evidence only.
 

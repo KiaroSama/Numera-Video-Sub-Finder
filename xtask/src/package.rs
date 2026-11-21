@@ -44,7 +44,10 @@ pub fn assemble(
         &sha(Path::new("Cargo.lock"))?,
         runtimes,
     )?;
-    let root = output.join(format!("Numera-Video-Sub-Finder-0.1.0-{target}"));
+    let root = output.join(format!(
+        "Numera-Video-Sub-Finder-{}-{target}",
+        env!("CARGO_PKG_VERSION")
+    ));
     std::fs::create_dir_all(&root)?;
     let cli_name = if cfg!(windows) { "nvsf.exe" } else { "nvsf" };
     let gui_name = if cfg!(windows) {
@@ -95,7 +98,10 @@ pub fn assemble(
 }
 
 pub fn standalone(target: &str, packages: &Path, fixtures: &Path) -> Result<()> {
-    let original = packages.join(format!("Numera-Video-Sub-Finder-0.1.0-{target}"));
+    let original = packages.join(format!(
+        "Numera-Video-Sub-Finder-{}-{target}",
+        env!("CARGO_PKG_VERSION")
+    ));
     let owned = PathBuf::from(".ci-work/relocated");
     std::fs::create_dir_all(&owned)?;
     let root = owned.join(format!("Numera 日本 portable {target}"));

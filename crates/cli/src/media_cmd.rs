@@ -1,11 +1,17 @@
-use crate::{PreviewCommand, RegionsCommand};
+use crate::{
+    PreviewCommand, RegionsCommand,
+    frame_overlay::{
+        PixelBox, box_color, draw_coordinate_grid, draw_rect_overlay, format_region_arg,
+        pixel_box_to_rect, rect_to_pixel_box, sample_timestamps_ms,
+    },
+};
 use nvsf_app::{
     AppError, Control, Paths, Result, media,
     native_request::{self, Operation, Response},
     storage,
 };
 use nvsf_core::Rect;
-use std::path::Path;
+use std::{path::Path, sync::atomic::Ordering};
 
 pub(crate) fn run_regions(paths: &Paths, command: RegionsCommand, control: &Control) -> Result<()> {
     match command {
@@ -35,6 +41,14 @@ pub(crate) fn run_regions(paths: &Paths, command: RegionsCommand, control: &Cont
     }
 }
 
+struct RenderOptions<'a> {
+    crop: Option<Rect>,
+    grid: bool,
+    draw_boxes: &'a [Rect],
+    pixel_boxes: &'a [PixelBox],
+    overwrite: bool,
+}
+
 pub(crate) fn run_preview(paths: &Paths, command: PreviewCommand, control: &Control) -> Result<()> {
     match command {
         PreviewCommand::Frame {
@@ -42,13 +56,12 @@ pub(crate) fn run_preview(paths: &Paths, command: PreviewCommand, control: &Cont
             at_ms,
             output,
             crop,
+            grid,
+            draw_box,
+            pixel_box,
             overwrite,
         } => {
-            if let Some(rect) = crop {
-                rect.validate()
-                    .map_err(|e| AppError::InvalidConfig(e.to_string()))?;
-                save_cropped_frame(paths, &input, at_ms, &output, rect, overwrite)
-            } else {
+            if crop.is_none() && !grid && draw_box.is_empty() && pixel_box.is_empty() {
                 let (response, bytes) = native_request::supervise(
                     paths,
                     &input,
@@ -66,64 +79,172 @@ pub(crate) fn run_preview(paths: &Paths, command: PreviewCommand, control: &Cont
                         "input": input,
                         "at_ms": at_ms,
                         "output": output,
+                        "frame_width": width,
+                        "frame_height": height,
                         "width": width,
                         "height": height,
                         "bytes": bytes.len(),
                         "cropped": false,
+                        "grid": false,
+                        "boxes": [],
                     }))?
                 );
                 Ok(())
+            } else {
+                let runtime = media::MediaRuntime::load(paths)?;
+                let opts = RenderOptions {
+                    crop,
+                    grid,
+                    draw_boxes: &draw_box,
+                    pixel_boxes: &pixel_box,
+                    overwrite,
+                };
+                let report = render_frame_to_png(&runtime, &input, at_ms, &output, &opts)?;
+                println!("{}", serde_json::to_string_pretty(&report)?);
+                Ok(())
             }
+        }
+        PreviewCommand::Strip {
+            input,
+            output_dir,
+            count,
+            start_ms,
+            end_ms,
+            crop,
+            grid,
+            draw_box,
+            pixel_box,
+            overwrite,
+        } => {
+            let runtime = media::MediaRuntime::load(paths)?;
+            let media_info = runtime.probe(&input)?;
+            let duration_ms = media_info.duration_ms.unwrap_or(start_ms);
+            let timestamps = sample_timestamps_ms(duration_ms, start_ms, end_ms, count)?;
+            std::fs::create_dir_all(&output_dir)?;
+            let opts = RenderOptions {
+                crop,
+                grid,
+                draw_boxes: &draw_box,
+                pixel_boxes: &pixel_box,
+                overwrite,
+            };
+            let mut frames = Vec::with_capacity(timestamps.len());
+            for (idx, at_ms) in timestamps.into_iter().enumerate() {
+                if control.cancel.load(Ordering::Acquire) {
+                    return Err(AppError::Cancelled);
+                }
+                let file = output_dir.join(format!("frame-{:03}-{at_ms}ms.png", idx + 1));
+                frames.push(render_frame_to_png(&runtime, &input, at_ms, &file, &opts)?);
+            }
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&serde_json::json!({
+                    "input": input,
+                    "output_dir": output_dir,
+                    "duration_ms": media_info.duration_ms,
+                    "frame_width": media_info.width,
+                    "frame_height": media_info.height,
+                    "count": frames.len(),
+                    "grid": grid,
+                    "frames": frames,
+                }))?
+            );
+            Ok(())
         }
     }
 }
 
-fn save_cropped_frame(
-    paths: &Paths,
+fn render_frame_to_png(
+    runtime: &media::MediaRuntime,
     input: &Path,
     at_ms: u64,
     output: &Path,
-    rect: Rect,
-    overwrite: bool,
-) -> Result<()> {
-    let frame = media::MediaRuntime::load(paths)?.preview(input, at_ms)?;
+    opts: &RenderOptions<'_>,
+) -> Result<serde_json::Value> {
+    if let Some(rect) = opts.crop {
+        rect.validate()
+            .map_err(|e| AppError::InvalidConfig(e.to_string()))?;
+    }
+    let frame = runtime.preview(input, at_ms)?;
     let frame_w = frame.width();
     let frame_h = frame.height();
-    let (x, y, w, h) = rect.pixels(frame_w, frame_h)?;
-    let raw = frame.as_raw();
+    let mut rgb = frame.into_raw();
+
+    if opts.grid {
+        draw_coordinate_grid(&mut rgb, frame_w, frame_h);
+    }
+
+    let mut resolved_boxes = Vec::with_capacity(opts.draw_boxes.len() + opts.pixel_boxes.len());
+    for &rect in opts.draw_boxes {
+        rect.validate()
+            .map_err(|e| AppError::InvalidConfig(e.to_string()))?;
+        resolved_boxes.push(rect);
+    }
+    for &px in opts.pixel_boxes {
+        resolved_boxes.push(pixel_box_to_rect(px, frame_w, frame_h)?);
+    }
+
+    let mut box_reports = Vec::with_capacity(resolved_boxes.len());
+    for (idx, rect) in resolved_boxes.into_iter().enumerate() {
+        let px = draw_rect_overlay(&mut rgb, frame_w, frame_h, rect, box_color(idx))?;
+        box_reports.push(serde_json::json!({
+            "index": idx,
+            "normalized": rect,
+            "region_arg": format_region_arg(rect),
+            "pixels": px,
+        }));
+    }
+
+    let (out_w, out_h, out_rgb, crop_pixels) = if let Some(rect) = opts.crop {
+        let px = rect_to_pixel_box(rect, frame_w, frame_h)?;
+        let cropped = crop_rgb_buffer(&rgb, frame_w, px)?;
+        (px.width, px.height, cropped, Some(px))
+    } else {
+        (frame_w, frame_h, rgb, None)
+    };
+
+    let png = encode_rgb_png(out_w, out_h, &out_rgb)?;
+    storage::write_atomic(output, &png, opts.overwrite)?;
+    Ok(serde_json::json!({
+        "input": input,
+        "at_ms": at_ms,
+        "output": output,
+        "frame_width": frame_w,
+        "frame_height": frame_h,
+        "width": out_w,
+        "height": out_h,
+        "crop": opts.crop,
+        "crop_pixels": crop_pixels,
+        "cropped": opts.crop.is_some(),
+        "grid": opts.grid,
+        "boxes": box_reports,
+        "bytes": png.len(),
+    }))
+}
+
+fn crop_rgb_buffer(raw: &[u8], frame_w: u32, px: PixelBox) -> Result<Vec<u8>> {
     let stride = (frame_w as usize)
         .checked_mul(3)
         .ok_or_else(|| nvsf_app::fail("Preview frame stride overflow"))?;
-    let mut cropped = Vec::with_capacity((w as usize).saturating_mul(h as usize).saturating_mul(3));
-    for row in 0..h as usize {
-        let row_start = (y as usize + row)
+    let mut cropped = Vec::with_capacity(
+        (px.width as usize)
+            .saturating_mul(px.height as usize)
+            .saturating_mul(3),
+    );
+    for row in 0..px.height as usize {
+        let row_start = (px.y as usize + row)
             .checked_mul(stride)
-            .and_then(|base| base.checked_add((x as usize).checked_mul(3)?))
+            .and_then(|base| base.checked_add((px.x as usize).checked_mul(3)?))
             .ok_or_else(|| nvsf_app::fail("Preview crop offset overflow"))?;
         let row_end = row_start
-            .checked_add((w as usize).saturating_mul(3))
+            .checked_add((px.width as usize).saturating_mul(3))
             .ok_or_else(|| nvsf_app::fail("Preview crop row overflow"))?;
         let slice = raw
             .get(row_start..row_end)
             .ok_or_else(|| nvsf_app::fail("Preview crop exceeds frame bounds"))?;
         cropped.extend_from_slice(slice);
     }
-    let png = encode_rgb_png(w, h, &cropped)?;
-    storage::write_atomic(output, &png, overwrite)?;
-    println!(
-        "{}",
-        serde_json::to_string_pretty(&serde_json::json!({
-            "input": input,
-            "at_ms": at_ms,
-            "output": output,
-            "width": w,
-            "height": h,
-            "crop": rect,
-            "bytes": png.len(),
-            "cropped": true,
-        }))?
-    );
-    Ok(())
+    Ok(cropped)
 }
 
 /// Encodes 8-bit RGB24 pixels as a spec-compliant PNG using stored DEFLATE blocks (std-only).

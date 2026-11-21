@@ -365,6 +365,34 @@ pub(crate) enum PreviewCommand {
         #[arg(long)]
         crop: Option<Rect>,
         #[arg(long)]
+        grid: bool,
+        #[arg(long = "draw-box")]
+        draw_box: Vec<Rect>,
+        #[arg(long = "pixel-box")]
+        pixel_box: Vec<crate::frame_overlay::PixelBox>,
+        #[arg(long)]
+        overwrite: bool,
+    },
+    Strip {
+        #[arg(long)]
+        input: PathBuf,
+        #[arg(long)]
+        output_dir: PathBuf,
+        #[arg(long, default_value_t = 6)]
+        count: usize,
+        #[arg(long, default_value_t = 0)]
+        start_ms: u64,
+        #[arg(long)]
+        end_ms: Option<u64>,
+        #[arg(long)]
+        crop: Option<Rect>,
+        #[arg(long)]
+        grid: bool,
+        #[arg(long = "draw-box")]
+        draw_box: Vec<Rect>,
+        #[arg(long = "pixel-box")]
+        pixel_box: Vec<crate::frame_overlay::PixelBox>,
+        #[arg(long)]
         overwrite: bool,
     },
 }
