@@ -130,8 +130,9 @@ fn queue_validation_error_truncation_and_failure_isolation() {
     })
     .expect("run fail-fast");
     assert_eq!(code, 6);
-    assert_eq!(summary["failed"], 1);
+    assert_eq!(summary["failed"], 2);
     assert_eq!(store.file.records[0].state, "failed");
+    assert_eq!(store.file.records[1].state, "cancelled");
     assert_eq!(r1.id, store.file.records[0].id);
     assert_eq!(r2.id, store.file.records[1].id);
 
@@ -156,7 +157,8 @@ fn queue_validation_error_truncation_and_failure_isolation() {
 
     assert_eq!(combine_failure(0, 6), 6);
     assert_eq!(combine_failure(4, 6), 4);
-    assert_eq!(truncate_error(&"x".repeat(1200)).chars().count(), 1000);
+    assert_eq!(truncate_error("short"), "short");
+    assert_eq!(truncate_error(&"x".repeat(5000)).len(), 4096);
 
     let cleared = clear_records(&mut store, "all").expect("clear all");
     assert_eq!(cleared, 2);
