@@ -99,3 +99,67 @@ fn queue_crud_and_run_preserve_desktop_schema() {
     drop(reloaded);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn queue_validation_error_truncation_and_failure_isolation() {
+    let dir = temp_root();
+    let v1 = dir.join("v1.mp4");
+    let v2 = dir.join("v2.mp4");
+    std::fs::write(&v1, b"v1").expect("v1");
+    std::fs::write(&v2, b"v2").expect("v2");
+
+    let mut store = QueueStore::open(&dir).expect("open");
+    let r1 = add_record(&mut store, &dir, make_args(v1.clone(), dir.join("o1.srt"))).expect("r1");
+    let r2 = add_record(&mut store, &dir, make_args(v2.clone(), dir.join("o2.srt"))).expect("r2");
+
+    // Duplicate output destination rejected.
+    assert!(add_record(&mut store, &dir, make_args(v1.clone(), dir.join("o1.srt"))).is_err());
+    // Missing remove ID rejected.
+    assert!(remove_record(&mut store, "no-such-id").is_err());
+    // Invalid clear state rejected.
+    assert!(clear_records(&mut store, "bogus").is_err());
+
+    // Failure isolation and fail-fast cancellation.
+    let control = Control::default();
+    let (code, summary) = run_records(&mut store, None, 1, true, &control, &|cfg, _| {
+        if cfg.input.ends_with("v1.mp4") {
+            Err(AppError::Provider("gpu unavailable".into()))
+        } else {
+            Ok(completed_project(&cfg, false))
+        }
+    })
+    .expect("run fail-fast");
+    assert_eq!(code, 6);
+    assert_eq!(summary["failed"], 1);
+    assert_eq!(store.file.records[0].state, "failed");
+    assert_eq!(r1.id, store.file.records[0].id);
+    assert_eq!(r2.id, store.file.records[1].id);
+
+    // Schema/field validation errors.
+    let bad = QueueFile {
+        schema: 2,
+        records: store.file.records.clone(),
+    };
+    assert!(bad.validate().is_err());
+    let mut bad_state = QueueFile {
+        schema: 1,
+        records: store.file.records.clone(),
+    };
+    bad_state.records[0].state = "unknown-state".into();
+    assert!(bad_state.validate().is_err());
+    let mut dup_id = QueueFile {
+        schema: 1,
+        records: store.file.records.clone(),
+    };
+    dup_id.records[1].id = dup_id.records[0].id.clone();
+    assert!(dup_id.validate().is_err());
+
+    assert_eq!(combine_failure(0, 6), 6);
+    assert_eq!(combine_failure(4, 6), 4);
+    assert_eq!(truncate_error(&"x".repeat(1200)).chars().count(), 1000);
+
+    let cleared = clear_records(&mut store, "all").expect("clear all");
+    assert_eq!(cleared, 2);
+    drop(store);
+    let _ = std::fs::remove_dir_all(&dir);
+}

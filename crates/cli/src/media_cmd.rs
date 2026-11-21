@@ -161,14 +161,33 @@ fn render_frame_to_png(
     output: &Path,
     opts: &RenderOptions<'_>,
 ) -> Result<serde_json::Value> {
+    let frame = runtime.preview(input, at_ms)?;
+    let frame_w = frame.width();
+    let frame_h = frame.height();
+    render_rgb_to_png(
+        input,
+        at_ms,
+        frame_w,
+        frame_h,
+        frame.into_raw(),
+        output,
+        opts,
+    )
+}
+
+fn render_rgb_to_png(
+    input: &Path,
+    at_ms: u64,
+    frame_w: u32,
+    frame_h: u32,
+    mut rgb: Vec<u8>,
+    output: &Path,
+    opts: &RenderOptions<'_>,
+) -> Result<serde_json::Value> {
     if let Some(rect) = opts.crop {
         rect.validate()
             .map_err(|e| AppError::InvalidConfig(e.to_string()))?;
     }
-    let frame = runtime.preview(input, at_ms)?;
-    let frame_w = frame.width();
-    let frame_h = frame.height();
-    let mut rgb = frame.into_raw();
 
     if opts.grid {
         draw_coordinate_grid(&mut rgb, frame_w, frame_h);
@@ -357,5 +376,83 @@ mod tests {
     fn rgb_png_encoder_rejects_mismatched_buffer_len() {
         assert!(encode_rgb_png(2, 2, &[0u8; 3]).is_err());
         assert!(encode_rgb_png(0, 2, &[]).is_err());
+    }
+
+    #[test]
+    fn render_rgb_to_png_draws_grid_boxes_crops_and_honors_overwrite() {
+        let dir = std::env::temp_dir().join(format!("nvsf-media-cmd-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let out = dir.join("annotated.png");
+        let input = dir.join("sample.mp4");
+        let rgb = vec![24u8; 100 * 80 * 3];
+        let draw = [Rect::new(0.1, 0.7, 0.8, 0.2).expect("rect")];
+        let px_box = [PixelBox {
+            x: 10,
+            y: 10,
+            width: 30,
+            height: 20,
+        }];
+        let crop = Rect::new(0.0, 0.5, 1.0, 0.5).expect("crop");
+        let opts = RenderOptions {
+            crop: Some(crop),
+            grid: true,
+            draw_boxes: &draw,
+            pixel_boxes: &px_box,
+            overwrite: true,
+        };
+        let report = render_rgb_to_png(&input, 5000, 100, 80, rgb.clone(), &out, &opts)
+            .expect("render annotated crop");
+        assert_eq!(report["frame_width"], 100);
+        assert_eq!(report["frame_height"], 80);
+        assert_eq!(report["width"], 100);
+        assert_eq!(report["height"], 40);
+        assert_eq!(report["cropped"], true);
+        assert_eq!(report["grid"], true);
+        assert_eq!(report["boxes"].as_array().expect("boxes").len(), 2);
+        assert_eq!(
+            report["boxes"][0]["region_arg"],
+            "0.1000,0.7000,0.8000,0.2000"
+        );
+
+        // overwrite=false must refuse clobbering existing PNG.
+        let no_overwrite = RenderOptions {
+            crop: None,
+            grid: false,
+            draw_boxes: &[],
+            pixel_boxes: &[],
+            overwrite: false,
+        };
+        assert!(
+            render_rgb_to_png(&input, 5000, 100, 80, rgb.clone(), &out, &no_overwrite).is_err()
+        );
+
+        // Full-frame uncropped render succeeds with overwrite=true.
+        let full_opts = RenderOptions {
+            crop: None,
+            grid: true,
+            draw_boxes: &draw,
+            pixel_boxes: &[],
+            overwrite: true,
+        };
+        let full = render_rgb_to_png(&input, 0, 100, 80, rgb, &out, &full_opts).expect("full");
+        assert_eq!(full["cropped"], false);
+        assert_eq!(full["width"], 100);
+        assert_eq!(full["height"], 80);
+
+        // Out-of-bounds crop fails cleanly.
+        assert!(
+            crop_rgb_buffer(
+                &[0u8; 12],
+                2,
+                PixelBox {
+                    x: 1,
+                    y: 1,
+                    width: 4,
+                    height: 4
+                }
+            )
+            .is_err()
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

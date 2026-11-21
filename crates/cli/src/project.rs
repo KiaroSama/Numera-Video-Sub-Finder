@@ -393,3 +393,167 @@ fn resolve_region(project: &Project, track: u32, override_region: Option<Rect>) 
         .map_err(|e| AppError::InvalidConfig(e.to_string()))?;
     Ok(rect)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ProjectCommand;
+    use nvsf_core::{Cue, ExtractConfig, MediaInfo};
+    use std::path::PathBuf;
+
+    fn sample_project(video: &Path, hash: String) -> Project {
+        let mut cfg = ExtractConfig {
+            input: video.to_string_lossy().into_owned(),
+            output: video.with_extension("srt").to_string_lossy().into_owned(),
+            ..ExtractConfig::default()
+        };
+        cfg.regions = vec![Rect::default()];
+        let cue = Cue::new(1, 0, 1000, 3000, "Hello".into()).expect("cue");
+        Project {
+            schema: 1,
+            source_hash: hash,
+            config: cfg,
+            media: MediaInfo {
+                width: 1280,
+                height: 720,
+                duration_ms: Some(10_000),
+                codec: "h264".into(),
+                time_base_num: 1,
+                time_base_den: 1000,
+                subtitle_streams: 0,
+                rotation: 0,
+            },
+            cues: vec![cue],
+            completed: true,
+            last_frame_ms: 10_000,
+            warnings: Vec::new(),
+            models: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn source_hash_region_resolution_and_fail_closed_retry_paths() {
+        let dir = std::env::temp_dir().join(format!("nvsf-proj-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let paths = Paths::new(Some(&dir)).expect("paths");
+        let video = dir.join("clip.mp4");
+        std::fs::write(&video, b"deterministic-video-bytes").expect("write video");
+        let other = dir.join("other.mp4");
+        std::fs::write(&other, b"different-video-bytes").expect("write other");
+
+        let hash = storage::hash_file(&video).expect("hash");
+        let proj = sample_project(&video, hash);
+        let proj_path = dir.join("clip.nvsf.json");
+        storage::save_project(&proj_path, &proj).expect("save project");
+
+        verify_source_hash(&proj, &video).expect("matching hash");
+        assert!(verify_source_hash(&proj, &other).is_err());
+
+        let r0 = resolve_region(&proj, 0, None).expect("track 0 region");
+        assert_eq!(r0, Rect::default());
+        let custom = Rect::new(0.1, 0.8, 0.8, 0.15).expect("custom");
+        assert_eq!(
+            resolve_region(&proj, 9, Some(custom)).expect("override"),
+            custom
+        );
+        assert!(resolve_region(&proj, 9, None).is_err());
+
+        // Missing cue ID and mismatched source hash fail closed in ReOcr and VisualRetry.
+        let control = Control::default();
+        assert!(
+            run(
+                &paths,
+                ProjectCommand::ReOcr {
+                    project: proj_path.clone(),
+                    id: 999,
+                    input: video.clone(),
+                    language: None,
+                    region: None,
+                    at_ms: None,
+                    apply: false,
+                    output: None,
+                },
+                &control,
+            )
+            .is_err()
+        );
+        assert!(
+            run(
+                &paths,
+                ProjectCommand::ReOcr {
+                    project: proj_path.clone(),
+                    id: 1,
+                    input: other.clone(),
+                    language: None,
+                    region: None,
+                    at_ms: None,
+                    apply: false,
+                    output: None,
+                },
+                &control,
+            )
+            .is_err()
+        );
+        assert!(
+            run(
+                &paths,
+                ProjectCommand::VisualRetry {
+                    project: proj_path.clone(),
+                    id: 1,
+                    input: video.clone(),
+                    opt_in: false,
+                    region: None,
+                    at_ms: None,
+                    apply: false,
+                    output: None,
+                },
+                &control,
+            )
+            .is_err()
+        );
+        assert!(
+            run(
+                &paths,
+                ProjectCommand::VisualRetry {
+                    project: proj_path.clone(),
+                    id: 999,
+                    input: video.clone(),
+                    opt_in: true,
+                    region: None,
+                    at_ms: None,
+                    apply: false,
+                    output: None,
+                },
+                &control,
+            )
+            .is_err()
+        );
+        assert!(
+            run(
+                &paths,
+                ProjectCommand::VisualRetry {
+                    project: proj_path,
+                    id: 1,
+                    input: video,
+                    opt_in: true,
+                    region: None,
+                    at_ms: None,
+                    apply: false,
+                    output: Some(PathBuf::from("unused.nvsf.json")),
+                },
+                &control,
+            )
+            .is_err()
+        );
+        assert!(
+            run(
+                &paths,
+                ProjectCommand::VisualRetryInstall { opt_in: false },
+                &control,
+            )
+            .is_err()
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}

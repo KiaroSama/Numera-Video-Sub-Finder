@@ -169,3 +169,62 @@ fn fail_fast_cancels_remaining_jobs_on_first_failure() {
     assert_eq!(results[2].status, "cancelled");
     assert_eq!(summarize_exit_code(&results), 4);
 }
+
+#[test]
+fn bulk_validation_extensions_inputs_planning_and_exit_codes() {
+    assert!(validate_concurrency(0).is_err());
+    assert!(validate_concurrency(1).is_ok());
+    assert!(validate_concurrency(8).is_ok());
+    assert!(validate_concurrency(9).is_err());
+    assert_eq!(per_job_threads(8, 2), 4);
+    assert_eq!(per_job_threads(1, 4), 1);
+
+    let exts = parse_extensions(".MP4, mkv , mov").expect("exts");
+    assert_eq!(exts, vec!["mp4", "mkv", "mov"]);
+    assert!(parse_extensions("   ,  ").is_err());
+
+    let json_list = parse_inputs_text(r#"["a.mp4", "b.mkv"]"#).expect("json inputs");
+    assert_eq!(json_list.len(), 2);
+    let line_list = parse_inputs_text("# comment\n\nfirst.mp4\nsecond.mkv\n").expect("lines");
+    assert_eq!(line_list.len(), 2);
+    assert!(parse_inputs_text("[not valid json").is_err());
+
+    let dir = temp_dir();
+    let sub_a = dir.join("a");
+    let sub_b = dir.join("b");
+    let out_dir = dir.join("out");
+    std::fs::create_dir_all(&sub_a).expect("sub_a");
+    std::fs::create_dir_all(&sub_b).expect("sub_b");
+    std::fs::create_dir_all(&out_dir).expect("out_dir");
+    let f1 = sub_a.join("clip.mp4");
+    let f2 = sub_b.join("clip.mp4");
+    std::fs::write(&f1, b"1").expect("f1");
+    std::fs::write(&f2, b"2").expect("f2");
+
+    let planned = plan_outputs(&[f1.clone(), f2.clone()], Some(&out_dir), "vtt").expect("plan");
+    assert_eq!(planned.len(), 2);
+    assert_ne!(planned[0], planned[1]);
+    assert!(planned[0].ends_with("clip.vtt"));
+    assert!(planned[1].ends_with("clip-2.vtt"));
+
+    let side_by_side = plan_outputs(&[f1.clone()], None, "srt").expect("side by side");
+    assert_eq!(side_by_side[0], sub_a.join("clip.srt"));
+    assert!(plan_outputs(&[f1], Some(&dir.join("missing-out")), "srt").is_err());
+
+    let mk = |status: &str, code: i32, review: bool| BulkItemResult {
+        input: "a.mp4".into(),
+        output: "a.srt".into(),
+        status: status.into(),
+        exit_code: code,
+        cues: 1,
+        review_needed: review,
+        elapsed_ms: 1,
+        error: None,
+    };
+    assert_eq!(summarize_exit_code(&[mk("ok", 0, false)]), 0);
+    assert_eq!(summarize_exit_code(&[mk("review_needed", 2, true)]), 2);
+    assert_eq!(summarize_exit_code(&[mk("cancelled", 5, false)]), 5);
+    assert_eq!(summarize_exit_code(&[mk("failed", 6, false)]), 6);
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
