@@ -296,12 +296,11 @@ fn reduced_motion(window: &Window) -> bool {
 
 fn silence_promise(target: &JsValue, prop: &str) {
     if let Ok(val) = js_sys::Reflect::get(target, &JsValue::from_str(prop))
-        && let Ok(promise) = val.dyn_into::<js_sys::Promise>()
+        && let Ok(catch_prop) = js_sys::Reflect::get(&val, &JsValue::from_str("catch"))
+        && let Ok(catch_fn) = catch_prop.dyn_into::<js_sys::Function>()
     {
         let noop = Closure::once_into_js(|_: JsValue| {});
-        if let Some(func) = noop.dyn_ref::<js_sys::Function>() {
-            let _ = promise.catch(func);
-        }
+        let _ = catch_fn.call1(&val, &noop);
     }
 }
 
@@ -417,6 +416,7 @@ pub fn sweep_theme(from: &str, to: &str) {
     let step_loop = Rc::clone(&step);
     let win_loop = window.clone();
     let root_loop = root.clone();
+    let engine_loop = Rc::clone(&engine);
 
     *step.borrow_mut() = Some(Closure::new(move |_raf_ts: f64| {
         let active = STATE.with(|cell| cell.borrow().generation == my_gen);
@@ -432,7 +432,7 @@ pub fn sweep_theme(from: &str, to: &str) {
                 .style()
                 .set_property("--glimm-old-clip", &sweep_clip_inset(eased, rtl));
         }
-        engine.draw(now, eased as f32, rtl, brightness);
+        engine_loop.draw(now, eased as f32, rtl, brightness);
         if raw < 1.0
             && let Some(cb_ref) = step_loop.borrow().as_ref()
             && let Ok(id) = win_loop.request_animation_frame(cb_ref.as_ref().unchecked_ref())
@@ -457,7 +457,7 @@ pub fn sweep_theme(from: &str, to: &str) {
         if let Some(vt) = finished_vt {
             skip_transition(&vt);
         }
-        engine.hide();
+        engine_loop.hide();
         cleanup_dom(&root_loop);
         let _ = step_loop.borrow_mut().take();
     }));
