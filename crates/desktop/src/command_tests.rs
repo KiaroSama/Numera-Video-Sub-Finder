@@ -563,6 +563,29 @@ fn review_save_and_export_preserve_files_without_overwrite_confirmation() {
 }
 
 #[test]
+fn review_save_cannot_replace_the_source_video() {
+    let (directory, _app) = workspace();
+    let source = directory.path().join("source 日本.mp4");
+    std::fs::write(&source, b"original source media").unwrap();
+    let mut corrected = project();
+    corrected.config.input = source.to_str().unwrap().into();
+    corrected.cues[0].text = "Saved correction فارسی".into();
+    let error = files::save_project_to(&corrected, &source, || {
+        panic!("source-media replacement must be rejected before overwrite confirmation")
+    })
+    .unwrap_err();
+    assert!(error.contains("Destination resolves to source media"));
+    assert_eq!(std::fs::read(&source).unwrap(), b"original source media");
+    let destination = directory.path().join("safe-review.json");
+    files::save_project_to(&corrected, &destination, || Ok(true)).unwrap();
+    assert_eq!(
+        nvsf_app::storage::load_project(&destination).unwrap().cues,
+        corrected.cues
+    );
+    assert_eq!(std::fs::read(&source).unwrap(), b"original source media");
+}
+
+#[test]
 fn model_file_actions_preserve_installed_bytes_on_denial_cancel_and_invalid_import() {
     use crate::model_manager;
     let (directory, app) = workspace();

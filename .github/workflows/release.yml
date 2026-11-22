@@ -161,20 +161,33 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          log() { printf '[%s] [%s] [RELEASE] %s\n' "$(date -u '+%Y-%m-%d %H:%M:%S UTC')" "$1" "$2"; }
+          trap 'log ERROR "Release publication failed"' ERR
           NOTES="Four-target 64-bit release (windows-x64, windows-arm64, linux-x64, linux-arm64) built from exact commit ${SOURCE_SHA} (Final verification run ${EVIDENCE_RUN}).
 
           Windows installers and binaries are signed with the project owner's self-signed Authenticode certificate (D-014, thumbprint B2A45C4E8257197BBF067ED94F83E626AC6CE1C5). No public CA publisher certificate is used. Verify downloaded files against SHA256SUMS.txt."
           EXTRA_ARGS=(--prerelease="$IS_PRERELEASE")
           if [ "$IS_PRERELEASE" = "true" ]; then
             EXTRA_ARGS+=(--latest=false)
+            log WARNING 'Publishing explicitly requested development prerelease assets'
             NOTES="Development prerelease; full real-language, device, and installer qualification remains incomplete.
 
           ${NOTES}"
           fi
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            if [ "$IS_PRERELEASE" = "true" ]; then
+              existing_prerelease="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isPrerelease --jq .isPrerelease)"
+              if [ "$existing_prerelease" != "true" ]; then
+                log ERROR 'Development assets cannot replace an existing stable release'
+                exit 1
+              fi
+            fi
+            log DEBUG 'Existing release channel admitted before asset replacement'
+            log INFO 'Uploading qualified release assets'
             gh release upload "$TAG" .ci-work/upload/* --repo "$GITHUB_REPOSITORY" --clobber
             gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --title "Numera Video Sub Finder $TAG" --notes "$NOTES" "${EXTRA_ARGS[@]}"
           else
+            log INFO 'Creating the requested release channel with qualified assets'
             gh release create "$TAG" .ci-work/upload/* \
               --repo "$GITHUB_REPOSITORY" \
               --target "$SOURCE_SHA" \

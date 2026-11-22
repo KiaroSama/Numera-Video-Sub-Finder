@@ -7,6 +7,7 @@ pub(crate) fn run_worker(
     request: &Path,
     control_dir: &Path,
     profile_directory: Option<&Path>,
+    resume_project: Option<&Path>,
 ) -> Result<()> {
     nvsf_app::worker::guard_parent_lifetime()?;
     use worker::protocol;
@@ -69,6 +70,8 @@ pub(crate) fn run_worker(
                 Ok(project)
             },
         )
+    } else if let Some(checkpoint) = resume_project {
+        nvsf_app::extraction::run_resuming(config, &control, progress, checkpoint)
     } else {
         nvsf_app::extraction::run(config, &control, progress)
     };

@@ -28,6 +28,8 @@ pub struct Ui {
     pub dirty: RwSignal<bool>,
     pub draft_dirty: RwSignal<bool>,
     pub busy: RwSignal<bool>,
+    pub review_loading: RwSignal<bool>,
+    pub review_generation: RwSignal<u64>,
     pub closing: RwSignal<bool>,
     pub pending_project: RwSignal<Option<Project>>,
     pub error: RwSignal<Option<String>>,
@@ -60,6 +62,8 @@ impl Ui {
             dirty: RwSignal::new(false),
             draft_dirty: RwSignal::new(false),
             busy: RwSignal::new(false),
+            review_loading: RwSignal::new(false),
+            review_generation: RwSignal::new(0),
             closing: RwSignal::new(false),
             pending_project: RwSignal::new(None),
             error: RwSignal::new(None),
@@ -87,24 +91,52 @@ impl Ui {
             "running" | "paused" | "cancelling"
         )
     }
+    pub fn review_editable(self) -> bool {
+        helpers::review_mutation_allowed(
+            self.project.with(Option::is_some),
+            &self.status.read().state,
+            self.busy.get() || self.review_loading.get(),
+            self.closing.get(),
+        )
+    }
+    pub fn begin_draft(self) -> bool {
+        if !self.review_editable() {
+            return false;
+        }
+        self.draft_dirty.set(true);
+        true
+    }
+    pub(crate) fn request_allowed(self, command: &str) -> bool {
+        if self.closing.get_untracked() || self.busy.get_untracked() {
+            return false;
+        }
+        let replaces_review = matches!(
+            command,
+            "pick_project" | "open_history" | "start_job" | "queue_start" | "pick_checkpoint"
+        );
+        if replaces_review && (self.active() || self.review_loading.get_untracked()) {
+            self.error.set(Some(
+                "Wait for the current extraction and its review result before opening another project"
+                    .into(),
+            ));
+            return false;
+        }
+        if replaces_review && (self.dirty.get_untracked() || self.draft_dirty.get_untracked()) {
+            self.error.set(Some(
+                "Save your current review project before replacing it or starting another job"
+                    .into(),
+            ));
+            return false;
+        }
+        true
+    }
     pub fn request<T: DeserializeOwned + 'static>(
         self,
         command: &'static str,
         args: Value,
         success: impl FnOnce(T) + 'static,
     ) {
-        if self.closing.get_untracked() || self.busy.get_untracked() {
-            return;
-        }
-        if matches!(
-            command,
-            "pick_project" | "open_history" | "start_job" | "queue_start" | "pick_checkpoint"
-        ) && (self.dirty.get_untracked() || self.draft_dirty.get_untracked())
-        {
-            self.error.set(Some(
-                "Save your current review project before replacing it or starting another job"
-                    .into(),
-            ));
+        if !self.request_allowed(command) {
             return;
         }
         self.busy.set(true);
@@ -161,14 +193,14 @@ impl Ui {
             },
         );
     }
-    pub fn accept_drop(self, paths: Vec<String>) {
-        if paths.is_empty() {
+    pub fn accept_drop(self, token: String) {
+        if token.is_empty() {
             return;
         }
         let config = self.config.get_untracked();
         self.request::<crate::ipc::DropOutcome>(
             "accept_dropped_paths",
-            json!({"paths": paths, "config": config}),
+            json!({"token": token, "config": config}),
             move |outcome| {
                 if outcome.kind == "single"
                     && let Some(source) = outcome.source
@@ -178,7 +210,13 @@ impl Ui {
                     self.time.set(0);
                     self.seek(0);
                     self.route.set("Extract".into());
-                    self.notice.set(format!("Loaded dropped video: {name}"));
+                    let suffix = if outcome.truncated {
+                        " Some dropped items exceeded the intake limit; drop smaller batches."
+                    } else {
+                        ""
+                    };
+                    self.notice
+                        .set(format!("Loaded dropped video: {name}{suffix}"));
                     return;
                 }
                 self.queue.set(outcome.queued);
@@ -194,13 +232,10 @@ impl Ui {
                     ));
                 }
                 if outcome.truncated {
-                    note.push_str(" Reached the 100-video queue cap.");
+                    note.push_str(" Reached the drop intake or 100-video queue limit.");
                 }
-                if !outcome.errors.is_empty() {
-                    note.push_str(&format!(
-                        " {} file(s) failed to load.",
-                        outcome.errors.len()
-                    ));
+                if let Some(error) = outcome.errors.first() {
+                    note.push_str(&format!(" {} drop issue(s): {error}", outcome.errors.len()));
                 }
                 self.notice.set(note);
             },
@@ -264,7 +299,7 @@ impl Ui {
             .with(|p| p.as_ref()?.cues.iter().find(|c| c.id == id).cloned())
     }
     pub fn edit(self, change: impl FnOnce(&mut Vec<Cue>) -> nvsf_core::Result<()>) {
-        if self.closing.get_untracked() {
+        if !self.review_editable() {
             return;
         }
         let mut error = None;
@@ -286,13 +321,22 @@ impl Ui {
         }
     }
     pub fn travel(self, redo: bool) {
-        if self.closing.get_untracked() {
+        if !self.review_editable() {
             return;
         }
         if self.draft_dirty.get_untracked() {
             self.error.set(Some(
                 "Apply or discard the current cue draft before undo/redo".into(),
             ));
+            return;
+        }
+        if !self.history.with_value(|history| {
+            if redo {
+                history.can_redo()
+            } else {
+                history.can_undo()
+            }
+        }) {
             return;
         }
         self.project.update(|p| {
@@ -310,72 +354,17 @@ impl Ui {
         self.revision.update(|v| *v += 1);
     }
     pub fn begin(self, queued: Queued) {
-        if self.dirty.get_untracked() || self.draft_dirty.get_untracked() {
-            self.error.set(Some(
-                "Save current corrections before starting another job".into(),
-            ));
-            return;
-        }
-        if self.active() {
-            self.error.set(Some(
-                "Wait for the active job before starting another".into(),
-            ));
+        if !self.request_allowed("start_job") {
             return;
         }
         self.source.set(Some(queued.source.clone()));
         self.request::<String>("start_job", json!({"sourceToken": queued.source.token, "outputToken": queued.output.token, "config": queued.config}), move |id| self.watch_job(id));
     }
     pub fn watch_job(self, id: String) {
-        self.status.set(JobStatus {
-            id,
-            state: "running".into(),
-            ..JobStatus::default()
-        });
-        self.route.set("Queue".into());
+        let generation = self.begin_review_watch(id);
         spawn_local(async move {
-            match ipc::call::<Vec<QueueEntry>>("queue_list", json!({})).await {
-                Ok(entries) => self.queue.set(entries),
-                Err(e) => self.error.set(Some(e)),
-            }
-            loop {
-                gloo_timers::future::TimeoutFuture::new(600).await;
-                if self.status.is_disposed() {
-                    break;
-                }
-                match ipc::call::<JobStatus>("job_status", json!({})).await {
-                    Ok(status) => {
-                        let active =
-                            matches!(status.state.as_str(), "running" | "paused" | "cancelling");
-                        if let Some(e) = status.error.clone() {
-                            self.error.set(Some(e));
-                        }
-                        let ready = status.project_ready;
-                        self.status.set(status);
-                        if !active {
-                            match ipc::call::<Vec<QueueEntry>>("queue_list", json!({})).await {
-                                Ok(entries) => self.queue.set(entries),
-                                Err(e) => self.error.set(Some(e)),
-                            }
-                            if ready {
-                                match ipc::call::<Option<Project>>("current_project", json!({}))
-                                    .await
-                                {
-                                    Ok(Some(p)) => self.load(p),
-                                    Ok(None) => self.error.set(Some(
-                                        "Completed job did not return a review project".into(),
-                                    )),
-                                    Err(e) => self.error.set(Some(e)),
-                                }
-                            }
-                            break;
-                        }
-                    }
-                    Err(e) => {
-                        self.error.set(Some(e));
-                        break;
-                    }
-                }
-            }
+            let mut io = crate::job_watch::NativeJobWatch;
+            self.watch_job_with(generation, &mut io).await;
         });
     }
     pub fn add_queue(self) {
@@ -408,10 +397,7 @@ impl Ui {
         let Some(project) = self.project.get_untracked() else {
             return;
         };
-        if self.closing.get_untracked()
-            || self.busy.get_untracked()
-            || self.preview_busy.get_untracked()
-        {
+        if !self.review_editable() || self.preview_busy.get_untracked() {
             return;
         }
         if self.draft_dirty.get_untracked() {
@@ -456,6 +442,7 @@ impl Ui {
     }
     pub fn set_theme(self, value: String) {
         let value = helpers::theme_value(&value).to_string();
+        #[cfg(target_arch = "wasm32")]
         let previous = self.theme.get_untracked();
         if let Some(window) = web_sys::window() {
             match window.local_storage() {
@@ -471,6 +458,7 @@ impl Ui {
             }
         }
         self.theme.set(value.clone());
+        #[cfg(target_arch = "wasm32")]
         crate::glimm::sweep_theme(&previous, &value);
         spawn_local(async move {
             if let Err(e) = ipc::call::<()>("ui_ready", json!({"theme": value})).await {

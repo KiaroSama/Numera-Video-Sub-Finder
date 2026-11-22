@@ -81,6 +81,7 @@ pub unsafe extern "C" fn nvsf_media_decode_v1(
             Path::new(&request.path),
             request.start_ms,
             request.end_ms,
+            request.include_preroll,
             |frame| {
                 checked_rgb_len(
                     frame.image.width(),

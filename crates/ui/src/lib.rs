@@ -10,17 +10,19 @@ mod evidence;
 mod extract;
 #[cfg(target_arch = "wasm32")]
 mod glimm;
-#[cfg(target_arch = "wasm32")]
+#[cfg(any(target_arch = "wasm32", test))]
 mod ipc;
+#[cfg(any(target_arch = "wasm32", test))]
+mod job_watch;
 #[cfg(target_arch = "wasm32")]
 mod languages;
-#[cfg(target_arch = "wasm32")]
+#[cfg(any(target_arch = "wasm32", test))]
 mod maintenance;
 #[cfg(target_arch = "wasm32")]
 mod models;
 #[cfg(target_arch = "wasm32")]
 mod review;
-#[cfg(target_arch = "wasm32")]
+#[cfg(any(target_arch = "wasm32", test))]
 mod state;
 #[cfg(target_arch = "wasm32")]
 mod visual_retry;

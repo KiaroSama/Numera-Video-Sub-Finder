@@ -7,6 +7,7 @@ mod project;
 mod project_ops;
 mod provider_profile;
 mod queue_cmd;
+mod resume;
 mod status;
 mod updates_cmd;
 mod worker_cmd;
@@ -88,9 +89,16 @@ fn run(cli: Cli) -> Result<i32> {
         request,
         control,
         provider_profile,
+        resume_project,
     } = &cli.command
     {
-        return worker_cmd::run_worker(request, control, provider_profile.as_deref()).map(|()| 0);
+        return worker_cmd::run_worker(
+            request,
+            control,
+            provider_profile.as_deref(),
+            resume_project.as_deref(),
+        )
+        .map(|()| 0);
     }
     preflight::validate(&cli)?;
     let paths = Paths::new(cli.data_root.as_deref())?;
@@ -211,10 +219,7 @@ fn run(cli: Cli) -> Result<i32> {
             }
         },
         Commands::Resume { project } => {
-            let p = storage::load_project(&project)?;
-            let project = nvsf_app::extract(p.config, &control, |p| {
-                eprintln!("{} {}ms", p.stage, p.position_ms)
-            })?;
+            let project = resume::run(&project, &control)?;
             exit_code = status::project(&project);
             println!(
                 "{}",

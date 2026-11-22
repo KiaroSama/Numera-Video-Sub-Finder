@@ -73,6 +73,7 @@ pub fn decode(
     path: &Path,
     start_ms: u64,
     end_ms: Option<u64>,
+    include_preroll: bool,
     mut consume: impl FnMut(DecodedFrame) -> Result<bool>,
 ) -> Result<()> {
     let mut input = open(path)?;
@@ -136,7 +137,7 @@ pub fn decode(
             let Some((at, duration_ms)) = clock.observe(pts, frame.packet().duration)? else {
                 continue;
             };
-            if at < start_ms {
+            if at < start_ms && !include_preroll {
                 continue;
             }
             if end_ms.is_some_and(|end| at >= end) {

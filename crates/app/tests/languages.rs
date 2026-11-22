@@ -32,3 +32,29 @@ fn missing_and_unadmitted_languages_cannot_mutate_resources_or_change_unrelated_
             .contains("Tesseract")
     );
 }
+
+#[test]
+fn required_acceleration_has_a_verifier_independent_checkpoint_identity() {
+    let directory = tempfile::tempdir().unwrap();
+    let paths = Paths::new(Some(directory.path())).unwrap();
+    let required = languages::fingerprint_with_policy(&paths, "en", true).unwrap();
+    assert_eq!(
+        required,
+        languages::fingerprint_with_policy(&paths, "eng", true).unwrap()
+    );
+    assert_ne!(required, languages::fingerprint(&paths, "en").unwrap());
+    std::fs::create_dir_all(paths.models.join("tessdata")).unwrap();
+    std::fs::write(
+        paths.models.join("tessdata/eng.traineddata"),
+        b"unavailable verifier",
+    )
+    .unwrap();
+    assert_eq!(
+        required,
+        languages::fingerprint_with_policy(&paths, "en", true).unwrap()
+    );
+    assert!(matches!(
+        languages::fingerprint_with_policy(&paths, "fra", true),
+        Err(nvsf_app::AppError::Provider(_))
+    ));
+}

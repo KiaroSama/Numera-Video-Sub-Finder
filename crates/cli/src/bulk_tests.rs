@@ -171,6 +171,164 @@ fn fail_fast_cancels_remaining_jobs_on_first_failure() {
 }
 
 #[test]
+fn fail_fast_running_job_observes_user_cancellation() {
+    let cfg = ExtractConfig {
+        input: "cancel.mp4".into(),
+        output: "cancel.srt".into(),
+        ..Default::default()
+    };
+    let jobs = vec![("cancel.mp4".into(), "cancel.srt".into(), cfg)];
+    let control = Control::default();
+    let results = execute_pool(jobs, 1, true, &control, &|cfg, job_control| {
+        // The CLI signal handler sets this token after extraction has started.
+        control.cancel.store(true, Ordering::Release);
+        if job_control.cancel.load(Ordering::Acquire) {
+            Err(AppError::Cancelled)
+        } else {
+            Ok(fake_project(&cfg, true))
+        }
+    });
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].status, "cancelled");
+    assert_eq!(results[0].exit_code, 5);
+    assert_eq!(summarize_exit_code(&results), 5);
+}
+
+#[test]
+fn fail_fast_failure_cancels_an_already_running_peer() {
+    let jobs: Vec<_> = (1..=2)
+        .map(|i| {
+            let input = PathBuf::from(format!("peer{i}.mp4"));
+            let output = PathBuf::from(format!("peer{i}.srt"));
+            let cfg = ExtractConfig {
+                input: format!("peer{i}.mp4"),
+                output: format!("peer{i}.srt"),
+                ..Default::default()
+            };
+            (input, output, cfg)
+        })
+        .collect();
+    let (started_tx, started_rx) = std::sync::mpsc::sync_channel(1);
+    let started_rx = Mutex::new(started_rx);
+    let control = Control::default();
+    let results = execute_pool(jobs, 2, true, &control, &|cfg, job_control| {
+        if cfg.input == "peer1.mp4" {
+            started_rx
+                .lock()
+                .expect("peer startup receiver")
+                .recv_timeout(std::time::Duration::from_secs(2))
+                .expect("second extraction started");
+            return Err(nvsf_app::fail("first extraction failed"));
+        }
+        started_tx.send(()).expect("report peer startup");
+        let deadline = Instant::now() + std::time::Duration::from_secs(2);
+        while !job_control.cancel.load(Ordering::Acquire) {
+            assert!(Instant::now() < deadline, "running peer was not cancelled");
+            std::thread::park_timeout(std::time::Duration::from_millis(1));
+        }
+        Err(AppError::Cancelled)
+    });
+    assert_eq!(results[0].status, "failed");
+    assert_eq!(results[0].exit_code, 4);
+    assert_eq!(results[1].status, "cancelled");
+    assert_eq!(results[1].exit_code, 5);
+    assert_eq!(summarize_exit_code(&results), 4);
+}
+
+#[test]
+fn bulk_srt_honors_each_requested_encoding() {
+    use clap::Parser;
+    let dir = temp_dir();
+    for (index, flags, expected) in [
+        (0, vec![], "1\n00:00:00,000 --> 00:00:00,500\nTest\n\n"),
+        (
+            1,
+            vec!["--bom"],
+            "\u{feff}1\n00:00:00,000 --> 00:00:00,500\nTest\n\n",
+        ),
+        (
+            2,
+            vec!["--crlf"],
+            "1\r\n00:00:00,000 --> 00:00:00,500\r\nTest\r\n\r\n",
+        ),
+        (
+            3,
+            vec!["--bom", "--crlf"],
+            "\u{feff}1\r\n00:00:00,000 --> 00:00:00,500\r\nTest\r\n\r\n",
+        ),
+    ] {
+        let input = dir.join(format!("encoding-{index}.mp4"));
+        std::fs::write(&input, b"controlled extraction input").expect("input fixture");
+        let mut argv = vec!["nvsf", "bulk", "--input", input.to_str().unwrap()];
+        argv.extend(flags);
+        let crate::Commands::Bulk(args) = crate::Cli::try_parse_from(argv).unwrap().command else {
+            panic!("bulk command expected");
+        };
+        let status = run_bulk_with(*args, None, &Control::default(), &|cfg, _| {
+            let project = fake_project(&cfg, true);
+            nvsf_app::export_project(
+                &project,
+                Path::new(&cfg.output),
+                "srt",
+                cfg.overwrite,
+                false,
+                false,
+            )?;
+            Ok(project)
+        })
+        .expect("bulk export");
+        assert_eq!(status, 0);
+        assert_eq!(
+            std::fs::read(input.with_extension("srt")).expect("SRT bytes"),
+            expected.as_bytes()
+        );
+    }
+    std::fs::remove_dir_all(dir).expect("remove fixtures");
+}
+
+#[test]
+fn bulk_srt_encoding_flags_do_not_authorize_replacing_existing_output() {
+    use clap::Parser;
+    let dir = temp_dir();
+    let input = dir.join("existing.mp4");
+    let output = input.with_extension("srt");
+    std::fs::write(&input, b"controlled extraction input").expect("input fixture");
+    std::fs::write(&output, b"Existing corrected subtitles").expect("existing output");
+    let crate::Commands::Bulk(args) = crate::Cli::try_parse_from([
+        "nvsf",
+        "bulk",
+        "--input",
+        input.to_str().unwrap(),
+        "--bom",
+        "--crlf",
+    ])
+    .unwrap()
+    .command
+    else {
+        panic!("bulk command expected");
+    };
+    let status = run_bulk_with(*args, None, &Control::default(), &|cfg, _| {
+        let project = fake_project(&cfg, true);
+        nvsf_app::export_project(
+            &project,
+            Path::new(&cfg.output),
+            "srt",
+            cfg.overwrite,
+            false,
+            false,
+        )?;
+        Ok(project)
+    })
+    .expect("bulk result");
+    assert_eq!(status, 4);
+    assert_eq!(
+        std::fs::read(output).expect("preserved output"),
+        b"Existing corrected subtitles"
+    );
+    std::fs::remove_dir_all(dir).expect("remove fixtures");
+}
+
+#[test]
 fn bulk_validation_extensions_inputs_planning_and_exit_codes() {
     assert!(validate_concurrency(0).is_err());
     assert!(validate_concurrency(1).is_ok());

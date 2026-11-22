@@ -341,27 +341,22 @@ pub fn repair_with_fetch<R: Read>(
     write_atomic(&stage.path().join("runtime-pack.sig"), signature, false)?;
     let id = hash_file(&stage.path().join("runtime-pack.json"))?;
     let destination = root.join(&id);
-    if destination.is_symlink() {
-        return Err(fail("Runtime activation destination must not be a symlink"));
-    }
-    if destination.exists() {
-        pack.verify(&destination)?;
-        authenticate(
-            &read_bounded(&destination.join("runtime-pack.json"), 1024 * 1024)?,
-            &read_bounded(&destination.join("runtime-pack.sig"), 4096)?,
-        )?;
-        if hash_file(&destination.join("runtime-pack.json"))? != id {
-            return Err(fail("Existing runtime inventory identity differs"));
-        }
-    } else {
-        check_transfer(cancel, deadline)?;
-        std::fs::rename(stage.path(), &destination)?;
-    }
     check_transfer(cancel, deadline)?;
-    write_atomic(
+    activation::activate(
+        &pack,
+        manifest,
+        signature,
+        stage.path(),
+        &destination,
         &paths.root.join("runtime-selection.json"),
-        &serde_json::to_vec(&id)?,
-        true,
+        || {
+            check_transfer(cancel, deadline)?;
+            write_atomic(
+                &paths.root.join("runtime-selection.json"),
+                &serde_json::to_vec(&id)?,
+                true,
+            )
+        },
     )?;
     Ok(destination)
 }
@@ -423,3 +418,6 @@ fn receive_entry(
 #[cfg(test)]
 #[path = "runtime_transfer_tests.rs"]
 mod transfer_tests;
+
+#[path = "runtime_activation.rs"]
+mod activation;

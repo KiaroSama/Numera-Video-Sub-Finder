@@ -36,6 +36,7 @@ pub(crate) enum Commands {
         #[command(subcommand)]
         command: LanguageCommand,
     },
+    /// Resume the explicitly selected checkpoint, preserving its saved corrections and location.
     Resume {
         project: PathBuf,
     },
@@ -107,6 +108,8 @@ pub(crate) enum Commands {
         control: PathBuf,
         #[arg(long, hide = true)]
         provider_profile: Option<PathBuf>,
+        #[arg(long, hide = true, conflicts_with = "provider_profile")]
+        resume_project: Option<PathBuf>,
     },
 }
 

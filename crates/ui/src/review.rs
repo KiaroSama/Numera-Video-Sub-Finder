@@ -45,9 +45,9 @@ pub fn Review(ui: Ui) -> impl IntoView {
                     <option value="all">"All cues"</option><option value="unreviewed">"Needs review"</option><option value="uncertain">"Uncertain / unscored"</option><option value="edited">"Edited"</option>
                 </select></label>
                 <span class="muted">{move ||format!("{} matches",indices.with(Vec::len))}</span>
-                <button disabled=move ||{ui.revision.get();!ui.history.with_value(|h|h.can_undo())} on:click=move |_|ui.travel(false)>"Undo"</button>
-                <button disabled=move ||{ui.revision.get();!ui.history.with_value(|h|h.can_redo())} on:click=move |_|ui.travel(true)>"Redo"</button>
-                <button on:click=move |_|ui.persist(None,false,false) disabled=move ||ui.busy.get()||ui.preview_busy.get()>"Save project"</button>
+                <button disabled=move ||{ui.revision.get();!ui.review_editable()||!ui.history.with_value(|h|h.can_undo())} on:click=move |_|ui.travel(false)>"Undo"</button>
+                <button disabled=move ||{ui.revision.get();!ui.review_editable()||!ui.history.with_value(|h|h.can_redo())} on:click=move |_|ui.travel(true)>"Redo"</button>
+                <button on:click=move |_|ui.persist(None,false,false) disabled=move ||!ui.review_editable()||ui.preview_busy.get()>"Save project"</button>
                 <span class="edit-state">{move ||if ui.dirty.get(){"Unsaved corrections"}else{"Project loaded"}}</span>
             </div>
             <div class="review-grid">
@@ -121,7 +121,17 @@ fn CueEditor(ui: Ui) -> impl IntoView {
     let start = RwSignal::new(String::new());
     let end = RwSignal::new(String::new());
     let split = RwSignal::new(String::new());
-    let proposal = RwSignal::new(None::<(u64, nvsf_core::Recognition)>);
+    let proposal = RwSignal::new(None::<helpers::OcrProposal>);
+    Effect::new(move |_| {
+        let selected = ui.selected.get();
+        let revision = ui.revision.get();
+        if proposal.with_untracked(|p| {
+            p.as_ref()
+                .is_some_and(|p| !p.is_current(selected, revision))
+        }) {
+            proposal.set(None);
+        }
+    });
     Effect::new(move |_| {
         ui.revision.get();
         if let Some(c) = ui.selected_cue() {
@@ -164,30 +174,37 @@ fn CueEditor(ui: Ui) -> impl IntoView {
             <div class="editor-heading"><h3>{move ||ui.selected.get().map(|id|format!("Cue {id}")).unwrap_or_default()}</h3>
                 <span class="muted">{move ||ui.selected_cue().and_then(|c|c.confidence).map(|c|format!("Model score {c:.3}")).unwrap_or_else(||"Confidence not reported".into())}</span></div>
             <label for="cue-text">"Subtitle text (logical Unicode)"</label>
-            <textarea id="cue-text" dir="auto" rows="4" spellcheck="false" prop:value=move ||text.get() on:input=move |e|{if !ui.closing.get_untracked(){text.set(event_target_value(&e));ui.draft_dirty.set(true);}}></textarea>
-            <div class="time-fields"><label for="cue-start">"Start"<input id="cue-start" class="mono" prop:value=move ||start.get() on:input=move |e|{if !ui.closing.get_untracked(){start.set(event_target_value(&e));ui.draft_dirty.set(true);}}/></label>
-                <label for="cue-end">"End"<input id="cue-end" class="mono" prop:value=move ||end.get() on:input=move |e|{if !ui.closing.get_untracked(){end.set(event_target_value(&e));ui.draft_dirty.set(true);}}/></label></div>
-            <div class="button-row"><button id="cue-apply" class="primary" on:click=move |_|apply()>"Apply correction"</button>
-                <button disabled=move ||!ui.draft_dirty.get() on:click=move |_|{ui.draft_dirty.set(false);ui.revision.update(|v|*v+=1);}>"Discard draft"</button>
-                <button disabled=move ||ui.draft_dirty.get() on:click=move |_|if let Some(id)=ui.selected.get_untracked(){ui.edit(move |cues|{let cue=cues.iter_mut().find(|c|c.id==id).ok_or_else(||Error::Invalid("Cue not found".into()))?;cue.reviewed=true;Ok(())});}>"Accept cue"</button>
-                <button disabled=move ||ui.draft_dirty.get() on:click=move |_|if let Some(id)=ui.selected.get_untracked(){ui.edit(move |cues|{let cue=cues.iter_mut().find(|c|c.id==id).ok_or_else(||Error::Invalid("Cue not found".into()))?;cue.text=cue.raw_text.clone();cue.edited=false;cue.reviewed=false;Ok(())});}>"Revert to OCR"</button>
+            <textarea id="cue-text" dir="auto" rows="4" spellcheck="false" disabled=move ||!ui.review_editable() prop:value=move ||text.get() on:input=move |e|{if ui.begin_draft(){text.set(event_target_value(&e));}}></textarea>
+            <div class="time-fields"><label for="cue-start">"Start"<input id="cue-start" class="mono" disabled=move ||!ui.review_editable() prop:value=move ||start.get() on:input=move |e|{if ui.begin_draft(){start.set(event_target_value(&e));}}/></label>
+                <label for="cue-end">"End"<input id="cue-end" class="mono" disabled=move ||!ui.review_editable() prop:value=move ||end.get() on:input=move |e|{if ui.begin_draft(){end.set(event_target_value(&e));}}/></label></div>
+            <div class="button-row"><button id="cue-apply" class="primary" disabled=move ||!ui.review_editable() on:click=move |_|apply()>"Apply correction"</button>
+                <button disabled=move ||!ui.review_editable()||!ui.draft_dirty.get() on:click=move |_|{if ui.review_editable(){ui.draft_dirty.set(false);ui.revision.update(|v|*v+=1);}}>"Discard draft"</button>
+                <button data-testid="cue-mark-reviewed" disabled=move ||!ui.review_editable()||ui.draft_dirty.get() on:click=move |_|if let Some(id)=ui.selected.get_untracked(){ui.edit(move |cues|{let cue=cues.iter_mut().find(|c|c.id==id).ok_or_else(||Error::Invalid("Cue not found".into()))?;cue.reviewed=true;Ok(())});}>"Accept cue"</button>
+                <button disabled=move ||!ui.review_editable()||ui.draft_dirty.get() on:click=move |_|if let Some(id)=ui.selected.get_untracked(){ui.edit(move |cues|{let cue=cues.iter_mut().find(|c|c.id==id).ok_or_else(||Error::Invalid("Cue not found".into()))?;cue.text=cue.raw_text.clone();cue.edited=false;cue.reviewed=false;Ok(())});}>"Revert to OCR"</button>
             </div>
-            <div class="button-row"><button disabled=move ||ui.busy.get()||ui.active()||ui.source.with(Option::is_none) on:click=move |_|{
+            <div class="button-row"><button data-testid="cue-recognize" disabled=move ||!ui.review_editable()||ui.draft_dirty.get()||ui.source.with(Option::is_none) on:click=move |_|{
                 let Some(source)=ui.source.get_untracked()else{return;};let Some(cue)=ui.selected_cue()else{return;};
+                let revision=ui.revision.get_untracked();
                 let setup=ui.project.with_untracked(|p|p.as_ref().map(|p|(p.config.language.clone(),p.config.regions.get(cue.track as usize).copied())));
-                if let Some((language,Some(region)))=setup{ui.request::<nvsf_core::Recognition>("recognize_cue",json!({"token":source.token,"cueId":cue.id,"atMs":cue.start_ms+(cue.end_ms-cue.start_ms)/2,"language":language,"region":region}),move |result|proposal.set(Some((cue.id,result))));}
+                if let Some((language,Some(region)))=setup{ui.request::<nvsf_core::Recognition>("recognize_cue",json!({"token":source.token,"cueId":cue.id,"atMs":cue.start_ms+(cue.end_ms-cue.start_ms)/2,"language":language,"region":region}),move |recognition|{
+                    let result=helpers::OcrProposal{cue_id:cue.id,revision,recognition};
+                    if result.is_current(ui.selected.get_untracked(),ui.revision.get_untracked()){proposal.set(Some(result));}
+                });}
                 else{ui.error.set(Some("Cue track has no valid region".into()));}
             }>"Re-recognize original crop"</button></div>
-            <Show when=move ||proposal.with(Option::is_some)><section class="message notice"><div><strong>"Review replacement proposal"</strong><p dir="auto">{move ||proposal.with(|p|p.as_ref().map(|(_,r)|r.text.clone()).unwrap_or_default())}</p>
+            <Show when=move ||proposal.with(Option::is_some)><section class="message notice"><div><strong>"Review replacement proposal"</strong><p dir="auto">{move ||proposal.with(|p|p.as_ref().map(|p|p.recognition.text.clone()).unwrap_or_default())}</p>
                 <p class="hint">"This replaces the selected cue's text, including user corrections, only when you explicitly accept. Undo restores the previous version."</p>
-                <div class="button-row"><button class="primary" disabled=move ||ui.draft_dirty.get()||proposal.with(|p|p.as_ref().is_some_and(|(id,_)|Some(*id)!=ui.selected.get())) on:click=move |_|if let Some((id,r))=proposal.get_untracked(){ui.edit(move |cues|{let cue=cues.iter_mut().find(|c|c.id==id).ok_or_else(||Error::Invalid("Cue no longer exists".into()))?;cue.text=r.text;cue.confidence=r.confidence;cue.edited=true;cue.reviewed=false;cue.validate()});proposal.set(None);}>"Replace cue text"</button>
+                <div class="button-row"><button data-testid="ocr-proposal-accept" class="primary" disabled=move ||!ui.review_editable()||ui.draft_dirty.get()||proposal.with(|p|p.as_ref().is_none_or(|p|!p.is_current(ui.selected.get(),ui.revision.get()))) on:click=move |_|if let Some(proposal_value)=proposal.get_untracked(){
+                    let selected=ui.selected.get_untracked();let revision=ui.revision.get_untracked();
+                    ui.edit(move |cues|proposal_value.apply(cues,selected,revision));proposal.set(None);
+                }>"Replace cue text"</button>
                     <button on:click=move |_|proposal.set(None)>"Keep existing text"</button></div></div></section></Show>
             <crate::visual_retry::VisualCue ui/>
             <details><summary>"Original OCR and structural edits"</summary>
                 <p class="raw-text" dir="auto">{move ||ui.selected_cue().map(|c|c.raw_text).unwrap_or_default()}</p>
-                <label for="split-time">"Split at source time"</label><div class="button-row"><input id="split-time" class="mono" prop:value=move ||split.get() on:input=move |e|split.set(event_target_value(&e))/>
-                    <button disabled=move ||ui.draft_dirty.get() on:click=move |_|if let Some(id)=ui.selected.get_untracked(){match helpers::parse_time(&split.get_untracked()){Ok(at)=>ui.edit(move |c|split_cue(c,id,at)),Err(e)=>ui.error.set(Some(e))}}>"Split cue"</button></div>
-                <button disabled=move ||ui.draft_dirty.get() on:click=move |_|{
+                <label for="split-time">"Split at source time"</label><div class="button-row"><input id="split-time" class="mono" disabled=move ||!ui.review_editable() prop:value=move ||split.get() on:input=move |e|split.set(event_target_value(&e))/>
+                    <button disabled=move ||!ui.review_editable()||ui.draft_dirty.get() on:click=move |_|if let Some(id)=ui.selected.get_untracked(){match helpers::parse_time(&split.get_untracked()){Ok(at)=>ui.edit(move |c|split_cue(c,id,at)),Err(e)=>ui.error.set(Some(e))}}>"Split cue"</button></div>
+                <button disabled=move ||!ui.review_editable()||ui.draft_dirty.get() on:click=move |_|{
                     let pair=ui.project.with(|p|{let p=p.as_ref()?;let i=p.cues.iter().position(|c|Some(c.id)==ui.selected.get_untracked())?;Some((p.cues[i].id,p.cues.get(i+1)?.id))});
                     if let Some((a,b))=pair{ui.edit(move |c|merge_cues(c,a,b));}else{ui.error.set(Some("No following cue to merge".into()));}
                 }>"Merge with next cue (same track)"</button>
@@ -203,7 +220,7 @@ fn Export(ui: Ui) -> impl IntoView {
     let crlf = RwSignal::new(false);
     view! {<div class="export-panel"><h3>"Export corrections"</h3><div class="button-row">
     <label for="export-format" class="sr-only">"Export format"</label><select id="export-format" on:change=move |e|format.set(event_target_value(&e))><option value="srt">"SRT"</option><option value="vtt">"WebVTT"</option><option value="ass">"ASS"</option><option value="json">"JSON evidence"</option></select>
-    <button class="primary" disabled=move ||ui.busy.get()||ui.preview_busy.get() on:click=move |_|ui.persist(Some(format.get_untracked()),bom.get_untracked(),crlf.get_untracked())>"Export…"</button></div>
+    <button class="primary" disabled=move ||!ui.review_editable()||ui.preview_busy.get() on:click=move |_|ui.persist(Some(format.get_untracked()),bom.get_untracked(),crlf.get_untracked())>"Export…"</button></div>
     <div class="button-row"><label class="check"><input type="checkbox" on:change=move |e|bom.set(event_target_checked(&e))/><span>"UTF-8 BOM"</span></label><label class="check"><input type="checkbox" on:change=move |e|crlf.set(event_target_checked(&e))/><span>"CRLF line endings"</span></label></div>
     <p class="hint">"Export uses a native save dialog and confirms existing-file replacement. Unsupported formats return the backend error."</p></div>}
 }

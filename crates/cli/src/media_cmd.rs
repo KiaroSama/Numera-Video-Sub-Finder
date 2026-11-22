@@ -61,6 +61,7 @@ pub(crate) fn run_preview(paths: &Paths, command: PreviewCommand, control: &Cont
             pixel_box,
             overwrite,
         } => {
+            storage::protect_source(&input, &output)?;
             if crop.is_none() && !grid && draw_box.is_empty() && pixel_box.is_empty() {
                 let (response, bytes) = native_request::supervise(
                     paths,
@@ -184,6 +185,7 @@ fn render_rgb_to_png(
     output: &Path,
     opts: &RenderOptions<'_>,
 ) -> Result<serde_json::Value> {
+    storage::protect_source(input, output)?;
     if let Some(rect) = opts.crop {
         rect.validate()
             .map_err(|e| AppError::InvalidConfig(e.to_string()))?;
@@ -376,6 +378,28 @@ mod tests {
     fn rgb_png_encoder_rejects_mismatched_buffer_len() {
         assert!(encode_rgb_png(2, 2, &[0u8; 3]).is_err());
         assert!(encode_rgb_png(0, 2, &[]).is_err());
+    }
+
+    #[test]
+    fn preview_png_export_never_overwrites_the_input_media() {
+        let dir =
+            std::env::temp_dir().join(format!("nvsf-preview-source-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let input = dir.join("source.mp4");
+        let original = b"original video bytes";
+        std::fs::write(&input, original).expect("source fixture");
+        let options = RenderOptions {
+            crop: None,
+            grid: false,
+            draw_boxes: &[],
+            pixel_boxes: &[],
+            overwrite: true,
+        };
+        for output in [input.clone(), dir.join(".").join("source.mp4")] {
+            assert!(render_rgb_to_png(&input, 0, 2, 2, vec![24; 12], &output, &options).is_err());
+            assert_eq!(std::fs::read(&input).unwrap(), original);
+        }
+        std::fs::remove_dir_all(dir).expect("remove fixture");
     }
 
     #[test]

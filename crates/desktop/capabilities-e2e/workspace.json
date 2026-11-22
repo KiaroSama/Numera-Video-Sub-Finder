@@ -3,5 +3,5 @@
   "identifier": "workspace",
   "description": "CI e2e artifact only: ordinary workspace plus fixed-root fixture admission.",
   "windows": ["main"],
-  "permissions": ["allow-workspace", "allow-e2e-fixture"]
+  "permissions": ["allow-workspace", "allow-e2e-fixture", "core:event:allow-listen", "core:event:allow-unlisten"]
 }

@@ -3,5 +3,5 @@
   "identifier": "workspace",
   "description": "Only the local main workspace may invoke token-scoped application commands.",
   "windows": ["main"],
-  "permissions": ["allow-workspace"]
+  "permissions": ["allow-workspace", "core:event:allow-listen", "core:event:allow-unlisten"]
 }

@@ -251,6 +251,7 @@ pub fn smoke(gui: &Path, fixtures: &Path, data: &Path, output: &Path) -> Result<
             "return !!document.querySelector('[data-testid=e2e-load-fixture]');",
             30,
         )?;
+        drop_ingress(&driver, output)?;
         driver.click("[data-testid=e2e-load-fixture]")?;
         driver.wait("return !!document.querySelector('.source-frame')?.naturalWidth && !document.querySelector('#extract-start')?.disabled;", 30)?;
         let initial = driver.script(
@@ -393,6 +394,7 @@ pub fn smoke(gui: &Path, fixtures: &Path, data: &Path, output: &Path) -> Result<
                 &json!({"draft":draft,"applied":dirty,"shortcut_mutation_blocked":true}),
             )?,
         )?;
+        review_operation_guards(&driver, output)?;
         driver.wait("return document.querySelector('[data-testid=e2e-save-edits]')?.disabled===false && document.querySelector('.preview-shell')?.getAttribute('aria-busy')!=='true';", 15)?;
         driver.click("[data-testid=e2e-save-edits]")?;
         driver.wait("return Array.from(document.querySelectorAll('[role=status]')).some(e=>e.textContent.includes('Saved ui-en.srt'));", 15)?;
@@ -487,7 +489,87 @@ pub fn smoke(gui: &Path, fixtures: &Path, data: &Path, output: &Path) -> Result<
     std::fs::write(
         output.join("gui-report.json"),
         serde_json::to_vec_pretty(
-            &json!({"schema":1,"source_sha":std::env::var("GITHUB_SHA")?,"target":std::env::var("NVSF_TARGET_ID")?,"passed":true,"tests":15,"failed":0,"skipped":0,"profile":"instrumented","proof":["native startup","fixed source admission and source frame","three persisted themes with measured contrast and circular logo","six workspace destinations","narrow and wide layout","programmatic control focus","zoom/pan/reset with normalized source ROI coordinates","content-verified original and selected-frame crop comparison","model catalog IDs and controls","full language catalog and nonpriority extraction choices","automatic update disable persisted through Settings","native diagnostics and unapproved repair guard","actual worker extraction","native close acknowledgement preserves draft/applied revision and blocks shortcuts","Unicode edit and exported bytes"],"not_proved":["native Tab traversal","physical IME composition","production listener absence","real-language quality","positive signed repair/update lifecycle","platform installers"]}),
+            &json!({"schema":1,"source_sha":std::env::var("GITHUB_SHA")?,"target":std::env::var("NVSF_TARGET_ID")?,"passed":true,"tests":19,"failed":0,"skipped":0,"profile":"instrumented","proof":["native startup","fixed source admission and source frame","three persisted themes with measured contrast and circular logo","six workspace destinations","narrow and wide layout","programmatic control focus","zoom/pan/reset with normalized source ROI coordinates","content-verified original and selected-frame crop comparison","model catalog IDs and controls","full language catalog and nonpriority extraction choices","automatic update disable persisted through Settings","native diagnostics and unapproved repair guard","actual worker extraction","native close acknowledgement preserves draft/applied revision and blocks shortcuts","Unicode edit and exported bytes","undo without an open project preserves clean review state","native drop event bridge accepts one host grant and refuses replay","pending native recognition blocks draft/apply/undo mutations","later cue edits invalidate an earlier OCR proposal"],"not_proved":["native Tab traversal","physical IME composition","external OS drag gesture","active-extraction review input interaction","production listener absence","real-language quality","positive signed repair/update lifecycle","platform installers"]}),
+        )?,
+    )?;
+    Ok(())
+}
+
+fn drop_ingress(driver: &Driver, output: &Path) -> Result<()> {
+    driver.wait(
+        "return document.querySelector('.app-shell')?.getAttribute('data-native-drop-ready')==='true';",
+        10,
+    )?;
+    let empty_review = driver.script("const read=window.__NVSF_REVIEW_STATE__;const before=read(false);window.dispatchEvent(new KeyboardEvent('keydown',{key:'z',ctrlKey:true,bubbles:true,cancelable:true}));window.dispatchEvent(new KeyboardEvent('keydown',{key:'z',ctrlKey:true,shiftKey:true,bubbles:true,cancelable:true}));return {before,after:read(false)};")?;
+    if empty_review["before"] != empty_review["after"]
+        || empty_review["after"]["dirty"] != false
+        || empty_review["after"]["draft"] != false
+    {
+        return Err(
+            format!("Undo without a project fabricated unsaved state: {empty_review}").into(),
+        );
+    }
+    let emitted = driver.request(
+        reqwest::Method::POST,
+        "/execute/async",
+        json!({"script":"const done=arguments[arguments.length-1];window.__TAURI__.core.invoke('e2e_drop_fixture').then(token=>done({token}),e=>done({error:String(e)}));","args":[]}),
+    )?;
+    let token = emitted["token"]
+        .as_str()
+        .ok_or_else(|| format!("Native drop fixture failed: {emitted}"))?;
+    driver.wait("return document.querySelector('.source-frame')?.naturalWidth>0 && Array.from(document.querySelectorAll('[role=status]')).some(e=>e.textContent.includes('Loaded dropped video: en.mp4')) && document.querySelector('.preview-shell')?.getAttribute('aria-busy')!=='true';", 30)?;
+    let replay = driver.request(
+        reqwest::Method::POST,
+        "/execute/async",
+        json!({"script":"const token=arguments[0],config=arguments[1],done=arguments[arguments.length-1];window.__TAURI__.core.invoke('accept_dropped_paths',{token,config}).then(()=>done({accepted:true}),e=>done({accepted:false,error:String(e)}));","args":[token,nvsf_core::ExtractConfig::default()]}),
+    )?;
+    if replay["accepted"] != false
+        || !replay["error"]
+            .as_str()
+            .is_some_and(|e| e.contains("Drop request expired"))
+    {
+        return Err(
+            format!("Native drop grant was reusable or hit the wrong guard: {replay}").into(),
+        );
+    }
+    std::fs::write(
+        output.join("drop-ingress.json"),
+        serde_json::to_vec_pretty(
+            &json!({"empty_review":empty_review,"native_event_accepted":true,"replay":replay,"external_os_gesture_verified":false}),
+        )?,
+    )?;
+    Ok(())
+}
+
+fn review_operation_guards(driver: &Driver, output: &Path) -> Result<()> {
+    driver.wait("return document.querySelector('[data-testid=cue-recognize]')?.disabled===false && document.querySelector('.preview-shell')?.getAttribute('aria-busy')!=='true';", 10)?;
+    let guarded = driver.script("const read=window.__NVSF_REVIEW_STATE__,field=document.querySelector('#cue-text');const before=read(false),text=field.value;document.querySelector('[data-testid=cue-recognize]').click();const pending=read(false);field.value='Rejected pending-operation draft';field.dispatchEvent(new Event('input',{bubbles:true}));window.dispatchEvent(new KeyboardEvent('keydown',{key:'z',ctrlKey:true,bubbles:true,cancelable:true}));document.querySelector('#cue-apply').click();field.value=text;return {before,pending,after:read(false),text};")?;
+    if guarded["pending"]["busy"] != true
+        || guarded["after"]["busy"] != true
+        || guarded["after"]["draft"] != false
+        || guarded["after"]["revision"] != guarded["before"]["revision"]
+        || guarded["after"]["dirty"] != guarded["before"]["dirty"]
+    {
+        return Err(format!("Review mutated during native recognition: {guarded}").into());
+    }
+    driver.wait(
+        "return document.querySelector('[data-testid=ocr-proposal-accept]')?.disabled===false;",
+        30,
+    )?;
+    driver.click("[data-testid=cue-mark-reviewed]")?;
+    driver.wait(
+        "return !document.querySelector('[data-testid=ocr-proposal-accept]');",
+        5,
+    )?;
+    let text = driver
+        .script("return document.querySelector('.cue-row.selected .cue-text')?.textContent;")?;
+    if text != guarded["text"] {
+        return Err("Pending-operation or stale-proposal checks changed the correction".into());
+    }
+    std::fs::write(
+        output.join("review-operation-guards.json"),
+        serde_json::to_vec_pretty(
+            &json!({"guarded":guarded,"later_edit_invalidated_proposal":true,"corrected_text_preserved":true}),
         )?,
     )?;
     Ok(())

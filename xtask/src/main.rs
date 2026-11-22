@@ -25,9 +25,9 @@ mod ocr_replay;
 mod package;
 mod process;
 mod production;
-mod publication;
 #[cfg(any(target_os = "linux", test))]
 mod production_supervisor;
+mod publication;
 mod quality;
 mod runtime_pack;
 mod source_policy;

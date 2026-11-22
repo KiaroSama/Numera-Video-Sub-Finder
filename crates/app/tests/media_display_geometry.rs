@@ -88,3 +88,42 @@ fn native_consumer_stop_and_malformed_input_preserve_source_and_allow_reopening(
     assert_eq!(std::fs::read(&malformed).unwrap(), b"not a video");
     assert!(runtime.decode(&video, 80, Some(40), |_| Ok(true)).is_err());
 }
+
+#[test]
+fn native_preview_selects_the_frame_displayed_at_the_requested_time() {
+    let directory = tempfile::tempdir().unwrap();
+    let video = directory.path().join("presentation intervals.y4m");
+    anamorphic_fixture(&video);
+    let runtime = runtime(directory.path());
+    for (at, expected) in [
+        (0, 0),
+        (1, 0),
+        (39, 0),
+        (40, 40),
+        (79, 40),
+        (80, 80),
+        (119, 80),
+    ] {
+        let reference = runtime.preview(&video, expected).unwrap();
+        let actual = runtime.preview(&video, at).unwrap();
+        assert_eq!(actual, reference, "requested presentation time {at}");
+    }
+    for at in [120, 121, 10_000] {
+        assert!(
+            runtime.preview(&video, at).is_err(),
+            "out-of-range time {at}"
+        );
+    }
+    let mut exact_range = Vec::new();
+    runtime
+        .decode(&video, 39, Some(80), |frame| {
+            exact_range.push(frame.time_ms);
+            Ok(true)
+        })
+        .unwrap();
+    assert_eq!(
+        exact_range,
+        [40],
+        "extraction must retain its start-bound filtering"
+    );
+}

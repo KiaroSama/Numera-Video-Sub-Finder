@@ -239,15 +239,7 @@ where
                             }),
                         }
                     } else {
-                        let job_control = if fail_fast {
-                            Control {
-                                cancel: Arc::clone(&stop_ref),
-                                pause: Arc::clone(&control.pause),
-                            }
-                        } else {
-                            control.clone()
-                        };
-                        match runner(cfg, &job_control) {
+                        match runner(cfg, control) {
                             Ok(project) => {
                                 let code = status::project(&project);
                                 let review_needed = code == 2;
@@ -270,6 +262,7 @@ where
                                 let code = status::failure(&err);
                                 if fail_fast {
                                     stop_ref.store(true, Ordering::Release);
+                                    control.cancel.store(true, Ordering::Release);
                                 }
                                 let is_cancelled = matches!(err, AppError::Cancelled);
                                 BulkItemResult {
@@ -333,6 +326,22 @@ pub(crate) fn summarize_exit_code(items: &[BulkItemResult]) -> i32 {
 }
 
 pub(crate) fn run_bulk(args: BulkArgs, data_root: Option<&Path>, control: &Control) -> Result<i32> {
+    run_bulk_with(args, data_root, control, &|cfg, ctrl| {
+        nvsf_app::extract(cfg, ctrl, |p| {
+            eprintln!("Bulk {} {}ms cues={}", p.stage, p.position_ms, p.cues)
+        })
+    })
+}
+
+fn run_bulk_with<F>(
+    args: BulkArgs,
+    data_root: Option<&Path>,
+    control: &Control,
+    extract: &F,
+) -> Result<i32>
+where
+    F: Fn(ExtractConfig, &Control) -> Result<Project> + Sync,
+{
     validate_concurrency(args.concurrency)?;
     if !["srt", "vtt", "ass", "json"].contains(&args.format.as_str()) {
         return Err(AppError::InvalidConfig(
@@ -392,15 +401,13 @@ pub(crate) fn run_bulk(args: BulkArgs, data_root: Option<&Path>, control: &Contr
         &|cfg, ctrl| {
             let final_format = format.as_str();
             let target_path = PathBuf::from(&cfg.output).with_extension(final_format);
-            let project = nvsf_app::extract(cfg, ctrl, |p| {
-                eprintln!("Bulk {} {}ms cues={}", p.stage, p.position_ms, p.cues)
-            })?;
-            if final_format != "srt" {
+            let project = extract(cfg, ctrl)?;
+            if final_format != "srt" || bom || crlf {
                 nvsf_app::export_project(
                     &project,
                     &target_path,
                     final_format,
-                    overwrite,
+                    overwrite || final_format == "srt",
                     bom,
                     crlf,
                 )?;

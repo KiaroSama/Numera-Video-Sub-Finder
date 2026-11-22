@@ -48,7 +48,42 @@ pub fn write_atomic(path: &Path, bytes: &[u8], overwrite: bool) -> Result<()> {
 
 pub fn save_project(project: &Project, path: &Path) -> Result<()> {
     project.validate()?;
+    protect_project_source(project, path)?;
     write_atomic(path, &serde_json::to_vec_pretty(project)?, true)
+}
+
+/// Prevents replacing the named source while allowing review when the source is unavailable.
+/// A distinct hard link is safe because our atomic writers replace that name, not its inode.
+pub fn protect_source(source: &Path, destination: &Path) -> Result<()> {
+    let source = match source.canonicalize() {
+        Ok(path) => path,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error.into()),
+    };
+    match destination.canonicalize() {
+        Ok(path) if path == source => Err(fail(
+            "Destination resolves to source media; no output changed",
+        )),
+        Ok(_) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error.into()),
+    }
+}
+
+/// Legacy projects may store a path relative to another working directory or a moved source.
+/// Their recorded content identity prevents replacing the original video during offline review.
+pub fn protect_project_source(project: &Project, destination: &Path) -> Result<()> {
+    let source = Path::new(&project.config.input);
+    protect_source(source, destination)?;
+    if (source.is_relative() || !source.is_file())
+        && destination.is_file()
+        && hash_file(destination)? == project.source_hash
+    {
+        return Err(fail(
+            "Destination matches source media content; no output changed",
+        ));
+    }
+    Ok(())
 }
 
 pub fn load_project(path: &Path) -> Result<Project> {

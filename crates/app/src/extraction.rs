@@ -4,10 +4,15 @@ use crate::{
     logging::Log,
     media, models,
     providers::profiles::ProfileFiles,
-    storage::{JobLock, hash_file, load_project, save_project},
+    storage::{hash_file, save_project},
     tesseract::Tesseract,
     vision,
 };
+
+#[path = "extraction_checkpoint.rs"]
+mod checkpoint;
+#[path = "extraction_identity.rs"]
+mod identity;
 use nvsf_core::{
     AppearanceTracker, ExtractConfig, Progress, Project, Recognition, normalize_persian,
 };
@@ -46,9 +51,56 @@ fn line_confidence(scores: &[Option<f32>]) -> Option<f32> {
         .map(|sum| sum / scores.len() as f32)
 }
 
+fn optional_verifier<T>(
+    has_paddle: bool,
+    required_acceleration: bool,
+    initialize: impl FnOnce() -> Result<T>,
+) -> (Option<T>, Option<&'static str>) {
+    if !has_paddle {
+        return (None, None);
+    }
+    if required_acceleration {
+        return (
+            None,
+            Some(
+                "Independent Tesseract verifier disabled by required acceleration; low-confidence observations require review",
+            ),
+        );
+    }
+    match initialize() {
+        Ok(verifier) => (Some(verifier), None),
+        Err(_) => (
+            None,
+            Some("Independent Tesseract verifier unavailable; primary ONNX remains active"),
+        ),
+    }
+}
+
 #[cfg(test)]
 mod verifier_tests {
-    use super::line_confidence;
+    use super::{line_confidence, optional_verifier};
+
+    #[test]
+    fn required_acceleration_never_initializes_a_cpu_verifier() {
+        for required in [true, false] {
+            let mut initialized = false;
+            let (verifier, warning) = optional_verifier(true, required, || {
+                initialized = true;
+                Ok(17)
+            });
+            assert_eq!(initialized, !required);
+            assert_eq!(verifier, (!required).then_some(17));
+            if required {
+                assert!(warning.unwrap().contains("required acceleration"));
+            } else {
+                assert!(warning.is_none());
+            }
+        }
+        let (verifier, warning) = optional_verifier(false, false, || -> crate::Result<()> {
+            panic!("Tesseract-primary recognition must not verify itself")
+        });
+        assert!(verifier.is_none() && warning.is_none());
+    }
 
     #[test]
     fn one_unscored_line_cannot_be_averaged_into_confident_text() {
@@ -85,7 +137,17 @@ pub fn run(
     control: &Control,
     callback: impl FnMut(Progress),
 ) -> Result<Project> {
-    run_inner(config, control, callback, None).map(|(project, _)| project)
+    run_inner(config, control, callback, None, None).map(|(project, _)| project)
+}
+
+/// Continues the explicitly selected checkpoint, retaining its location and output ownership.
+pub fn run_resuming(
+    config: ExtractConfig,
+    control: &Control,
+    callback: impl FnMut(Progress),
+    checkpoint: &Path,
+) -> Result<Project> {
+    run_inner(config, control, callback, None, Some(checkpoint)).map(|(project, _)| project)
 }
 
 /// Profiles the ordinary extraction sessions without changing the OCR or export policy.
@@ -95,7 +157,7 @@ pub fn run_profiled(
     callback: impl FnMut(Progress),
     profile_directory: &Path,
 ) -> Result<(Project, ProfileFiles)> {
-    let (project, profiles) = run_inner(config, control, callback, Some(profile_directory))?;
+    let (project, profiles) = run_inner(config, control, callback, Some(profile_directory), None)?;
     Ok((
         project,
         profiles.ok_or_else(|| fail("Extraction produced no provider profiles"))?,
@@ -107,11 +169,14 @@ fn run_inner(
     control: &Control,
     mut callback: impl FnMut(Progress),
     profile_directory: Option<&Path>,
+    selected_checkpoint: Option<&Path>,
 ) -> Result<(Project, Option<ProfileFiles>)> {
     config.validate()?;
     let paths = Paths::new(config.data_root.as_deref().map(Path::new))?;
     let log = Log::new(&paths, "nvsf-worker");
     let input = Path::new(&config.input).canonicalize()?;
+    let identity = identity::SourceIdentity::bind(config, &input)?;
+    let config = &identity.config;
     let output = Path::new(&config.output);
     if output.exists() && !config.overwrite {
         return Err(fail("Output exists; enable overwrite explicitly"));
@@ -119,14 +184,15 @@ fn run_inner(
     if output.exists() && output.canonicalize()? == input {
         return Err(fail("Output resolves to input media"));
     }
-    let checkpoint = output.with_extension("nvsf.json");
-    let _lock = JobLock::acquire(&checkpoint.with_extension("lock"))?;
+    let checkpoint_owner = checkpoint::Checkpoint::open(output, selected_checkpoint, &input)?;
+    let checkpoint = checkpoint_owner.path.clone();
     let source_hash = hash_file(&input)?;
-    let config_hash = Sha256::digest(serde_json::to_vec(&config)?)
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect::<String>();
-    let model_hash = crate::languages::fingerprint(&paths, &config.language)?;
+    let config_hash = &identity.hash;
+    let model_hash = crate::languages::fingerprint_with_policy(
+        &paths,
+        &config.language,
+        config.gpu_required || config.accelerator_required,
+    )?;
     let runtime = media::MediaRuntime::load(&paths)?;
     let media = runtime.probe(&input)?;
     let mut project = Project {
@@ -143,16 +209,8 @@ fn run_inner(
         warnings: vec![],
     };
     let mut start = config.start_ms;
-    if checkpoint.is_file() {
-        let saved = load_project(&checkpoint)?;
-        if saved.source_hash != source_hash
-            || saved.config_hash != config_hash
-            || saved.model_hash != model_hash
-        {
-            return Err(fail(
-                "Checkpoint source/configuration/model mismatch; choose a new output or restore compatible configuration",
-            ));
-        }
+    if let Some(mut saved) = checkpoint_owner.load()? {
+        identity.admit(&mut saved, &source_hash, &model_hash)?;
         if saved.completed {
             if profile_directory.is_some() {
                 return Err(fail(
@@ -160,6 +218,7 @@ fn run_inner(
                 ));
             }
             crate::export_project(&saved, output, "srt", config.overwrite, false, false)?;
+            save_project(&saved, &checkpoint)?;
             return Ok((saved, None));
         }
         start = start.max(saved.processed_ms);
@@ -199,16 +258,16 @@ fn run_inner(
         None
     };
     let has_paddle = nvsf_core::languages::paddle_model(&config.language).is_some();
-    let mut fallback = if has_paddle {
-        Tesseract::new(&paths, &config.language).ok()
-    } else {
-        None
-    };
-    if has_paddle && fallback.is_none() {
-        project
-            .warnings
-            .push("Independent Tesseract verifier unavailable; primary ONNX remains active".into());
-        log.event("WARNING", "OCR", "Tesseract verifier unavailable");
+    let (mut fallback, verifier_warning) = optional_verifier(
+        has_paddle,
+        config.gpu_required || config.accelerator_required,
+        || Tesseract::new(&paths, &config.language),
+    );
+    if let Some(warning) = verifier_warning {
+        if !project.warnings.iter().any(|existing| existing == warning) {
+            project.warnings.push(warning.into());
+        }
+        log.event("WARNING", "OCR", warning);
     }
     log.event(
         "INFO",

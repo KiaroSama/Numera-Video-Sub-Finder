@@ -179,6 +179,7 @@ fn main() {
     #[cfg(feature = "e2e")]
     let builder = builder.invoke_handler(commands![
         e2e::e2e_fixture,
+        e2e::e2e_drop_fixture,
         e2e::e2e_save_edits,
         e2e::e2e_focus,
         e2e::e2e_close_probe,
@@ -235,11 +236,9 @@ fn main() {
                 }
                 tauri::DragDropEvent::Drop { paths, .. } => {
                     let _ = app.emit("nvsf://drag-state", false);
-                    let list: Vec<String> = paths
-                        .into_iter()
-                        .map(|p| p.to_string_lossy().into_owned())
-                        .collect();
-                    let _ = app.emit("nvsf://files-dropped", list);
+                    if let Err(error) = drop::publish_native_drop(app, &shutdown, paths) {
+                        shutdown.0.log.event("ERROR", "DROP", &error);
+                    }
                 }
                 _ => {}
             },

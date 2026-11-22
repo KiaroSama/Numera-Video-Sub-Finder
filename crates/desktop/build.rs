@@ -17,6 +17,7 @@ fn main() {
             "cancel_update",
             "save_update",
             "pick_source",
+            "accept_dropped_paths",
             "choose_output",
             "preview_frame",
             "start_job",
@@ -54,6 +55,8 @@ fn main() {
             "propose_visual_retry",
             #[cfg(feature = "e2e")]
             "e2e_fixture",
+            #[cfg(feature = "e2e")]
+            "e2e_drop_fixture",
             #[cfg(feature = "e2e")]
             "e2e_save_edits",
             #[cfg(feature = "e2e")]

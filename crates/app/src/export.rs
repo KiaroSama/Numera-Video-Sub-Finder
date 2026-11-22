@@ -1,4 +1,7 @@
-use crate::{Result, fail, storage::write_atomic};
+use crate::{
+    Result, fail,
+    storage::{protect_project_source, write_atomic},
+};
 use nvsf_core::{Project, export_ass, export_srt, export_vtt};
 use std::path::Path;
 
@@ -55,6 +58,7 @@ pub fn export_project(
                 "Export set contains an existing or unsafe destination; no output changed",
             ));
         }
+        protect_project_source(project, destination)?;
         let parent = destination
             .parent()
             .filter(|p| !p.as_os_str().is_empty())

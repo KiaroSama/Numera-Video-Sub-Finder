@@ -46,6 +46,7 @@ const INPUTS: &[&str] = &[
     "crates/app/Cargo.toml",
     "crates/media-native/Cargo.toml",
     "crates/app/src/media.rs",
+    "crates/app/src/media_preview.rs",
     "crates/core/src/media_abi.rs",
     "crates/media-native/src/lib.rs",
     "crates/app/tests/media_display_geometry.rs",
@@ -470,7 +471,7 @@ impl Admission<'_> {
             Some("media::callback_tests::"),
             Some(3),
         )?;
-        let geometry = self.tests("display-geometry", geometry, None, Some(2))?;
+        let geometry = self.tests("display-geometry", geometry, None, Some(3))?;
         let mut loaded = Vec::new();
         for json in geometry.lines().filter_map(|line| {
             line.split_once("NVSF_MEDIA_ASAN_LOADED=")
@@ -487,9 +488,10 @@ impl Admission<'_> {
             }
             loaded.push(record);
         }
-        if loaded.len() != 2 {
+        if loaded.len() != 3 {
             return Err(
-                "Both actual Y4M tests must report their live loaded media/FFmpeg closure.".into(),
+                "All three actual Y4M tests must report their live loaded media/FFmpeg closure."
+                    .into(),
             );
         }
         self.report["loaded"] = json!(loaded);

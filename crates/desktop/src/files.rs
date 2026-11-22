@@ -303,6 +303,7 @@ pub(crate) fn save_project_to(
     path: &std::path::Path,
     confirm: impl FnOnce() -> Result<bool>,
 ) -> Result<Option<String>> {
+    nvsf_app::storage::protect_project_source(project, path).map_err(|e| e.to_string())?;
     let overwrite = path.exists();
     if !confirm()? {
         return Ok(None);

@@ -80,8 +80,10 @@ pub fn split_cue(cues: &mut Vec<Cue>, id: u64, at_ms: u64) -> Result<()> {
         .ok_or(Error::Overflow)?;
     second.start_ms = at_ms;
     second.edited = true;
+    second.reviewed = false;
     cues[i].end_ms = at_ms;
     cues[i].edited = true;
+    cues[i].reviewed = false;
     cues.insert(i + 1, second);
     Ok(())
 }
@@ -105,7 +107,9 @@ pub fn merge_cues(cues: &mut Vec<Cue>, first: u64, second: u64) -> Result<()> {
     merged.start_ms = merged.start_ms.min(later.start_ms);
     merged.end_ms = merged.end_ms.max(later.end_ms);
     merged.text = format!("{}\n{}", merged.text, later.text);
+    merged.raw_text = format!("{}\n{}", merged.raw_text, later.raw_text);
     merged.edited = true;
+    merged.reviewed = false;
     merged.validate()?;
     cues[a] = merged;
     cues.remove(b);

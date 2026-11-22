@@ -145,7 +145,22 @@ pub fn export(paths: &Paths, code: &str, destination: &Path) -> Result<()> {
 }
 
 pub fn fingerprint(paths: &Paths, code: &str) -> Result<String> {
+    fingerprint_with_policy(paths, code, false)
+}
+
+pub fn fingerprint_with_policy(
+    paths: &Paths,
+    code: &str,
+    required_acceleration: bool,
+) -> Result<String> {
     let language = spec(code)?;
+    let paddle = languages::paddle_model(code);
+    if required_acceleration && paddle.is_none() {
+        return Err(crate::AppError::Provider(
+            "This language uses Tesseract CPU recognition; required acceleration cannot be met"
+                .into(),
+        ));
+    }
     let mut identities = Vec::new();
     for id in [Some("det"), languages::paddle_model(code)]
         .into_iter()
@@ -157,7 +172,9 @@ pub fn fingerprint(paths: &Paths, code: &str) -> Result<String> {
             .ok_or_else(|| fail("Recognition model identity missing"))?;
         identities.push(format!("{id}:{}:{}", model.sha256, model.metadata_sha256));
     }
-    if verify(paths, code).is_ok() {
+    if required_acceleration {
+        identities.push(format!("{}:verifier-disabled-by-policy", language.code));
+    } else if verify(paths, code).is_ok() {
         identities.push(format!("{}:{}", language.code, language.sha256));
     } else if languages::paddle_model(code).is_none() {
         verify(paths, code)?;
