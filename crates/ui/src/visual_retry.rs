@@ -68,7 +68,7 @@ pub fn VisualCue(ui: Ui) -> impl IntoView {
         }>{move ||if cancelling.get(){"Stopping retry…"}else{"Cancel crop retry"}}</button></Show></div>
         <Show when=move ||proposal.with(Option::is_some)><section class="message notice"><div><h3>"Review-only visual proposal"</h3>
             <p class="hint">{move ||proposal.with(|p|p.as_ref().map(|(_,_,p)|format!("Provider: {} · {}",p.provider,p.warning)).unwrap_or_default())}</p>
-            <p dir="auto" data-testid="visual-proposal-text">{move ||proposal.with(|p|p.as_ref().map(|(_,_,p)|if p.unreadable{"Unreadable — current cue retained".into()}else{p.text.clone().unwrap_or_else(||"No readable proposal returned".into())}).unwrap_or_default())}</p>
+            <p dir="auto" data-testid="visual-proposal-text">{move ||proposal.with(|p|p.as_ref().map(|(_,_,p)|if p.unreadable{"Unreadable; current cue retained".into()}else{p.text.clone().unwrap_or_else(||"No readable proposal returned".into())}).unwrap_or_default())}</p>
             <p class="hint">"Replacing text also replaces user corrections in this cue. Raw OCR, source timing, crop and confidence stay intact. Undo restores the previous revision."</p>
             <div class="button-row"><button data-testid="visual-proposal-accept" class="primary" disabled=move ||ui.busy.get()||ui.draft_dirty.get()||proposal.with(|p|p.as_ref().is_none_or(|(id,revision,p)|Some(*id)!=ui.selected.get()||*revision!=ui.revision.get()||p.unreadable||!p.requires_review||p.text.as_ref().is_none_or(|text|text.trim().is_empty()))) on:click=move |_|{
                 if let Some((id,revision,result))=proposal.get_untracked(){if revision!=ui.revision.get_untracked()||Some(id)!=ui.selected.get_untracked()||result.unreadable||!result.requires_review{return;}

@@ -1,8 +1,8 @@
 # Validation status
 
-Updated: 2026-11-21 (version `0.2.0`). NOT a full public-release acceptance report. Hosted observations below refer to exact named commit SHAs.
+Updated: 2026-11-22 (version `0.3.0`). Hosted observations below refer to exact named commit SHAs.
 
-2026-11-21, D-020 verified green on exact `af4917ceedf31d23c27b14743be9b5f4926ab9f1` ([run 44866722797](https://github.com/KiaroSama/Numera-Video-Sub-Finder/actions/runs/44866722797)): all 15/15 Final verification jobs, 14/14 commit statuses, and 17/17 check runs (including Gitleaks and Socket Security) passed across all four 64-bit targets (`windows-x64`, `windows-arm64`, `linux-x64`, `linux-arm64`) on Rust `1.100.0`. D-021 (`0.2.0`) adds full desktop-to-CLI agent parity, concurrent `bulk` extraction, visual frame grid/box-drawing (`preview frame --grid --draw-box --pixel-box`, `preview strip`), the tracked AI Agent Skill under `skills/numera-video-sub-finder/`, GPU OOM fallback, boundary refinement, workflow policy linting, `SHA256SUMS.txt`, and four-target `release.yml`.
+2026-11-22, D-021 (`0.2.0`) verified green on exact `5a1f21b5645858920d2bd05a9cf6829b0bdc9cf3` ([run 44977170144](https://github.com/KiaroSama/Numera-Video-Sub-Finder/actions/runs/44977170144), tag `v0.2.0`): all 15/15 Final verification jobs, 14/14 commit statuses, and 17/17 check runs passed across all four 64-bit targets (`windows-x64`, `windows-arm64`, `linux-x64`, `linux-arm64`) on Rust `1.100.0`, alongside physical Windows 11 desktop acceptance. D-022 (`0.3.0`) migrates stage-two CI PowerShell helpers to Rust (`xtask`), updates GitHub Releases publishing with owner self-signed `D-014` Windows signing, completes the writing-voice audit across docs and UI copy, and adds live Windows 11 `agent-desktop` and real-video validation.
 
 2026-11-17, owner decision D-018: support is limited to Windows x64, Windows ARM64, Linux x64 and Linux ARM64. Apple signing/notarization and macOS screenshot obligations are withdrawn, not blocked. Earlier macOS results and pending descriptions remain historical evidence only.
 

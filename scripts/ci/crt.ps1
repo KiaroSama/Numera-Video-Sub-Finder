@@ -1,5 +1,23 @@
 #requires -Version 7.4
+function Resolve-BuiltXtask {
+    $root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
+    $ext = if ($IsWindows) { '.exe' } else { '' }
+    $candidate = Join-Path $root "target/release/xtask$ext"
+    if ([IO.File]::Exists($candidate)) { return $candidate }
+    return $null
+}
 function Get-ReleaseCrtImports([string]$Dependencies) {
+    $xtask = Resolve-BuiltXtask
+    if ($null -ne $xtask) {
+        $tmp = [IO.Path]::GetTempFileName()
+        try {
+            [IO.File]::WriteAllText($tmp, $Dependencies, [Text.UTF8Encoding]::new($false))
+            $out = & $xtask ci-crt --mode imports --input $tmp
+            if ($LASTEXITCODE -ne 0) { throw 'Rust ci-crt imports validation failed.' }
+            foreach ($line in @($out)) { if (-not [string]::IsNullOrWhiteSpace($line)) { $line.Trim() } }
+            return
+        } finally { Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue }
+    }
     if ($Dependencies.Length -gt 1048576) { throw 'PE import listing exceeds its byte budget.' }
     $imports = [regex]::Matches($Dependencies, '(?im)^\s+([A-Za-z0-9_.+-]+\.(?:dll|drv))\s*$')
     if ($imports.Count -lt 1 -or $imports.Count -gt 512) { throw 'PE import listing is empty or exceeds its member budget.' }
@@ -13,6 +31,12 @@ function Get-ReleaseCrtImports([string]$Dependencies) {
     }
 }
 function Assert-ReleaseCrtMachine([string]$Path, [string]$Architecture) {
+    $xtask = Resolve-BuiltXtask
+    if ($null -ne $xtask) {
+        & $xtask ci-crt --mode machine --input $Path --arch $Architecture
+        if ($LASTEXITCODE -ne 0) { throw 'Rust ci-crt machine validation failed.' }
+        return
+    }
     if ($Architecture -notin @('arm64', 'x64')) { throw 'Unsupported native CRT architecture.' }
     $file = Get-Item -LiteralPath $Path -Force
     if ($file.PSIsContainer -or ($file.Attributes -band [IO.FileAttributes]::ReparsePoint) -or $file.Length -lt 64 -or $file.Length -gt 16777216) { throw 'CRT input must be a bounded regular PE image.' }

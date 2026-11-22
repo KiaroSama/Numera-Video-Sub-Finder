@@ -29,6 +29,7 @@
 /.ci-runner-win/
 /.ci-work/
 /.ci-cache/
+/real tests/
 /.venv/
 /venv/
 /coverage/

@@ -6,7 +6,7 @@
 
 [![Final verification](https://github.com/KiaroSama/Numera-Video-Sub-Finder/actions/workflows/verify.yml/badge.svg)](https://github.com/KiaroSama/Numera-Video-Sub-Finder/actions/workflows/verify.yml)
 [![License GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-2563eb)](LICENSE)
-[![Version 0.2.0](https://img.shields.io/badge/version-0.2.0-059669)](Cargo.toml)
+[![Version 0.3.0](https://img.shields.io/badge/version-0.3.0-059669)](Cargo.toml)
 [![Rust 1.100.0 toolchain](https://img.shields.io/badge/rust-1.100.0-8b5cf6)](rust-toolchain.toml)
 [![Runs on Windows and Linux, x64 and ARM64](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%28x64%2C%20ARM64%29-0891b2)](ci/targets.json)
 [![Project guides](https://img.shields.io/badge/docs-project%20guides-1d4ed8)](docs/architecture.md)
@@ -24,18 +24,18 @@
 An offline-first desktop workspace for extracting visible, burned-in subtitles from video, reviewing their source frames, and exporting timed Unicode subtitles. Application code, including the Leptos/WebAssembly frontend and CLI, is written in Rust. Tauri and native FFmpeg, ONNX Runtime and Tesseract provide platform integrations.
 
 <p align="center">
-  <img src="assets/screenshot-desktop.png" alt="Numera Video Sub Finder v0.2.0 desktop workspace running on Windows 11" width="900">
+  <img src="assets/screenshot-desktop.png" alt="Numera Video Sub Finder v0.3.0 desktop workspace running on Windows 11" width="900">
 </p>
 
 ## Status
 
-Development; not a qualified release. Source and CI definitions do not prove successful builds or OCR quality. The live CI badge is authoritative for hosted checks. See [validation status](docs/validation.md) for remaining gates. Android and iPhone applications are not included.
+Active 0.x releases follow sequential minor versions (`0.2.0`, `0.3.0`, `0.4.0`, ...) with matching Git tags and GitHub Releases built on exact verified commits. The live CI badge is authoritative for hosted checks. See [validation status](docs/validation.md) for current verification coverage and remaining external gates. Android and iPhone applications are not included.
 
-The four native 64-bit targets are Windows x64, Windows ARM64, Linux x64 and Linux ARM64. All 32-bit builds are excluded. Hosted CPU CI is separate from real-device accelerator qualification. Windows binaries and NSIS installers carry the pinned owner self-signed development Authenticode signature (`D-014`); public CA publisher trust remains separate. The dedicated updater key is not a platform certificate. Source availability does not imply public trust, GPU placement or real-corpus accuracy certification.
+The four native 64-bit targets are Windows x64, Windows ARM64, Linux x64 and Linux ARM64. All 32-bit builds are excluded. Hosted CPU CI is separate from real-device accelerator qualification. Windows binaries and NSIS installers are signed with the project owner's self-signed Authenticode certificate (`D-014`, thumbprint `B2A45C4E8257197BBF067ED94F83E626AC6CE1C5`); no public CA certificate is used. Verify downloaded packages against the published `SHA256SUMS.txt`.
 
 ## Installation and setup
 
-Start with the [installation guide](docs/installation.md): pick the matching OS and architecture, verify the package, install required resources and run a first extraction. No ready-build release is claimed while required native checks and signing gates remain open. Development prereleases, when published, are marked experimental and never appear on the stable updater channel.
+Download the matching 64-bit package for your OS and architecture from [GitHub Releases](https://github.com/KiaroSama/Numera-Video-Sub-Finder/releases) and follow the [installation guide](docs/installation.md) to verify checksums, install required models, and run a first extraction. Windows packages carry the owner's self-signed Authenticode signature (`D-014`), so Windows SmartScreen may prompt before first launch.
 
 ## Workflow
 

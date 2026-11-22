@@ -3,19 +3,24 @@ on:
   workflow_dispatch:
     inputs:
       evidence_run:
-        description: Exact Final verification run containing complete four-target qualification evidence
+        description: Exact Final verification run containing complete four-target packages
         required: true
         type: string
-      publish_prerelease:
-        description: Publish a GitHub development prerelease with four-target packages and SHA256SUMS.txt
+      publish_release:
+        description: Publish a GitHub Release with all four 64-bit targets and SHA256SUMS.txt
         required: false
         default: false
         type: boolean
-      prerelease_tag:
-        description: Explicit prerelease tag (e.g. v0.2.0-dev.1) when publish_prerelease is true
+      release_tag:
+        description: Explicit release tag (e.g. v0.3.0) when publish_release is true
         required: false
         default: ''
         type: string
+      prerelease:
+        description: Mark the published GitHub Release as a prerelease
+        required: false
+        default: false
+        type: boolean
 permissions:
   contents: read
   actions: read
@@ -41,34 +46,34 @@ jobs:
           mkdir -p .ci-work/release-assets
           : > .ci-work/release-assets/SHA256SUMS.txt
           for target in windows-x64 windows-arm64 linux-x64 linux-arm64; do
-            bundle_report=".ci-work/qualification/reports/${target}-bundles.json"
+            bundle_report=".ci-work/qualification/packages/reports/${target}-bundles.json"
             test -f "$bundle_report" || { echo "Missing required target bundle report: $target"; exit 1; }
             jq -e --arg sha "$SOURCE_SHA" --arg target "$target" '.source_sha==$sha and .target==$target and .passed==true and (.formats|length>=2)' "$bundle_report" >/dev/null
-            sums=".ci-work/qualification/packages/${target}/SHA256SUMS.txt"
+            sums=".ci-work/qualification/packages/installers/${target}/SHA256SUMS.txt"
             test -f "$sums" || { echo "Missing SHA256SUMS.txt for $target"; exit 1; }
-            (cd ".ci-work/qualification/packages/${target}" && sha256sum -c SHA256SUMS.txt)
+            (cd ".ci-work/qualification/packages/installers/${target}" && sha256sum -c SHA256SUMS.txt)
             sed "s|  |  ${target}/|" "$sums" >> .ci-work/release-assets/SHA256SUMS.txt
           done
-      - name: Fail closed on missing required full-release qualification evidence
-        if: ${{ !inputs.publish_prerelease }}
+      - name: Fail closed on missing full-qualification evidence when not publishing
+        if: ${{ !inputs.publish_release }}
         env:
           SOURCE_SHA: ${{ github.sha }}
         shell: bash
         run: |
-          report=.ci-work/qualification/reports/qualification.json
+          report=.ci-work/qualification/packages/reports/qualification.json
           jq -e --arg sha "$SOURCE_SHA" '.source_sha==$sha and .release_ready==true and all(.evidence[]; .state=="PASS") and (.families|length==30) and all(.families[]; (.id=="CT-23" and .state=="NOT_APPLICABLE") or (.state=="PASS" and .tests>0 and .source_sha==$sha)) and .metrics.coverage>=0.80 and .metrics.critical_coverage>=0.90 and .metrics.changed_line_coverage>=0.90 and .metrics.critical_mutation>=0.80' "$report"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-checksums-${{ github.sha }}
           path: .ci-work/release-assets/SHA256SUMS.txt
           if-no-files-found: error
-      - name: Publication remains reviewer controlled
-        if: ${{ !inputs.publish_prerelease }}
+      - name: Qualification only does not publish
+        if: ${{ !inputs.publish_release }}
         run: echo 'Qualification does not publish, sign, merge or close a pull request.'
 
-  prerelease:
+  publish:
     needs: qualification
-    if: ${{ inputs.publish_prerelease }}
+    if: ${{ inputs.publish_release }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
@@ -84,18 +89,14 @@ jobs:
           pattern: desktop-*-${{ github.sha }}
           path: .ci-work/qualification
           merge-multiple: true
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          name: release-checksums-${{ github.sha }}
-          path: .ci-work/release-assets
-      - name: Stage four-target assets and verify checksums
+      - name: Stage four-target release assets and verify checksums
         shell: bash
         run: |
           set -euo pipefail
-          test -n "${{ inputs.prerelease_tag }}" || { echo "prerelease_tag is required when publish_prerelease is true"; exit 1; }
+          test -n "${{ inputs.release_tag }}" || { echo "release_tag is required when publish_release is true"; exit 1; }
           mkdir -p .ci-work/upload
           for target in windows-x64 windows-arm64 linux-x64 linux-arm64; do
-            for f in .ci-work/qualification/packages/${target}/*; do
+            for f in .ci-work/qualification/packages/installers/${target}/*; do
               base=$(basename "$f")
               [ "$base" = "SHA256SUMS.txt" ] && continue
               cp "$f" ".ci-work/upload/${target}-${base}"
@@ -106,17 +107,30 @@ jobs:
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: '.ci-work/upload/*'
-      - name: Publish GitHub development prerelease
+      - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ inputs.prerelease_tag }}
+          TAG: ${{ inputs.release_tag }}
           SOURCE_SHA: ${{ github.sha }}
+          IS_PRERELEASE: ${{ inputs.prerelease }}
         shell: bash
         run: |
           set -euo pipefail
-          gh release create "$TAG" .ci-work/upload/* \
-            --repo "$GITHUB_REPOSITORY" \
-            --target "$SOURCE_SHA" \
-            --prerelease \
-            --title "Numera Video Sub Finder $TAG (development prerelease)" \
-            --notes "Exact-source four-target development prerelease (windows-x64, windows-arm64, linux-x64, linux-arm64) from commit $SOURCE_SHA. Windows binaries carry the owner self-signed development Authenticode signature (D-014); public CA trust and licensed real multilingual corpus qualification remain separate."
+          NOTES="Four-target 64-bit release (windows-x64, windows-arm64, linux-x64, linux-arm64) built from exact commit ${SOURCE_SHA} (Final verification run ${{ inputs.evidence_run }}).
+
+          Windows installers and binaries are signed with the project owner's self-signed Authenticode certificate (D-014, thumbprint B2A45C4E8257197BBF067ED94F83E626AC6CE1C5). No public CA publisher certificate is used. Verify downloaded files against SHA256SUMS.txt."
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" .ci-work/upload/* --repo "$GITHUB_REPOSITORY" --clobber
+            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --title "Numera Video Sub Finder $TAG" --notes "$NOTES"
+          else
+            EXTRA_ARGS=()
+            if [ "$IS_PRERELEASE" = "true" ]; then
+              EXTRA_ARGS+=(--prerelease)
+            fi
+            gh release create "$TAG" .ci-work/upload/* \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$SOURCE_SHA" \
+              --title "Numera Video Sub Finder $TAG" \
+              --notes "$NOTES" \
+              "${EXTRA_ARGS[@]}"
+          fi

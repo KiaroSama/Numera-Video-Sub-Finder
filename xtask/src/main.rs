@@ -1,3 +1,7 @@
+mod ci_coverage;
+mod ci_crt;
+mod ci_frontend;
+mod ci_notices;
 mod ci_tasks;
 mod coverage_scope;
 mod executable_icons;
@@ -207,6 +211,30 @@ enum Cmd {
         arguments_json: String,
     },
     FrontendTools,
+    CiCrt {
+        #[arg(long)]
+        mode: String,
+        #[arg(long)]
+        input: Option<PathBuf>,
+        #[arg(long)]
+        arch: Option<String>,
+    },
+    CiNotices {
+        #[arg(long)]
+        source: PathBuf,
+        #[arg(long)]
+        destination: PathBuf,
+    },
+    CiCoverage {
+        #[arg(long)]
+        phase: String,
+        #[arg(long)]
+        target: Option<String>,
+    },
+    CiFrontend {
+        #[arg(long)]
+        e2e: bool,
+    },
 }
 fn main() {
     if let Err(e) = run() {
@@ -322,6 +350,13 @@ fn run() -> Result<(), Box<dyn Error>> {
             arguments_json,
         } => ci_tasks::virtual_desktop(&executable, &arguments_json),
         Cmd::FrontendTools => ci_tasks::frontend_tools(),
+        Cmd::CiCrt { mode, input, arch } => ci_crt::run(&mode, input.as_deref(), arch.as_deref()),
+        Cmd::CiNotices {
+            source,
+            destination,
+        } => ci_notices::run(&source, &destination),
+        Cmd::CiCoverage { phase, target } => ci_coverage::run(&phase, target.as_deref()),
+        Cmd::CiFrontend { e2e } => ci_frontend::run(e2e),
     };
     writeln!(
         log,

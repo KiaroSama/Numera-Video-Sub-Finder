@@ -15,7 +15,7 @@ use std::{
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
-const GUARD_SNIPPET: &str = "$n=$env:NVSF_GUARD_NAME; $w=[int]$env:NVSF_GUARD_WALL; $i=[int]$env:NVSF_GUARD_IDLE; $e=$env:NVSF_GUARD_EXE; $a=@(ConvertFrom-Json -InputObject $env:NVSF_GUARD_ARGS_JSON); $c=$env:NVSF_GUARD_CAPTURE; Remove-Item Env:NVSF_GUARD_* -ErrorAction SilentlyContinue; if($c){ & './scripts/ci/guard.ps1' -Name $n -WallSeconds $w -IdleSeconds $i -Executable $e -Arguments $a -CaptureStdoutPath $c } else { & './scripts/ci/guard.ps1' -Name $n -WallSeconds $w -IdleSeconds $i -Executable $e -Arguments $a }";
+const GUARD_SNIPPET: &str = "$n=$env:NVSF_GUARD_NAME; $w=[int]$env:NVSF_GUARD_WALL; $i=[int]$env:NVSF_GUARD_IDLE; $e=$env:NVSF_GUARD_EXE; $a=@(ConvertFrom-Json -InputObject $env:NVSF_GUARD_ARGS_JSON); $c=$env:NVSF_GUARD_CAPTURE; $d=$env:NVSF_GUARD_WORKDIR; Remove-Item Env:NVSF_GUARD_* -ErrorAction SilentlyContinue; $p=@{ Name=$n; WallSeconds=$w; IdleSeconds=$i; Executable=$e; Arguments=$a }; if($c){ $p.CaptureStdoutPath=$c }; if($d){ $p.WorkingDirectory=$d }; & './scripts/ci/guard.ps1' @p";
 
 fn invoke_guard(
     name: &str,
@@ -25,7 +25,40 @@ fn invoke_guard(
     args: &[&str],
     capture: Option<&Path>,
 ) -> Result<()> {
+    invoke_guard_in_dir(name, wall_s, idle_s, exe, args, capture, None)
+}
+
+pub(crate) fn invoke_guard_in_dir(
+    name: &str,
+    wall_s: u32,
+    idle_s: u32,
+    exe: &str,
+    args: &[&str],
+    capture: Option<&Path>,
+    workdir: Option<&Path>,
+) -> Result<()> {
+    invoke_guard_with_env(name, wall_s, idle_s, exe, args, capture, workdir, &[], &[])
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn invoke_guard_with_env(
+    name: &str,
+    wall_s: u32,
+    idle_s: u32,
+    exe: &str,
+    args: &[&str],
+    capture: Option<&Path>,
+    workdir: Option<&Path>,
+    remove_env: &[String],
+    set_env: &[(&str, &str)],
+) -> Result<()> {
     let mut cmd = Command::new("pwsh");
+    for key in remove_env {
+        cmd.env_remove(key);
+    }
+    for (key, value) in set_env {
+        cmd.env(key, value);
+    }
     cmd.args([
         "-NoLogo",
         "-NoProfile",
@@ -42,6 +75,11 @@ fn invoke_guard(
         cmd.env("NVSF_GUARD_CAPTURE", cap);
     } else {
         cmd.env_remove("NVSF_GUARD_CAPTURE");
+    }
+    if let Some(dir) = workdir {
+        cmd.env("NVSF_GUARD_WORKDIR", dir);
+    } else {
+        cmd.env_remove("NVSF_GUARD_WORKDIR");
     }
     let status = cmd.status()?;
     if !status.success() {

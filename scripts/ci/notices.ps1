@@ -1,5 +1,14 @@
 #requires -Version 7.4
 function Copy-VisualStudioNotices([string]$Source, [string]$Destination) {
+    $repoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
+    $ext = if ($IsWindows) { '.exe' } else { '' }
+    $xtask = Join-Path $repoRoot "target/release/xtask$ext"
+    if ([IO.File]::Exists($xtask)) {
+        $out = & $xtask ci-notices --source $Source --destination $Destination
+        if ($LASTEXITCODE -ne 0) { throw 'Rust ci-notices copy failed.' }
+        foreach ($line in @($out)) { if (-not [string]::IsNullOrWhiteSpace($line)) { $line.Trim() } }
+        return
+    }
     $root = [IO.Path]::GetFullPath($Source)
     if (-not [IO.Directory]::Exists($root)) { throw 'Visual Studio distribution license terms are absent.' }
     $pending = [Collections.Generic.Queue[string]]::new()
