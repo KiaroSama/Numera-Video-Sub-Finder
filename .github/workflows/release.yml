@@ -17,7 +17,7 @@ on:
         default: ''
         type: string
       prerelease:
-        description: Mark the published GitHub Release as a prerelease
+        description: Explicit development prerelease; stable publication requires full qualification
         required: false
         default: false
         type: boolean
@@ -27,9 +27,32 @@ permissions:
 jobs:
   qualification:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 30
+    env:
+      CARGO_BUILD_JOBS: 2
+      RUST_TEST_THREADS: 2
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249
+        with:
+          toolchain: 1.100.0
+      - name: Read the requested verification run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVIDENCE_RUN: ${{ inputs.evidence_run }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          log() { printf '[%s] [%s] [RELEASE] %s\n' "$(date -u '+%Y-%m-%d %H:%M:%S UTC')" "$1" "$2"; }
+          trap 'log ERROR "Verification metadata retrieval failed"' ERR
+          [[ "$EVIDENCE_RUN" =~ ^[1-9][0-9]*$ ]] || { log ERROR 'evidence_run must be a positive run ID'; exit 1; }
+          mkdir -p .ci-work
+          log INFO 'Reading the selected verification run'
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${EVIDENCE_RUN}" > .ci-work/evidence-run.json
+          log DEBUG 'Verification run metadata saved for exact-source admission'
+      - name: Build the existing Rust release gates
+        timeout-minutes: 20
+        run: cargo build --release --locked -p xtask
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           run-id: ${{ inputs.evidence_run }}
@@ -37,6 +60,20 @@ jobs:
           pattern: desktop-*-${{ github.sha }}
           path: .ci-work/qualification
           merge-multiple: true
+      - name: Require exact verification and channel-appropriate qualification
+        env:
+          SOURCE_SHA: ${{ github.sha }}
+          PUBLISH_RELEASE: ${{ inputs.publish_release }}
+          IS_PRERELEASE: ${{ inputs.prerelease }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./target/release/xtask publication-gate \
+            --reports .ci-work/qualification/packages/reports \
+            --source-sha "$SOURCE_SHA" --evidence .ci-work/evidence-run.json \
+            --repository "$GITHUB_REPOSITORY" --publish "$PUBLISH_RELEASE" \
+            --prerelease "$IS_PRERELEASE" --tag "$RELEASE_TAG"
       - name: Verify four-target release matrix and SHA256SUMS inventory
         env:
           SOURCE_SHA: ${{ github.sha }}
@@ -54,14 +91,6 @@ jobs:
             (cd ".ci-work/qualification/packages/installers/${target}" && sha256sum -c SHA256SUMS.txt)
             sed "s|  |  ${target}/|" "$sums" >> .ci-work/release-assets/SHA256SUMS.txt
           done
-      - name: Fail closed on missing full-qualification evidence when not publishing
-        if: ${{ !inputs.publish_release }}
-        env:
-          SOURCE_SHA: ${{ github.sha }}
-        shell: bash
-        run: |
-          report=.ci-work/qualification/packages/reports/qualification.json
-          jq -e --arg sha "$SOURCE_SHA" '.source_sha==$sha and .release_ready==true and all(.evidence[]; .state=="PASS") and (.families|length==30) and all(.families[]; (.id=="CT-23" and .state=="NOT_APPLICABLE") or (.state=="PASS" and .tests>0 and .source_sha==$sha)) and .metrics.coverage>=0.80 and .metrics.critical_coverage>=0.90 and .metrics.changed_line_coverage>=0.90 and .metrics.critical_mutation>=0.80' "$report"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-checksums-${{ github.sha }}
@@ -91,12 +120,26 @@ jobs:
           path: .ci-work/qualification
           merge-multiple: true
       - name: Stage four-target release assets and verify checksums
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          SOURCE_SHA: ${{ github.sha }}
         shell: bash
         run: |
           set -euo pipefail
-          test -n "${{ inputs.release_tag }}" || { echo "release_tag is required when publish_release is true"; exit 1; }
+          log() { printf '[%s] [%s] [RELEASE] %s\n' "$(date -u '+%Y-%m-%d %H:%M:%S UTC')" "$1" "$2"; }
+          trap 'log ERROR "Release staging or tag verification failed"' ERR
+          test -n "$RELEASE_TAG" || { log ERROR 'release_tag is required'; exit 1; }
+          log INFO 'Checking the release tag against the verified source'
+          tag_refs="$(git ls-remote --tags "https://github.com/${GITHUB_REPOSITORY}.git" "refs/tags/${RELEASE_TAG}" "refs/tags/${RELEASE_TAG}^{}")"
+          tag_sha="$(awk '$2 ~ /\^\{\}$/ { peeled=$1 } { if (!first) first=$1 } END { print peeled ? peeled : first }' <<<"$tag_refs")"
+          if [ -n "$tag_sha" ] && [ "$tag_sha" != "$SOURCE_SHA" ]; then
+            log ERROR 'Existing release tag points to a different source commit'
+            exit 1
+          fi
+          log DEBUG 'Release tag is absent or matches the verified source'
           mkdir -p .ci-work/upload
           for target in windows-x64 windows-arm64 linux-x64 linux-arm64; do
+            (cd ".ci-work/qualification/packages/installers/${target}" && sha256sum -c SHA256SUMS.txt)
             for f in .ci-work/qualification/packages/installers/${target}/*; do
               base=$(basename "$f")
               [ "$base" = "SHA256SUMS.txt" ] && continue
@@ -114,20 +157,24 @@ jobs:
           TAG: ${{ inputs.release_tag }}
           SOURCE_SHA: ${{ github.sha }}
           IS_PRERELEASE: ${{ inputs.prerelease }}
+          EVIDENCE_RUN: ${{ inputs.evidence_run }}
         shell: bash
         run: |
           set -euo pipefail
-          NOTES="Four-target 64-bit release (windows-x64, windows-arm64, linux-x64, linux-arm64) built from exact commit ${SOURCE_SHA} (Final verification run ${{ inputs.evidence_run }}).
+          NOTES="Four-target 64-bit release (windows-x64, windows-arm64, linux-x64, linux-arm64) built from exact commit ${SOURCE_SHA} (Final verification run ${EVIDENCE_RUN}).
 
           Windows installers and binaries are signed with the project owner's self-signed Authenticode certificate (D-014, thumbprint B2A45C4E8257197BBF067ED94F83E626AC6CE1C5). No public CA publisher certificate is used. Verify downloaded files against SHA256SUMS.txt."
+          EXTRA_ARGS=(--prerelease="$IS_PRERELEASE")
+          if [ "$IS_PRERELEASE" = "true" ]; then
+            EXTRA_ARGS+=(--latest=false)
+            NOTES="Development prerelease; full real-language, device, and installer qualification remains incomplete.
+
+          ${NOTES}"
+          fi
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release upload "$TAG" .ci-work/upload/* --repo "$GITHUB_REPOSITORY" --clobber
-            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --title "Numera Video Sub Finder $TAG" --notes "$NOTES"
+            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --title "Numera Video Sub Finder $TAG" --notes "$NOTES" "${EXTRA_ARGS[@]}"
           else
-            EXTRA_ARGS=()
-            if [ "$IS_PRERELEASE" = "true" ]; then
-              EXTRA_ARGS+=(--prerelease)
-            fi
             gh release create "$TAG" .ci-work/upload/* \
               --repo "$GITHUB_REPOSITORY" \
               --target "$SOURCE_SHA" \
