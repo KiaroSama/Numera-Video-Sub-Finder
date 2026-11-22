@@ -10,7 +10,7 @@
 [![Rust 1.100.0 toolchain](https://img.shields.io/badge/rust-1.100.0-8b5cf6)](rust-toolchain.toml)
 [![Runs on Windows and Linux, x64 and ARM64](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%28x64%2C%20ARM64%29-0891b2)](ci/targets.json)
 [![Project guides](https://img.shields.io/badge/docs-project%20guides-1d4ed8)](docs/architecture.md)
-[![Tracked repository working tree size 7.7 MB](https://img.shields.io/badge/repo%20size-7.7%20MB-ca8a04)](docs/installation.md)
+[![Tracked repository working tree size 7.9 MB](https://img.shields.io/badge/repo%20size-7.9%20MB-ca8a04)](docs/installation.md)
 [![Rust edition 2024](https://img.shields.io/badge/edition-2024-ea580c)](Cargo.toml)
 [![Tauri 2 desktop shell](https://img.shields.io/badge/Tauri-2-0d9488)](crates/desktop/Cargo.toml)
 [![Leptos Rust and WebAssembly UI](https://img.shields.io/badge/UI-Leptos%20%7C%20WASM-dc2626)](crates/ui/Cargo.toml)
@@ -22,6 +22,10 @@
 </div>
 
 An offline-first desktop workspace for extracting visible, burned-in subtitles from video, reviewing their source frames, and exporting timed Unicode subtitles. Application code, including the Leptos/WebAssembly frontend and CLI, is written in Rust. Tauri and native FFmpeg, ONNX Runtime and Tesseract provide platform integrations.
+
+<p align="center">
+  <img src="assets/screenshot-desktop.png" alt="Numera Video Sub Finder v0.2.0 desktop workspace running on Windows 11" width="900">
+</p>
 
 ## Status
 

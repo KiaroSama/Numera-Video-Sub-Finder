@@ -399,3 +399,18 @@ No successful CI, quality percentage, coverage number, screenshot, signing, GPU 
 Run `39128206281` completed the portable tiers successfully (dependencies, Miri, mutation, both CodeQL analyses). Linux x64 passed production lifecycle and all twelve instrumented GUI behaviors but failed the retained coverage floors at 59.9% overall and 73.3% critical; Linux ARM64 and Windows x64 passed their native rows. macOS ARM64 failed before its first screenshot on the optional debugger attachment gate while the GUI itself was alive and visible. Windows ARM64 and macOS Intel were still running when this note was written; their outcomes are not inferred.
 
 The corrected diagnostic upload retained1204 members for macOS ARM64, including the attachment summary that previous runs lost. The coverage and debugger corrections described in `docs/testing.md` are authored and unverified until the next exact-source run.
+
+## Exact `25170a9` (`0.2.0`) and physical Windows 11 acceptance
+
+Manual Final verification (`verify.yml`, run `44965511174`) passed on exact commit `25170a919624bb37d9eaa9f9d51534ac59b32434` across all 15 jobs (`windows-x64`, `windows-arm64`, `linux-x64`, `linux-arm64`, dependencies, Miri, Loom, fuzz, mutation, Rust and Actions CodeQL, and aggregation), all 14 published Commit Statuses, and all 17 Check Runs (including Gitleaks and Socket Security). Linux x64 coverage passed both unchanged floors (`>= 80%` overall, `>= 90%` critical).
+
+The exact CI-built Windows x64 artifact (`desktop-windows-x64-25170a919624bb37d9eaa9f9d51534ac59b32434`, artifact `14734085067`) then ran through physical Windows 11 Enterprise (`10.0.26300`) desktop acceptance:
+
+- `SHA256SUMS.txt` matched both `Numera Video Sub Finder_0.2.0_x64-setup.exe` (`321ba95715d226eb2a5c69699c04483460f31ec55441278cfbc0a8a54c864956`) and `Numera-Video-Sub-Finder-0.2.0-windows-x64.zip`.
+- Authenticode signature verification confirmed the pinned owner self-signed `D-014` certificate (`CN=Numera Video Sub Finder`, thumbprint `B2A45C4E8257197BBF067ED94F83E626AC6CE1C5`) on the NSIS installer, portable ZIP binaries, and installed `numera-video-sub-finder.exe`, `nvsf.exe`, and `uninstall.exe`. Public CA publisher trust remains separate.
+- Silent per-user NSIS install (`/S`) exited 0 and installed to `%LOCALAPPDATA%\Numera Video Sub Finder`.
+- Installed `nvsf.exe doctor` reported version `0.2.0`, source SHA `25170a919624bb37d9eaa9f9d51534ac59b32434`, verified FFmpeg native adapter (`avcodec 4129126`), Tesseract `5.5.4`, ONNX Runtime `1.31.0`, and all four bundled hash-verified model packs (`det`, `fa`, `en-ja`, `ja-specialist`).
+- Installed `nvsf.exe preview frame --grid --draw-box --pixel-box` decoded a real synthetic MP4 clip and emitted the annotated PNG and JSON coordinates. Live testing of `nvsf.exe preview strip` exposed an end-of-duration timestamp defect where the final sample hit `duration_ms` past the last presented frame's PTS; `crates/cli/src/frame_overlay.rs` now samples bucket midpoints `(2 * idx + 1) / (2 * count)` strictly inside `[start_ms, effective_end)`.
+- Installed `numera-video-sub-finder.exe` launched with its embedded `N` titlebar and sidebar icons, structured UTF-8 logging (`nvsf-desktop_*.log`), 95 Windows UI Automation controls, live Dark/Light `glimm` theme toggling (`TogglePattern`), tab switching (`Models`, `Settings`, `Extract`), native `#32770` `Open subtitle video` file dialog open/close, and real desktop capture saved to `assets/screenshot-desktop.png` (`1282x892`).
+- Silent NSIS uninstall (`/S`) exited 0 and removed the installation directory completely.
+

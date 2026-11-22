@@ -113,10 +113,13 @@ pub(crate) fn sample_timestamps_ms(
     if count == 1 || effective_end == start_ms {
         return Ok(vec![start_ms]);
     }
-    let span = effective_end - start_ms;
-    let denom = (count - 1) as u64;
+    let span = u128::from(effective_end - start_ms);
+    let two_count = (count as u128) * 2;
     Ok((0..count)
-        .map(|idx| start_ms + (span * idx as u64) / denom)
+        .map(|idx| {
+            let offset = (span * (2 * (idx as u128) + 1)) / two_count;
+            start_ms + offset as u64
+        })
         .collect())
 }
 
@@ -319,8 +322,12 @@ mod tests {
         assert!(tiny.iter().all(|&b| b == 0));
 
         assert_eq!(
-            sample_timestamps_ms(10_000, 1_000, Some(9_000), 5).unwrap(),
-            vec![1_000, 3_000, 5_000, 7_000, 9_000]
+            sample_timestamps_ms(10_000, 1_000, Some(9_000), 4).unwrap(),
+            vec![2_000, 4_000, 6_000, 8_000]
+        );
+        assert_eq!(
+            sample_timestamps_ms(2_000, 0, None, 3).unwrap(),
+            vec![333, 1_000, 1_666]
         );
         assert_eq!(
             sample_timestamps_ms(10_000, 500, None, 1).unwrap(),
