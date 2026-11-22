@@ -440,7 +440,8 @@ mod tests {
             ExtractConfig::default(),
             |_| Ok(sample_media()),
         )
-        .expect_err("no videos");
+        .err()
+        .expect("no videos");
         assert!(empty_err.contains("No supported video files"));
 
         let good = dir.path().join("good.mp4");
@@ -477,7 +478,8 @@ mod tests {
             ExtractConfig::default(),
             |_| Err("probe unavailable".into()),
         )
-        .expect_err("all failed");
+        .err()
+        .expect("all failed");
         assert!(all_fail.contains("probe unavailable"));
     }
 
