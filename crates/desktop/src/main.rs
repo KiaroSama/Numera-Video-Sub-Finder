@@ -3,6 +3,7 @@
 mod close;
 #[cfg(test)]
 mod command_tests;
+mod drop;
 #[cfg(feature = "e2e")]
 mod e2e;
 mod files;
@@ -24,7 +25,7 @@ mod updates;
 mod visual_retry;
 
 use state::Host;
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 #[tauri::command]
 fn set_unsaved(host: tauri::State<'_, Host>, dirty: bool) -> state::Result<()> {
@@ -136,6 +137,7 @@ fn main() {
             updates::cancel_update,
             updates::save_update,
             files::pick_source,
+            drop::accept_dropped_paths,
             files::choose_output,
             files::preview_frame,
             jobs::start_job,
@@ -220,6 +222,27 @@ fn main() {
                 api.prevent_close();
                 close::request(app, &shutdown);
             }
+            tauri::RunEvent::WindowEvent {
+                label,
+                event: tauri::WindowEvent::DragDrop(drop_event),
+                ..
+            } if label == "main" => match drop_event {
+                tauri::DragDropEvent::Enter { .. } | tauri::DragDropEvent::Over { .. } => {
+                    let _ = app.emit("nvsf://drag-state", true);
+                }
+                tauri::DragDropEvent::Leave => {
+                    let _ = app.emit("nvsf://drag-state", false);
+                }
+                tauri::DragDropEvent::Drop { paths, .. } => {
+                    let _ = app.emit("nvsf://drag-state", false);
+                    let list: Vec<String> = paths
+                        .into_iter()
+                        .map(|p| p.to_string_lossy().into_owned())
+                        .collect();
+                    let _ = app.emit("nvsf://files-dropped", list);
+                }
+                _ => {}
+            },
             tauri::RunEvent::Exit => {
                 if let Some(host) = app.try_state::<Host>() {
                     host.inner()

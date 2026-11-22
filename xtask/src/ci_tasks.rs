@@ -15,8 +15,6 @@ use std::{
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
-const GUARD_SNIPPET: &str = "$n=$env:NVSF_GUARD_NAME; $w=[int]$env:NVSF_GUARD_WALL; $i=[int]$env:NVSF_GUARD_IDLE; $e=$env:NVSF_GUARD_EXE; $a=@(ConvertFrom-Json -InputObject $env:NVSF_GUARD_ARGS_JSON); $c=$env:NVSF_GUARD_CAPTURE; $d=$env:NVSF_GUARD_WORKDIR; Remove-Item Env:NVSF_GUARD_* -ErrorAction SilentlyContinue; $p=@{ Name=$n; WallSeconds=$w; IdleSeconds=$i; Executable=$e; Arguments=$a }; if($c){ $p.CaptureStdoutPath=$c }; if($d){ $p.WorkingDirectory=$d }; & './scripts/ci/guard.ps1' @p";
-
 fn invoke_guard(
     name: &str,
     wall_s: u32,
@@ -52,40 +50,29 @@ pub(crate) fn invoke_guard_with_env(
     remove_env: &[String],
     set_env: &[(&str, &str)],
 ) -> Result<()> {
-    let mut cmd = Command::new("pwsh");
+    let mut command = Command::new(exe);
+    command.args(args);
     for key in remove_env {
-        cmd.env_remove(key);
+        command.env_remove(key);
     }
     for (key, value) in set_env {
-        cmd.env(key, value);
-    }
-    cmd.args([
-        "-NoLogo",
-        "-NoProfile",
-        "-NonInteractive",
-        "-Command",
-        GUARD_SNIPPET,
-    ])
-    .env("NVSF_GUARD_NAME", name)
-    .env("NVSF_GUARD_WALL", wall_s.to_string())
-    .env("NVSF_GUARD_IDLE", idle_s.to_string())
-    .env("NVSF_GUARD_EXE", exe)
-    .env("NVSF_GUARD_ARGS_JSON", serde_json::to_string(args)?);
-    if let Some(cap) = capture {
-        cmd.env("NVSF_GUARD_CAPTURE", cap);
-    } else {
-        cmd.env_remove("NVSF_GUARD_CAPTURE");
+        command.env(key, value);
     }
     if let Some(dir) = workdir {
-        cmd.env("NVSF_GUARD_WORKDIR", dir);
-    } else {
-        cmd.env_remove("NVSF_GUARD_WORKDIR");
+        command.current_dir(dir);
     }
-    let status = cmd.status()?;
-    if !status.success() {
-        return Err(format!("Guarded command failed: {name}").into());
-    }
-    Ok(())
+    crate::ci_guard::run(
+        crate::ci_guard::Guard {
+            name,
+            wall_s,
+            idle_s,
+            capture,
+            progress: None,
+            stall: false,
+        },
+        command,
+    )?
+    .require_success(name)
 }
 
 pub(crate) fn parse_suite_output(name: &str, text: &str) -> Result<u64> {
@@ -360,7 +347,7 @@ pub(crate) fn is_allowed_binaryen_path(name: &str) -> bool {
     false
 }
 
-fn sha256_hex(path: &Path) -> Result<(u64, String)> {
+pub(crate) fn sha256_hex(path: &Path) -> Result<(u64, String)> {
     let mut file = File::open(path)?;
     let mut hasher = Sha256::new();
     let mut buf = [0_u8; 65536];

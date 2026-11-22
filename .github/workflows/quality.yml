@@ -22,6 +22,11 @@ jobs:
       - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249
         with:
           toolchain: 1.100.0
+      - name: Build uninstrumented CI helper
+        timeout-minutes: 20
+        env:
+          CARGO_HOME: ${{ github.workspace }}/.ci-work/cargo
+        run: cargo build --release -p xtask --locked
       - name: Project-owned mutation state
         run: |
           foreach ($dir in 'temp','logs','captures','cargo','tools','mutation') { New-Item -ItemType Directory -Force -Path ".ci-work/$dir" | Out-Null }
@@ -29,16 +34,19 @@ jobs:
           foreach ($name in 'TMP','TEMP','TMPDIR') { "$name=$env:GITHUB_WORKSPACE/.ci-work/temp" >> $env:GITHUB_ENV }
       - name: Pinned mutation runner
         run: |
-          ./scripts/ci/guard.ps1 -Name mutants-install -WallSeconds 1200 -IdleSeconds 180 -Executable cargo -Arguments @('install','cargo-mutants','--version','27.1.0','--locked','--root','.ci-work/tools')
+          $guardArgs = @('install','cargo-mutants','--version','27.1.0','--locked','--root','.ci-work/tools')
+          ./target/release/xtask ci-guard --name mutants-install --wall-seconds 1200 --idle-seconds 180 --executable cargo -- @guardArgs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           "$env:GITHUB_WORKSPACE/.ci-work/tools/bin" >> $env:GITHUB_PATH
-      - name: Build result validator
-        run: ./scripts/ci/guard.ps1 -Name mutation-validator-build -WallSeconds 600 -IdleSeconds 120 -Executable cargo -Arguments @('build','--locked','--release','-p','xtask')
       - name: Critical portable behavior mutation
         timeout-minutes: 95
-        run: ./scripts/ci/guard.ps1 -Name portable-mutants -WallSeconds 5400 -IdleSeconds 240 -Executable cargo -Arguments @('mutants','--caught','--unviable','--gitignore=true','-p','nvsf-core','--file','crates/core/src/time.rs','--file','crates/core/src/tracking.rs','--file','crates/core/src/export.rs','--file','crates/core/src/edit.rs','--jobs','1','--jobserver-tasks','2','--timeout','30','--build-timeout','300','--output','.ci-work/mutation','--cargo-arg','--locked','--','--','--test-threads=2')
+        run: |
+          $guardArgs = @('mutants','--caught','--unviable','--gitignore=true','-p','nvsf-core','--file','crates/core/src/time.rs','--file','crates/core/src/tracking.rs','--file','crates/core/src/export.rs','--file','crates/core/src/edit.rs','--jobs','1','--jobserver-tasks','2','--timeout','30','--build-timeout','300','--output','.ci-work/mutation','--cargo-arg','--locked','--','--','--test-threads=2')
+          ./target/release/xtask ci-guard --name portable-mutants --wall-seconds 5400 --idle-seconds 240 --executable cargo -- @guardArgs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Nonzero mutation denominator and retained floor
         run: |
-          & target/release/xtask mutation --input '.ci-work/mutation/mutants.out/outcomes.json' --output '.ci-work/mutation/mutation-report.json'
+          ./target/release/xtask mutation --input '.ci-work/mutation/mutants.out/outcomes.json' --output '.ci-work/mutation/mutation-report.json'
           if ($LASTEXITCODE -ne 0) { throw 'Mutation result integrity/floor failed' }
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         if: always()
@@ -52,7 +60,7 @@ jobs:
           retention-days: 7
   loom:
     runs-on: ubuntu-24.04
-    timeout-minutes: 8
+    timeout-minutes: 25
     defaults:
       run:
         shell: pwsh
@@ -61,6 +69,11 @@ jobs:
       - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249
         with:
           toolchain: 1.100.0
+      - name: Build uninstrumented CI helper
+        timeout-minutes: 20
+        env:
+          CARGO_HOME: ${{ github.workspace }}/.ci-work/cargo
+        run: cargo build --release -p xtask --locked
       - name: Project-owned model state
         run: |
           foreach ($dir in 'temp','logs','cargo') { New-Item -ItemType Directory -Force -Path ".ci-work/$dir" | Out-Null }
@@ -76,10 +89,10 @@ jobs:
           LOOM_CHECKPOINT_FILE: '.ci-work/loom/untrusted-checkpoint'
         run: |
           New-Item -ItemType Directory -Force -Path .ci-work/bin | Out-Null
-          $ext = if ($IsWindows) { '.exe' } else { '' }
-          ./scripts/ci/guard.ps1 -Name loom-runner-build -WallSeconds 120 -IdleSeconds 60 -Executable rustc -Arguments @('--edition','2024','-O','scripts/ci/loom_runner.rs','-o',".ci-work/bin/loom-runner$ext")
+          $guardArgs = @('--edition','2024','-O','scripts/ci/loom_runner.rs','-o','.ci-work/bin/loom-runner')
+          ./target/release/xtask ci-guard --name loom-runner-build --wall-seconds 120 --idle-seconds 60 --executable rustc -- @guardArgs
           if ($LASTEXITCODE -ne 0) { throw 'Loom runner compilation failed' }
-          & "./.ci-work/bin/loom-runner$ext"
+          ./.ci-work/bin/loom-runner
           if ($LASTEXITCODE -ne 0) { throw 'Bounded Loom admission failed' }
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         if: always()
@@ -94,7 +107,7 @@ jobs:
           retention-days: 7
   fuzz:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 45
     env:
       CARGO_BUILD_JOBS: 2
       RUST_TEST_THREADS: 1
@@ -105,6 +118,15 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249
         with:
+          toolchain: 1.100.0
+      - name: Build uninstrumented CI helper
+        timeout-minutes: 20
+        env:
+          CARGO_HOME: ${{ github.workspace }}/.ci-work/cargo
+        run: cargo build --release -p xtask --locked
+      - name: Install pinned nightly tools
+        uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249
+        with:
           toolchain: nightly-2026-10-27
           components: rust-src
       - name: Project-owned fuzz state
@@ -114,12 +136,13 @@ jobs:
           foreach ($name in 'TMP','TEMP','TMPDIR') { "$name=$env:GITHUB_WORKSPACE/.ci-work/temp" >> $env:GITHUB_ENV }
       - name: Pinned coverage-guided runner
         run: |
-          ./scripts/ci/guard.ps1 -Name fuzz-install -WallSeconds 900 -IdleSeconds 180 -Executable cargo -Arguments @('+nightly-2026-10-27','install','cargo-fuzz','--version','0.13.2','--locked','--root','.ci-work/tools')
+          $guardArgs = @('+nightly-2026-10-27','install','cargo-fuzz','--version','0.13.2','--locked','--root','.ci-work/tools')
+          ./target/release/xtask ci-guard --name fuzz-install --wall-seconds 900 --idle-seconds 180 --executable cargo -- @guardArgs
           if ($LASTEXITCODE -ne 0) { throw 'Pinned cargo-fuzz installation failed' }
           "$env:GITHUB_WORKSPACE/.ci-work/tools/bin" >> $env:GITHUB_PATH
       - name: Bounded actual SRT parser fuzz admission
         timeout-minutes: 15
-        run: ./scripts/ci/fuzz.ps1
+        run: ./target/release/xtask ci-fuzz
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         if: always()
         with:
@@ -133,7 +156,7 @@ jobs:
           retention-days: 7
   miri:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 45
     env:
       CARGO_BUILD_JOBS: 2
       RUST_TEST_THREADS: 2
@@ -146,6 +169,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249
         with:
+          toolchain: 1.100.0
+      - name: Build uninstrumented CI helper
+        timeout-minutes: 20
+        run: cargo build --release -p xtask --locked
+      - name: Install pinned nightly tools
+        uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249
+        with:
           toolchain: nightly-2026-10-12
           components: miri
       - name: Owned interpreter state
@@ -155,8 +185,12 @@ jobs:
       - name: Miri portable public contracts
         timeout-minutes: 25
         run: |
-          ./scripts/ci/guard.ps1 -Name miri-setup -WallSeconds 600 -IdleSeconds 120 -Executable cargo -Arguments @('+nightly-2026-10-12','miri','setup')
-          ./scripts/ci/guard.ps1 -Name miri-core -WallSeconds 1200 -IdleSeconds 180 -Executable cargo -Arguments @('+nightly-2026-10-12','miri','test','--locked','-p','nvsf-core','--test','contracts','--test','editing','--test','boundaries','--','--test-threads=2')
+          $guardArgs = @('+nightly-2026-10-12','miri','setup')
+          ./target/release/xtask ci-guard --name miri-setup --wall-seconds 600 --idle-seconds 120 --executable cargo -- @guardArgs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $guardArgs = @('+nightly-2026-10-12','miri','test','--locked','-p','nvsf-core','--test','contracts','--test','editing','--test','boundaries','--','--test-threads=2')
+          ./target/release/xtask ci-guard --name miri-core --wall-seconds 1200 --idle-seconds 180 --executable cargo -- @guardArgs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         if: failure()
         with:

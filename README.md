@@ -6,11 +6,11 @@
 
 [![Final verification](https://github.com/KiaroSama/Numera-Video-Sub-Finder/actions/workflows/verify.yml/badge.svg)](https://github.com/KiaroSama/Numera-Video-Sub-Finder/actions/workflows/verify.yml)
 [![License GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-2563eb)](LICENSE)
-[![Version 0.3.0](https://img.shields.io/badge/version-0.3.0-059669)](Cargo.toml)
+[![Version 0.4.0](https://img.shields.io/badge/version-0.4.0-059669)](Cargo.toml)
 [![Rust 1.100.0 toolchain](https://img.shields.io/badge/rust-1.100.0-8b5cf6)](rust-toolchain.toml)
 [![Runs on Windows and Linux, x64 and ARM64](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%28x64%2C%20ARM64%29-0891b2)](ci/targets.json)
 [![Project guides](https://img.shields.io/badge/docs-project%20guides-1d4ed8)](docs/architecture.md)
-[![Tracked repository working tree size 7.9 MB](https://img.shields.io/badge/repo%20size-7.9%20MB-ca8a04)](docs/installation.md)
+[![Tracked repository working tree size 8.0 MB](https://img.shields.io/badge/repo%20size-8.0%20MB-ca8a04)](docs/installation.md)
 [![Rust edition 2024](https://img.shields.io/badge/edition-2024-ea580c)](Cargo.toml)
 [![Tauri 2 desktop shell](https://img.shields.io/badge/Tauri-2-0d9488)](crates/desktop/Cargo.toml)
 [![Leptos Rust and WebAssembly UI](https://img.shields.io/badge/UI-Leptos%20%7C%20WASM-dc2626)](crates/ui/Cargo.toml)
@@ -24,7 +24,7 @@
 An offline-first desktop workspace for extracting visible, burned-in subtitles from video, reviewing their source frames, and exporting timed Unicode subtitles. Application code, including the Leptos/WebAssembly frontend and CLI, is written in Rust. Tauri and native FFmpeg, ONNX Runtime and Tesseract provide platform integrations.
 
 <p align="center">
-  <img src="assets/screenshot-desktop.png" alt="Numera Video Sub Finder v0.3.0 desktop workspace running on Windows 11" width="900">
+  <img src="assets/screenshot-desktop.png" alt="Numera Video Sub Finder desktop workspace running on Windows 11" width="900">
 </p>
 
 ## Status
@@ -39,8 +39,10 @@ Download the matching 64-bit package for your OS and architecture from [GitHub R
 
 ## Workflow
 
-1. Open a local video and choose a distinct `.srt` output through native file dialogs.
-2. Choose from the 123 official Tesseract language and vertical variants, then set subtitle regions, exclusions, source-time range, quality and device policy. Compatible admitted Paddle recognizers are used where available; other languages require their selected Tesseract pack. English, Persian and Japanese keep their original qualification targets; catalog availability does not certify accuracy. Automatic region detection gives editable suggestions; scene signs are not accepted as dialogue on their own.
+1. Load media either through the native **Open video** dialog or by dragging and dropping onto the window:
+   - Drop a **single video file** (`.mp4`, `.mkv`, `.mov`, `.avi`, `.webm`, `.m4v`, `.ts`, `.mts`, `.m2ts`, `.mpeg`, `.wmv`) to open it directly in **Extract**, then pick an `.srt` destination.
+   - Drop **multiple video files or a folder** (scanned up to 4 levels deep, up to 100 videos; symlinks and unsupported files are skipped) to queue them automatically in **Queue** with sibling `.srt` outputs.
+2. Pick the subtitle language using the searchable **Subtitle language** box: type any part of the English name, native name (`فارسی`, `日本語`), or language code (`fa`, `ja`, `chi_sim`, `fra`) to filter all 126 languages live, press `Enter` or click a match, then set subtitle regions, exclusions, source-time range, quality, and device policy. Compatible admitted Paddle recognizers are used where available; other languages require their selected Tesseract pack. English, Persian and Japanese keep their original qualification targets; catalog availability does not certify accuracy. Automatic region detection gives editable suggestions; scene signs are not accepted as dialogue on their own.
 3. Start extraction. Pause and cancel controls keep compatible checkpoints; missing models return an actionable error instead of downloading during inference.
 4. Review original frames, edit text and times, split or merge cues, undo or redo changes, and explicitly accept re-recognition proposals.
 5. Save the project or export SRT, WebVTT, basic ASS, or JSON evidence. Replacing an existing file requires confirmation; raw OCR and user edits stay separate.

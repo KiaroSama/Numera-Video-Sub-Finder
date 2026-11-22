@@ -110,7 +110,12 @@ Pack availability and hash verification do not measure subtitle accuracy. Origin
 
 ## 5. Extract and save
 
-Choose a local video with visible burned-in subtitles and a different `.srt` output. Select its language, regions/exclusions and time range. Start with a short representative section. Automatic region suggestions are editable, not automatic acceptance of scene signs.
+Load a local video in either of two ways:
+
+- **Single video:** Click **Open video**, or drag and drop one video file (`.mp4`, `.mkv`, `.mov`, `.avi`, `.webm`, `.m4v`, `.ts`, `.mts`, `.m2ts`, `.mpeg`, `.wmv`) onto the window to open it in **Extract**, then choose a distinct `.srt` destination.
+- **Multiple videos or a folder:** Drag and drop several video files or a folder onto the window. The app scans dropped folders up to 4 levels deep (capped at 100 videos, skipping symlinks and non-video files), creates non-colliding sibling `.srt` destinations, and adds every video to **Queue** with your current extraction settings.
+
+Type any word, native script (`فارسی`, `日本語`), or ISO/Tesseract code (`fa`, `ja`, `chi_sim`, `deu`) into the **Subtitle language** search box to filter the 126 supported languages immediately, then click a match or press `Enter`. Set regions/exclusions and time range, starting with a short representative section. Automatic region suggestions are editable, not automatic acceptance of scene signs.
 
 ```bash
 ./nvsf extract --input "video with subtitles.mp4" --output "subtitles.srt" --language fra --quality accurate --device auto

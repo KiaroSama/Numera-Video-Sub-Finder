@@ -212,6 +212,57 @@ pub(crate) fn run(source: &Path, destination: &Path) -> Result<()> {
     Ok(())
 }
 
+pub(crate) fn contracts() -> Result<()> {
+    crate::ci_guard::hosted("Native notice contracts run only on GitHub-hosted Actions.")?;
+    let state = crate::ci_guard::state_dir(&crate::ci_guard::root())?;
+    let work = tempfile::Builder::new()
+        .prefix("notice-contract-")
+        .tempdir_in(state)?;
+    let source = work.path().join("source");
+    let locale = source.join("1033");
+    let destination = work.path().join("destination");
+    fs::create_dir_all(&locale)?;
+    let bytes = b"{\\rtf1 \xe9}";
+    let original = locale.join(".NET_Framework_EULA.rtf");
+    let copied = destination.join("1033/DOTNET_Framework_EULA.rtf");
+    fs::write(&original, bytes)?;
+    fs::write(locale.join("ThirdPartyNotices.txt"), bytes)?;
+    let files = copy_visual_studio_notices(&source, &destination)?;
+    if files
+        != [
+            "1033/DOTNET_Framework_EULA.rtf",
+            "1033/ThirdPartyNotices.txt",
+        ]
+    {
+        return Err("Native notice destination inventory differs from its contract.".into());
+    }
+    if fs::read(original)? != bytes || fs::read(&copied)? != bytes {
+        return Err("Notice bytes changed.".into());
+    }
+    if copy_visual_studio_notices(&source, &destination)? != files {
+        return Err("Identical notice copying is not idempotent.".into());
+    }
+    let reject = |message| match copy_visual_studio_notices(&source, &destination) {
+        Err(error) if error.to_string() == message => Ok(()),
+        Err(error) => Err(error),
+        Ok(_) => Err(format!("Expected rejection: {message}").into()),
+    };
+    fs::write(&copied, [1])?;
+    reject("Visual Studio notice destination bytes collide.")?;
+    fs::write(copied, bytes)?;
+    fs::write(locale.join(".private-fixture.txt"), bytes)?;
+    reject("Unexpected Visual Studio notice path.")?;
+    if destination.join("1033/.private-fixture.txt").exists() {
+        return Err("Unexpected hidden notice was copied.".into());
+    }
+    crate::ci_crt::contract(work.path())?;
+    work.close()?;
+    println!(
+        "Native notice/CRT contracts passed: tests=7 failed=0 skipped=0; exact bytes, collision, hidden paths, import selection and strict PE admission."
+    );
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

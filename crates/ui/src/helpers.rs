@@ -163,9 +163,77 @@ pub fn sweep_clip_inset(progress: f64, rtl: bool) -> String {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LanguageOption {
+    pub code: String,
+    pub label: String,
+}
+
+pub fn language_options(query: &str) -> Vec<LanguageOption> {
+    let mut all = Vec::with_capacity(nvsf_core::languages::catalog().len() + 3);
+    all.push(LanguageOption {
+        code: "en".into(),
+        label: "English".into(),
+    });
+    all.push(LanguageOption {
+        code: "fa".into(),
+        label: "Persian / فارسی".into(),
+    });
+    all.push(LanguageOption {
+        code: "ja".into(),
+        label: "Japanese / 日本語".into(),
+    });
+    for language in nvsf_core::languages::catalog() {
+        all.push(LanguageOption {
+            code: language.code.clone(),
+            label: format!("{} ({})", language.name, language.code),
+        });
+    }
+    let terms: Vec<String> = query
+        .split_whitespace()
+        .map(|part| part.to_lowercase())
+        .collect();
+    if terms.is_empty() {
+        return all;
+    }
+    all.into_iter()
+        .filter(|entry| {
+            let label = entry.label.to_lowercase();
+            let code = entry.code.to_lowercase();
+            terms
+                .iter()
+                .all(|term| label.contains(term) || code.contains(term))
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn language_search_filters_by_any_term_and_code() {
+        let all = language_options("");
+        assert_eq!(all.len(), nvsf_core::languages::catalog().len() + 3);
+        assert_eq!(all[0].code, "en");
+        assert_eq!(all[1].code, "fa");
+        assert_eq!(all[2].code, "ja");
+
+        let persian = language_options("فارسی");
+        assert_eq!(persian.len(), 1);
+        assert_eq!(persian[0].code, "fa");
+
+        let chinese_vert = language_options("chinese vertical");
+        assert!(chinese_vert.iter().any(|l| l.code == "chi_sim_vert"));
+        assert!(chinese_vert.iter().any(|l| l.code == "chi_tra_vert"));
+        assert!(!chinese_vert.iter().any(|l| l.code == "en"));
+
+        let by_code = language_options("aze_cyrl");
+        assert_eq!(by_code.len(), 1);
+        assert_eq!(by_code[0].code, "aze_cyrl");
+
+        assert!(language_options("zzzz-no-language").is_empty());
+    }
     #[test]
     fn bounded_review_and_ascii_timeline() {
         assert_eq!(window_range(100_000, 72 * 99_999), 99_995..100_000);

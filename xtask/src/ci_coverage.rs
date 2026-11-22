@@ -1,6 +1,6 @@
 //! Stage-two CI helper ported from `scripts/ci/coverage.ps1` into Rust.
 //! Parses `cargo llvm-cov show-env --pwsh`, unions bounded LCOV profiles,
-//! and executes the `report` phase in hosted GitHub Actions.
+//! and executes the `start` and `report` phases in hosted GitHub Actions.
 
 use crate::{ci_tasks, quality};
 use std::{
@@ -14,7 +14,6 @@ type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
 const MAX_COMBINED_LCOV_BYTES: u64 = 67_108_864;
 
-#[cfg_attr(not(test), allow(dead_code))]
 fn is_allowed_coverage_key(key: &str) -> bool {
     matches!(
         key,
@@ -35,7 +34,6 @@ fn is_allowed_coverage_key(key: &str) -> bool {
     })
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
 fn decode_pwsh_unicode_escapes(encoded: &str) -> Result<String> {
     let mut out = String::new();
     let mut rest = encoded;
@@ -64,7 +62,6 @@ fn decode_pwsh_unicode_escapes(encoded: &str) -> Result<String> {
 }
 
 /// Parses `cargo llvm-cov show-env --pwsh` lines against the strict variable allowlist.
-#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn parse_llvm_cov_pwsh_env(text: &str) -> Result<Vec<(String, String)>> {
     let mut out = Vec::new();
     for line in text.lines() {
@@ -121,12 +118,87 @@ pub(crate) fn combine_lcov_files(inputs: &[PathBuf], output: &Path, max_bytes: u
     Ok(written)
 }
 
+fn start(root: &Path) -> Result<()> {
+    use std::{env, fs::OpenOptions, process::Command};
+
+    let tools = root.join(".ci-work/tools/bin");
+    let github_path = env::var_os("GITHUB_PATH").ok_or("GITHUB_PATH is missing.")?;
+    let github_env = env::var_os("GITHUB_ENV").ok_or("GITHUB_ENV is missing.")?;
+    let tools_text = tools
+        .to_str()
+        .filter(|s| !s.contains(['\r', '\n']))
+        .ok_or("Invalid coverage tools path.")?;
+    ci_tasks::invoke_guard_in_dir(
+        "llvm-cov-install",
+        1200,
+        180,
+        "cargo",
+        &[
+            "install",
+            "cargo-llvm-cov",
+            "--version",
+            "0.9.1",
+            "--locked",
+            "--root",
+            ".ci-work/tools",
+        ],
+        None,
+        Some(root),
+    )
+    .map_err(|_| "Coverage tool installation failed")?;
+    let mut executable_path = vec![tools.clone()];
+    if let Some(path) = env::var_os("PATH") {
+        executable_path.extend(env::split_paths(&path));
+    }
+    let executable_path = env::join_paths(executable_path)?;
+    let mut export_path = OpenOptions::new().append(true).open(github_path)?;
+    writeln!(export_path, "{tools_text}")?;
+    let cargo = |args: &[&str]| {
+        let mut command = Command::new("cargo");
+        command
+            .args(args)
+            .current_dir(root)
+            .env("PATH", &executable_path);
+        command
+    };
+    let discovered = cargo(&["llvm-cov", "show-env", "--pwsh"]).output()?;
+    if !discovered.status.success() {
+        return Err("Coverage environment discovery failed".into());
+    }
+    let pairs = parse_llvm_cov_pwsh_env(std::str::from_utf8(&discovered.stdout)?)?;
+    if pairs
+        .iter()
+        .any(|(_, value)| value.contains(['\r', '\n', '\0']))
+    {
+        return Err("Unexpected coverage environment output".into());
+    }
+    let mut export_environment = OpenOptions::new().append(true).open(github_env)?;
+    for (name, value) in &pairs {
+        writeln!(export_environment, "{name}={value}")?;
+    }
+    export_environment.flush()?;
+    if !cargo(&["llvm-cov", "clean", "--workspace"])
+        .envs(pairs)
+        .status()?
+        .success()
+    {
+        return Err("Coverage clean failed".into());
+    }
+    Ok(())
+}
+
 pub(crate) fn run(phase: &str, target: Option<&str>) -> Result<()> {
     if std::env::var("GITHUB_ACTIONS").as_deref() != Ok("true") {
         return Err("Coverage only runs in GitHub Actions".into());
     }
-    if phase != "report" {
-        return Err(format!("xtask ci-coverage supports --phase report (got {phase})").into());
+    let root = crate::ci_guard::root();
+    if phase.eq_ignore_ascii_case("start") {
+        return start(&root);
+    }
+    if !phase.eq_ignore_ascii_case("report") {
+        return Err(
+            format!("xtask ci-coverage supports --phase start or report (got {phase})").into(),
+        );
     }
     let target = target
         .map(str::trim)
@@ -138,7 +210,6 @@ pub(crate) fn run(phase: &str, target: Option<&str>) -> Result<()> {
     {
         return Err("Invalid coverage target identifier.".into());
     }
-    let root = std::env::current_dir()?;
     let mut exports = Vec::with_capacity(2);
     for profile in ["debug", "release"] {
         let path = root.join(format!(".ci-work/coverage-{profile}.lcov"));
@@ -157,7 +228,7 @@ pub(crate) fn run(phase: &str, target: Option<&str>) -> Result<()> {
             args.push(target);
         }
         let guard_name = format!("llvm-cov-{profile}");
-        ci_tasks::invoke_guard_in_dir(&guard_name, 180, 60, "cargo", &args, None, None)
+        ci_tasks::invoke_guard_in_dir(&guard_name, 180, 60, "cargo", &args, None, Some(&root))
             .map_err(|_| format!("Coverage {profile} export failed"))?;
         exports.push(path);
     }

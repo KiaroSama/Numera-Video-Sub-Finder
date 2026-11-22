@@ -180,8 +180,7 @@ pub fn verify() -> Result<(), Box<dyn Error>> {
             return Err("Cargo package CI claim references a missing job".into());
         };
         if pkg == "fuzz"
-            && (!file_set.contains("scripts/ci/fuzz.ps1")
-                || !body.contains("./scripts/ci/fuzz.ps1"))
+            && (!file_set.contains("xtask/src/ci_fuzz.rs") || !body.contains("ci-fuzz"))
         {
             return Err("Standalone fuzz package requires its actual portable runner".into());
         }

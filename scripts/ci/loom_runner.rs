@@ -9,8 +9,6 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-const GUARD_CMD: &str = "$n=$env:NVSF_GUARD_NAME; $w=[int]$env:NVSF_GUARD_WALL; $i=[int]$env:NVSF_GUARD_IDLE; $e=$env:NVSF_GUARD_EXE; $a=@(ConvertFrom-Json -InputObject $env:NVSF_GUARD_ARGS_JSON); $c=$env:NVSF_GUARD_CAPTURE; Remove-Item Env:NVSF_GUARD_* -ErrorAction SilentlyContinue; & './scripts/ci/guard.ps1' -Name $n -WallSeconds $w -IdleSeconds $i -Executable $e -Arguments $a -CaptureStdoutPath $c";
-
 fn utc_stamp(colon: bool) -> String {
     let out = Command::new("date")
         .args([
@@ -158,17 +156,36 @@ fn main() {
             "INFO",
             "Model-checking the same production close-admission source with two contenders; no native application execution.",
         );
-        let status = Command::new("pwsh")
-            .args(["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", GUARD_CMD])
-            .env("NVSF_GUARD_NAME", "close-loom")
-            .env("NVSF_GUARD_WALL", "180")
-            .env("NVSF_GUARD_IDLE", "60")
-            .env("NVSF_GUARD_EXE", "cargo")
-            .env(
-                "NVSF_GUARD_ARGS_JSON",
-                r#"["test","--locked","--manifest-path","ci/loom/Cargo.toml","--lib","--","--test-threads=1","--nocapture"]"#,
-            )
-            .env("NVSF_GUARD_CAPTURE", &capture)
+        let xtask = root.join(if cfg!(windows) {
+            "target/release/xtask.exe"
+        } else {
+            "target/release/xtask"
+        });
+        let status = Command::new(&xtask)
+            .args([
+                "ci-guard",
+                "--name",
+                "close-loom",
+                "--wall-seconds",
+                "180",
+                "--idle-seconds",
+                "60",
+                "--executable",
+                "cargo",
+                "--capture-stdout-path",
+            ])
+            .arg(&capture)
+            .args([
+                "--",
+                "test",
+                "--locked",
+                "--manifest-path",
+                "ci/loom/Cargo.toml",
+                "--lib",
+                "--",
+                "--test-threads=1",
+                "--nocapture",
+            ])
             .env("RUSTFLAGS", "--cfg=loom")
             .env_remove("CARGO_ENCODED_RUSTFLAGS")
             .env("CARGO_TARGET_DIR", work.join("target"))

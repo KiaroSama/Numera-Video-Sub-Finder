@@ -126,7 +126,7 @@ pub(crate) fn assert_release_crt_machine(path: &Path, architecture: &str) -> Res
     };
     let meta = fs::symlink_metadata(path)?;
     let len = meta.len();
-    if meta.is_dir()
+    if !meta.is_file()
         || is_reparse_or_symlink(&meta)
         || !(MIN_PE_BYTES..=MAX_PE_BYTES).contains(&len)
     {
@@ -190,6 +190,42 @@ pub(crate) fn run(mode: &str, input: Option<&Path>, arch: Option<&str>) -> Resul
         }
         other => Err(format!("Unsupported ci-crt mode: {other}.").into()),
     }
+}
+
+pub(crate) fn contract(work: &Path) -> Result<()> {
+    let imports = parse_release_crt_imports(
+        "    KERNEL32.dll\n    VCRUNTIME140.dll\n    msvcp140.dll\n    VCRUNTIME140.dll\n",
+    )?;
+    if imports != ["vcruntime140.dll", "msvcp140.dll"] {
+        return Err("Imported release CRT selection differs.".into());
+    }
+    for listing in ["", "    vcruntime140d.dll", "    msvcp999.dll"] {
+        if parse_release_crt_imports(listing).is_ok() {
+            return Err("Invalid or debug CRT import accepted.".into());
+        }
+    }
+    let mut pe = [0_u8; 134];
+    pe[..2].copy_from_slice(b"MZ");
+    pe[0x3c] = 128;
+    pe[128..132].copy_from_slice(b"PE\0\0");
+    pe[132..].copy_from_slice(&0xaa64_u16.to_le_bytes());
+    let path = work.join("fixture-crt.dll");
+    fs::write(&path, pe)?;
+    assert_release_crt_machine(&path, "arm64")?;
+    let error = assert_release_crt_machine(&path, "x64")
+        .err()
+        .ok_or("Wrong CRT architecture accepted.")?;
+    if error.to_string()
+        != "Redistributable DLL architecture differs: member=fixture-crt.dll expected=0x8664 actual=0xAA64."
+    {
+        return Err(error);
+    }
+    pe[0x3c] = 255;
+    fs::write(&path, pe)?;
+    if assert_release_crt_machine(&path, "arm64").is_ok() {
+        return Err("Invalid CRT PE offset accepted.".into());
+    }
+    Ok(())
 }
 
 #[cfg(test)]

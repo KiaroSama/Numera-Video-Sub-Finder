@@ -1,6 +1,6 @@
 use nvsf_core::{MediaInfo, Progress};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
-use wasm_bindgen::prelude::*;
+use wasm_bindgen::{JsCast, prelude::*};
 
 fn arguments(value: &serde_json::Value) -> Result<JsValue, String> {
     value
@@ -12,6 +12,30 @@ fn arguments(value: &serde_json::Value) -> Result<JsValue, String> {
 extern "C" {
     #[wasm_bindgen(js_namespace = ["window", "__TAURI__", "core"], catch)]
     async fn invoke(command: &str, args: JsValue) -> Result<JsValue, JsValue>;
+
+    #[wasm_bindgen(js_namespace = ["window", "__TAURI__", "event"], catch)]
+    async fn listen(event: &str, handler: &js_sys::Function) -> Result<JsValue, JsValue>;
+}
+
+pub async fn listen_event(
+    event: &str,
+    handler: &js_sys::Function,
+) -> Result<Option<js_sys::Function>, String> {
+    let Some(window) = web_sys::window() else {
+        return Ok(None);
+    };
+    let tauri = js_sys::Reflect::get(&window, &JsValue::from_str("__TAURI__"))
+        .unwrap_or(JsValue::UNDEFINED);
+    if tauri.is_undefined() || tauri.is_null() {
+        return Ok(None);
+    }
+    let event_ns =
+        js_sys::Reflect::get(&tauri, &JsValue::from_str("event")).unwrap_or(JsValue::UNDEFINED);
+    if event_ns.is_undefined() || event_ns.is_null() {
+        return Ok(None);
+    }
+    let unlisten = listen(event, handler).await.map_err(error_text)?;
+    Ok(unlisten.dyn_into::<js_sys::Function>().ok())
 }
 
 pub async fn call<T: DeserializeOwned>(
@@ -120,6 +144,17 @@ pub struct Dependency {
     pub component: String,
     pub state: String,
     pub message: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct DropOutcome {
+    pub kind: String,
+    pub source: Option<Source>,
+    pub queued: Vec<QueueEntry>,
+    pub added_count: usize,
+    pub skipped_unsupported: usize,
+    pub truncated: bool,
+    pub errors: Vec<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]

@@ -1,6 +1,6 @@
 # Testing and evidence
 
-All application compilation and execution checks run in GitHub Actions on the exact commit. The four required native target rows are Windows x64, Windows ARM64, Linux x64 and Linux ARM64, with maximum three concurrently hosted jobs, two build/test/native threads per runner, command/HTTP/job bounds and owned process cleanup. Missing jobs, wrong source SHA and missing reports fail the aggregate; no broad continue-on-error or fake passing badges.
+All application compilation and execution checks run in GitHub Actions on the exact commit. The four required native target rows are Windows x64, Windows ARM64, Linux x64 and Linux ARM64, with maximum three concurrently hosted jobs, two build/test/native threads per runner, command/HTTP/job bounds and owned process cleanup. Missing jobs, wrong source SHA and missing reports fail the aggregate; no broad continue-on-error or fake passing badges. Starting in `0.4.0` (`D-023`), all CI orchestration and verification helpers run natively through compiled `xtask` subcommands (`ci-guard`, `ci-native`, `ci-bundle`, `ci-authenticode`, `ci-coverage`, `ci-crt`, `ci-notices`, `ci-frontend`, `ci-fuzz`, `ci-media-sanitizer`, and their contract test runners) with zero PowerShell scripts remaining in `scripts/ci/`; historical sections below preserve the original script names from earlier exact-SHA checkpoints.
 
 Exact-SHA checkpoints below retain their original target counts. Those historical counts do not expand the current four-target matrix.
 

@@ -14,11 +14,11 @@ fn sample_offer(token: &str, downloaded: Option<PathBuf>) -> CachedOffer {
     CachedOffer {
         schema: 1,
         token: token.into(),
-        version: "0.3.0".into(),
+        version: "0.5.0".into(),
         notes: "Test release notes".into(),
         target: "linux-x86_64-appimage".into(),
         artifact: updates::Artifact {
-            url: "https://github.com/KiaroSama/Numera-Video-Sub-Finder/releases/download/v0.3.0/app.AppImage".into(),
+            url: "https://github.com/KiaroSama/Numera-Video-Sub-Finder/releases/download/v0.5.0/app.AppImage".into(),
             signature: "invalid-sig".into(),
             sha256: "a".repeat(64),
             bytes: 16,
@@ -193,7 +193,7 @@ fn updates_verify_and_bounded_reader_enforce_integrity_and_limits() {
             None,
             Some(&payload),
             None,
-            Some("0.3.0"),
+            Some("0.5.0"),
             None,
             None
         )
@@ -206,7 +206,7 @@ fn updates_verify_and_bounded_reader_enforce_integrity_and_limits() {
         None,
         Some(&payload),
         Some("sig"),
-        Some("0.3.0"),
+        Some("0.5.0"),
         Some(&"0".repeat(64)),
         Some("linux-x86_64-appimage"),
     )

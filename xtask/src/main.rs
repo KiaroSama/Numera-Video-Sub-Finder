@@ -1,6 +1,13 @@
+mod ci_authenticode;
+mod ci_bundle;
 mod ci_coverage;
 mod ci_crt;
 mod ci_frontend;
+mod ci_fuzz;
+mod ci_guard;
+mod ci_media_sanitizer;
+mod ci_native;
+mod ci_native_helpers;
 mod ci_notices;
 mod ci_tasks;
 mod coverage_scope;
@@ -235,15 +242,71 @@ enum Cmd {
         #[arg(long)]
         e2e: bool,
     },
+    CiGuard {
+        #[arg(long)]
+        name: String,
+        #[arg(long)]
+        wall_seconds: u32,
+        #[arg(long)]
+        idle_seconds: u32,
+        #[arg(long)]
+        working_directory: Option<PathBuf>,
+        #[arg(long)]
+        capture_stdout_path: Option<PathBuf>,
+        #[arg(long)]
+        progress_directory: Option<PathBuf>,
+        #[arg(long, value_parser = ["none", "stall"], default_value = "none")]
+        progress_contract: String,
+        #[arg(long, visible_alias = "file-path")]
+        executable: PathBuf,
+        #[arg(last = true)]
+        arguments: Vec<std::ffi::OsString>,
+    },
+    CiGuardTests,
+    CiNative {
+        #[arg(long)]
+        target_id: String,
+        #[arg(long)]
+        stage_media_adapter: bool,
+    },
+    CiBundle {
+        #[arg(long)]
+        target_id: String,
+        #[arg(long, default_value = ".ci-work/packages")]
+        packages_root: PathBuf,
+    },
+    CiAuthenticode {
+        #[arg(long, value_parser = ["enable", "disable", "sign", "verify", "negative-checks"])]
+        action: String,
+        #[arg(long)]
+        path: Option<PathBuf>,
+        #[arg(long)]
+        certificate_sha256: Option<String>,
+    },
+    CiAuthenticodeTests,
+    CiWindowsSigning {
+        #[arg(long)]
+        path: PathBuf,
+    },
+    CiFuzz,
+    CiMediaSanitizer,
+    CiNoticeTests,
+    CiFrontendTests,
 }
 fn main() {
     if let Err(e) = run() {
         eprintln!("[ERROR] [CI] {e}");
-        std::process::exit(1);
+        std::process::exit(
+            e.downcast_ref::<ci_guard::Failure>()
+                .map_or(1, |failure| failure.code),
+        );
     }
 }
 fn run() -> Result<(), Box<dyn Error>> {
-    if worker_faults::dispatch_fixture()? {
+    if let Some(code) = ci_guard::dispatch()? {
+        std::process::exit(code);
+    }
+    if ci_media_sanitizer::dispatch()? || worker_faults::dispatch_fixture()? {
         return Ok(());
     }
     let log_dir = PathBuf::from(".ci-work/logs");
@@ -357,6 +420,55 @@ fn run() -> Result<(), Box<dyn Error>> {
         } => ci_notices::run(&source, &destination),
         Cmd::CiCoverage { phase, target } => ci_coverage::run(&phase, target.as_deref()),
         Cmd::CiFrontend { e2e } => ci_frontend::run(e2e),
+        Cmd::CiGuard {
+            name,
+            wall_seconds,
+            idle_seconds,
+            working_directory,
+            capture_stdout_path,
+            progress_directory,
+            progress_contract,
+            executable,
+            arguments,
+        } => {
+            let mut command = std::process::Command::new(executable);
+            command.args(arguments);
+            if let Some(directory) = working_directory {
+                command.current_dir(directory);
+            }
+            ci_guard::run(
+                ci_guard::Guard {
+                    name: &name,
+                    wall_s: wall_seconds,
+                    idle_s: idle_seconds,
+                    capture: capture_stdout_path.as_deref(),
+                    progress: progress_directory.as_deref(),
+                    stall: progress_contract == "stall",
+                },
+                command,
+            )?
+            .require_success(&name)
+        }
+        Cmd::CiGuardTests => ci_guard::contracts(),
+        Cmd::CiNative {
+            target_id,
+            stage_media_adapter,
+        } => ci_native::execute(&target_id, stage_media_adapter),
+        Cmd::CiBundle {
+            target_id,
+            packages_root,
+        } => ci_bundle::execute(&target_id, &packages_root),
+        Cmd::CiAuthenticode {
+            action,
+            path,
+            certificate_sha256,
+        } => ci_authenticode::identity(&action, path.as_deref(), certificate_sha256.as_deref()),
+        Cmd::CiAuthenticodeTests => ci_authenticode::contracts(),
+        Cmd::CiWindowsSigning { path } => ci_authenticode::sign_allowlisted(&path),
+        Cmd::CiFuzz => ci_fuzz::run(),
+        Cmd::CiMediaSanitizer => ci_media_sanitizer::run(),
+        Cmd::CiNoticeTests => ci_notices::contracts(),
+        Cmd::CiFrontendTests => ci_frontend::contracts(),
     };
     writeln!(
         log,

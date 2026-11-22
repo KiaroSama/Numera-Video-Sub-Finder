@@ -9,6 +9,7 @@ use crate::{
 use leptos::prelude::*;
 use serde_json::json;
 use wasm_bindgen::{JsCast, closure::Closure};
+use wasm_bindgen_futures::spawn_local;
 
 pub fn mount() {
     let saved = web_sys::window()
@@ -188,6 +189,54 @@ fn App(initial_theme: String) -> impl IntoView {
             }
         });
     }
+    {
+        let drag_state_cb =
+            Closure::<dyn FnMut(wasm_bindgen::JsValue)>::new(move |ev: wasm_bindgen::JsValue| {
+                let active = js_sys::Reflect::get(&ev, &wasm_bindgen::JsValue::from_str("payload"))
+                    .ok()
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                ui.dragging.set(active);
+            });
+        let files_drop_cb =
+            Closure::<dyn FnMut(wasm_bindgen::JsValue)>::new(move |ev: wasm_bindgen::JsValue| {
+                ui.dragging.set(false);
+                if let Ok(payload) =
+                    js_sys::Reflect::get(&ev, &wasm_bindgen::JsValue::from_str("payload"))
+                    && let Ok(paths) = serde_wasm_bindgen::from_value::<Vec<String>>(payload)
+                {
+                    ui.accept_drop(paths);
+                }
+            });
+        let drag_fn: js_sys::Function = drag_state_cb
+            .as_ref()
+            .unchecked_ref::<js_sys::Function>()
+            .clone();
+        let drop_fn: js_sys::Function = files_drop_cb
+            .as_ref()
+            .unchecked_ref::<js_sys::Function>()
+            .clone();
+        let unlisteners = StoredValue::new_local(Vec::<js_sys::Function>::new());
+        let drag_cb_holder = StoredValue::new_local(drag_state_cb);
+        let drop_cb_holder = StoredValue::new_local(files_drop_cb);
+        spawn_local(async move {
+            if let Ok(Some(u)) = ipc::listen_event("nvsf://drag-state", &drag_fn).await {
+                unlisteners.update_value(|v| v.push(u));
+            }
+            if let Ok(Some(u)) = ipc::listen_event("nvsf://files-dropped", &drop_fn).await {
+                unlisteners.update_value(|v| v.push(u));
+            }
+        });
+        on_cleanup(move || {
+            unlisteners.with_value(|list| {
+                for unlisten in list {
+                    let _ = unlisten.call0(&wasm_bindgen::JsValue::NULL);
+                }
+            });
+            drag_cb_holder.with_value(|_| {});
+            drop_cb_holder.with_value(|_| {});
+        });
+    }
     on_cleanup(move || {
         let url = ui.preview_url.get_untracked();
         if !url.is_empty() {
@@ -213,7 +262,7 @@ fn App(initial_theme: String) -> impl IntoView {
                         <svg viewBox="0 0 24 24" aria-hidden="true"><path d=path/></svg><span>{route}</span>
                     </button>
                 }).collect_view()}</nav>
-                <div class="sidebar-footer"><strong class="local-label"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 4 6v6c0 5 8 9 8 9s8-4 8-9V6z M9 12l2 2 4-4"/></svg>"Local by design"</strong><p>"Your video stays on this device. No cloud transcription. No telemetry."</p><span class="version mono">{concat!("v",env!("CARGO_PKG_VERSION"))}</span></div>
+                <div class="sidebar-footer"><span class="version mono">{concat!("v",env!("CARGO_PKG_VERSION"))}</span></div>
             </aside>
             <div class="workspace">
                 <header class="topbar"><div><span class="eyebrow">"NUMERA / WORKSPACE"</span><h1>{move ||ui.route.get()}</h1><p class="route-description">{move ||match ui.route.get().as_str(){
@@ -244,8 +293,16 @@ fn App(initial_theme: String) -> impl IntoView {
                     <div hidden=move ||ui.route.get()!="History"><History ui/></div>
                     <div hidden=move ||ui.route.get()!="Settings"><Settings ui/></div>
                 </main>
-                <footer class="statusbar"><span>"Local processing · optional release checks · approved downloads"</span><span>{move ||if ui.active(){"Job active, checkpoints preserved"}else{"No active extraction"}}</span></footer>
+                <footer class="statusbar"><span>{move ||if ui.active(){"Job active, checkpoints preserved"}else{"No active extraction"}}</span></footer>
             </div>
         </div>
+        <Show when=move || ui.dragging.get()>
+            <div class="drop-overlay" role="status" aria-live="polite">
+                <div class="drop-card">
+                    <strong>"Drop video files or a folder"</strong>
+                    <span>"Single video opens in Extract · multiple videos or folders add to Queue"</span>
+                </div>
+            </div>
+        </Show>
     }
 }

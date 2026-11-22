@@ -28,6 +28,7 @@ jobs:
   native:
     needs: inventory
     runs-on: ${{ matrix.runner }}
+    environment: ${{ github.ref == 'refs/heads/main' && 'numera-signing' || '' }}
     timeout-minutes: 240
     strategy:
       fail-fast: false
@@ -38,6 +39,7 @@ jobs:
       CARGO_BUILD_JOBS: 2
       OMP_NUM_THREADS: 2
       NVSF_TARGET_ID: ${{ matrix.id }}
+      CI_XTASK: ${{ format('{0}/target/release/xtask{1}', github.workspace, matrix.os == 'windows' && '.exe' || '') }}
       ORT_SKIP_DOWNLOAD: 1
     defaults:
       run:
@@ -49,6 +51,11 @@ jobs:
           toolchain: 1.100.0
           components: rustfmt, clippy, llvm-tools-preview
           targets: wasm32-unknown-unknown
+      - name: Build uninstrumented CI helper
+        timeout-minutes: 20
+        env:
+          CARGO_HOME: ${{ github.workspace }}/.ci-work/cargo
+        run: cargo build --release -p xtask --locked
       - name: Project-owned working directories
         run: |
           $work = Join-Path $env:GITHUB_WORKSPACE '.ci-work'
@@ -60,31 +67,35 @@ jobs:
       - name: Hosted CI script regression contracts
         timeout-minutes: 2
         run: |
-          ./scripts/ci/guard-tests.ps1
+          & $env:CI_XTASK ci-guard-tests
           if ($LASTEXITCODE -ne 0) { throw 'Guard regression contracts failed' }
-          ./scripts/ci/guard.ps1 -Name frontend-contracts -WallSeconds 20 -IdleSeconds 10 -Executable pwsh -Arguments @('-NoLogo','-NoProfile','-NonInteractive','-File','scripts/ci/frontend-tests.ps1')
+          $guardArgs = @('ci-frontend-tests')
+          & $env:CI_XTASK ci-guard --name frontend-contracts --wall-seconds 20 --idle-seconds 10 --executable $env:CI_XTASK -- @guardArgs
           if ($LASTEXITCODE -ne 0) { throw 'Frontend environment regression contracts failed' }
-          ./scripts/ci/guard.ps1 -Name notice-contracts -WallSeconds 20 -IdleSeconds 10 -Executable pwsh -Arguments @('-NoLogo','-NoProfile','-NonInteractive','-File','scripts/ci/notice-tests.ps1')
+          $guardArgs = @('ci-notice-tests')
+          & $env:CI_XTASK ci-guard --name notice-contracts --wall-seconds 20 --idle-seconds 10 --executable $env:CI_XTASK -- @guardArgs
           if ($LASTEXITCODE -ne 0) { throw 'Native notice regression contracts failed' }
           if ($IsWindows) {
-            ./scripts/ci/guard.ps1 -Name authenticode-contracts -WallSeconds 60 -IdleSeconds 30 -Executable pwsh -Arguments @('-NoLogo','-NoProfile','-NonInteractive','-File','scripts/ci/authenticode-tests.ps1')
+            $guardArgs = @('ci-authenticode-tests')
+            & $env:CI_XTASK ci-guard --name authenticode-contracts --wall-seconds 60 --idle-seconds 30 --executable $env:CI_XTASK -- @guardArgs
             if ($LASTEXITCODE -ne 0) { throw 'Authenticode regression contracts failed' }
           }
       - name: Linux native prerequisites
         if: matrix.os == 'linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential pkg-config clang libclang-dev nasm cmake ninja-build autoconf autoconf-archive automake libtool libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf libfuse2 libarchive-tools gdb dbus-daemon xvfb xdotool wmctrl openbox fonts-dejavu-core fonts-noto-core fonts-noto-cjk
+          sudo apt-get install -y build-essential pkg-config clang libclang-dev unzip nasm cmake ninja-build autoconf autoconf-archive automake libtool libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf libfuse2 libarchive-tools gdb dbus-daemon xvfb xdotool wmctrl openbox fonts-dejavu-core fonts-noto-core fonts-noto-cjk
           if ($LASTEXITCODE -ne 0) { throw 'Linux prerequisites failed' }
       - name: Restore verified native dependency cache
         id: native-cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: .ci-work/native/binary-cache
-          key: native-${{ matrix.id }}-${{ matrix.runner }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json', 'ci/native-lock.json', 'ci/ports/**', 'ci/triplets/*.cmake', 'scripts/ci/native.ps1') }}
+          key: native-${{ matrix.id }}-${{ matrix.runner }}-${{ hashFiles('vcpkg.json', 'vcpkg-configuration.json', 'ci/native-lock.json', 'ci/ports/**', 'ci/triplets/*.cmake', 'xtask/src/ci_native*.rs') }}
       - name: Native dependency source builds and verified runtime
         id: native-provision
-        run: ./scripts/ci/native.ps1 -TargetId '${{ matrix.id }}'
+        run: |
+          & $env:CI_XTASK ci-native --target-id '${{ matrix.id }}'
       - name: Retain successful native dependencies
         if: ${{ !cancelled() && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && steps.native-provision.outcome == 'success' && steps.native-cache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -93,7 +104,7 @@ jobs:
           key: ${{ steps.native-cache.outputs.cache-primary-key }}
       - name: Native coverage instrumentation
         if: matrix.id == 'linux-x64'
-        run: ./scripts/ci/coverage.ps1 -Phase start
+        run: ./target/release/xtask ci-coverage --phase start
       - name: Rust formatting
         run: |
           cargo fmt --all --check
@@ -104,30 +115,38 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Committed dependency lock mismatch' }
       - name: Native resource tools and approved icons
         run: |
-          ./scripts/ci/guard.ps1 -Name tauri-install -WallSeconds 1200 -IdleSeconds 180 -Executable cargo -Arguments @('install','tauri-cli','--version','2.12.4','--locked','--root','.ci-work/tools')
+          $guardArgs = @('install','tauri-cli','--version','2.12.4','--locked','--root','.ci-work/tools')
+          & $env:CI_XTASK ci-guard --name tauri-install --wall-seconds 1200 --idle-seconds 180 --executable cargo -- @guardArgs
           if ($LASTEXITCODE -ne 0) { throw 'Tauri CLI installation failed' }
-          ./scripts/ci/guard.ps1 -Name tauri-version -WallSeconds 15 -IdleSeconds 5 -Executable "$env:GITHUB_WORKSPACE/.ci-work/tools/bin/cargo-tauri$(if ($IsWindows) { '.exe' } else { '' })" -Arguments @('--version') -CaptureStdoutPath "$env:GITHUB_WORKSPACE/.ci-work/tools/tauri-version.txt"
+          $guardArgs = @('--version')
+          & $env:CI_XTASK ci-guard --name tauri-version --wall-seconds 15 --idle-seconds 5 --executable "$env:GITHUB_WORKSPACE/.ci-work/tools/bin/cargo-tauri$(if ($IsWindows) { '.exe' } else { '' })" --capture-stdout-path "$env:GITHUB_WORKSPACE/.ci-work/tools/tauri-version.txt" -- @guardArgs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           if ($LASTEXITCODE -ne 0 -or [IO.File]::ReadAllText("$env:GITHUB_WORKSPACE/.ci-work/tools/tauri-version.txt",[Text.Encoding]::UTF8).Trim() -ne 'tauri-cli 2.12.4') { throw 'Installed Tauri CLI version mismatch' }
           "$env:GITHUB_WORKSPACE/.ci-work/tools/bin" >> $env:GITHUB_PATH
           $env:PATH = "$env:GITHUB_WORKSPACE/.ci-work/tools/bin$([IO.Path]::PathSeparator)$env:PATH"
-          ./scripts/ci/guard.ps1 -Name native-icons -WallSeconds 60 -IdleSeconds 20 -Executable cargo -Arguments @('tauri','icon','assets/logo.svg','--output','crates/desktop/icons')
+          $guardArgs = @('tauri','icon','assets/logo.svg','--output','crates/desktop/icons')
+          & $env:CI_XTASK ci-guard --name native-icons --wall-seconds 60 --idle-seconds 20 --executable cargo -- @guardArgs
           if ($LASTEXITCODE -ne 0) { throw 'Native icon generation failed' }
       - name: Core and native static analysis
         run: |
-          ./scripts/ci/guard.ps1 -Name rust-clippy -WallSeconds 1200 -IdleSeconds 180 -Executable cargo -Arguments @('clippy','--locked','-vv','-p','nvsf-core','-p','nvsf-app','-p','nvsf-media-native','-p','nvsf-cli','-p','xtask','--','-D','warnings')
+          $guardArgs = @('clippy','--locked','-vv','-p','nvsf-core','-p','nvsf-app','-p','nvsf-media-native','-p','nvsf-cli','-p','xtask','--','-D','warnings')
+          & $env:CI_XTASK ci-guard --name rust-clippy --wall-seconds 1200 --idle-seconds 180 --executable cargo -- @guardArgs
           if ($LASTEXITCODE -ne 0) { throw 'Rust static analysis failed' }
       - name: Same-target native media adapter and loader closure
         timeout-minutes: 35
         run: |
-          ./scripts/ci/guard.ps1 -Name media-adapter-release -WallSeconds 1800 -IdleSeconds 360 -Executable cargo -Arguments @('build','--locked','--release','--target','${{ matrix.target }}','-p','nvsf-media-native')
+          $guardArgs = @('build','--locked','--release','--target','${{ matrix.target }}','-p','nvsf-media-native')
+          & $env:CI_XTASK ci-guard --name media-adapter-release --wall-seconds 1800 --idle-seconds 360 --executable cargo -- @guardArgs
           if ($LASTEXITCODE -ne 0) { throw 'Native media adapter build failed' }
-          ./scripts/ci/native.ps1 -TargetId '${{ matrix.id }}' -StageMediaAdapter
+          & $env:CI_XTASK ci-native --target-id '${{ matrix.id }}' --stage-media-adapter
           if ($LASTEXITCODE -ne 0) { throw 'Native media adapter loader staging failed' }
       - name: CLI and frontend build
         run: |
-          ./scripts/ci/guard.ps1 -Name native-release -WallSeconds 1800 -IdleSeconds 360 -Executable cargo -Arguments @('build','--locked','--release','-p','nvsf-cli','-p','xtask')
+          $guardArgs = @('build','--locked','--release','-p','nvsf-cli')
+          & $env:CI_XTASK ci-guard --name native-release --wall-seconds 1800 --idle-seconds 360 --executable cargo -- @guardArgs
           if ($LASTEXITCODE -ne 0) { throw 'Native CLI build failed' }
-          ./scripts/ci/guard.ps1 -Name trunk-install -WallSeconds 1200 -IdleSeconds 180 -Executable cargo -Arguments @('install','trunk','--version','0.22.1','--locked','--config','profile.release.lto="off"','--config','profile.release.codegen-units=16','--root','.ci-work/tools')
+          $guardArgs = @('install','trunk','--version','0.22.1','--locked','--config','profile.release.lto="off"','--config','profile.release.codegen-units=16','--root','.ci-work/tools')
+          & $env:CI_XTASK ci-guard --name trunk-install --wall-seconds 1200 --idle-seconds 180 --executable cargo -- @guardArgs
           if ($LASTEXITCODE -ne 0) { throw 'Trunk installation failed' }
           "$env:GITHUB_WORKSPACE/.ci-work/tools/bin" >> $env:GITHUB_PATH
           $env:PATH = "$env:GITHUB_WORKSPACE/.ci-work/tools/bin$([IO.Path]::PathSeparator)$env:PATH"
@@ -145,7 +164,8 @@ jobs:
           $work = Join-Path $env:GITHUB_WORKSPACE '.ci-work/cuda'
           New-Item -ItemType Directory -Force -Path $work | Out-Null
           $archive = Join-Path $work $pin.asset
-          ./scripts/ci/guard.ps1 -Name cuda-ort-download -WallSeconds 900 -IdleSeconds 180 -Executable curl -Arguments @('--fail','--location','--proto','=https','--proto-redir','=https','--connect-timeout','30','--max-time','840','--output',$archive,$pin.url)
+          $guardArgs = @('--fail','--location','--proto','=https','--proto-redir','=https','--connect-timeout','30','--max-time','840','--output',$archive,$pin.url)
+          & $env:CI_XTASK ci-guard --name cuda-ort-download --wall-seconds 900 --idle-seconds 180 --executable curl -- @guardArgs
           if ($LASTEXITCODE -ne 0) { throw 'Pinned CUDA ONNX Runtime download failed' }
           if ((Get-Item -LiteralPath $archive).Length -ne $pin.bytes -or (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant() -ne $pin.sha256) { throw 'CUDA ONNX Runtime archive identity mismatch' }
           $variant = Join-Path $env:GITHUB_WORKSPACE '.ci-work/cuda-variant'
@@ -163,7 +183,8 @@ jobs:
             }
           } finally { $zip.Dispose() }
           Remove-Item -LiteralPath $archive -Force
-          ./scripts/ci/guard.ps1 -Name cuda-cli-release -WallSeconds 1800 -IdleSeconds 360 -Executable cargo -Arguments @('build','--locked','--release','-p','nvsf-cli','--features','cuda')
+          $guardArgs = @('build','--locked','--release','-p','nvsf-cli','--features','cuda')
+          & $env:CI_XTASK ci-guard --name cuda-cli-release --wall-seconds 1800 --idle-seconds 360 --executable cargo -- @guardArgs
           if ($LASTEXITCODE -ne 0) { throw 'CUDA CLI variant build failed' }
           Copy-Item -LiteralPath (Join-Path $env:CARGO_TARGET_DIR 'release/nvsf.exe') -Destination (Join-Path $variant 'nvsf.exe')
           $files = @(Get-ChildItem -LiteralPath $variant -File -Recurse | ForEach-Object { [ordered]@{ file = [IO.Path]::GetRelativePath($variant, $_.FullName).Replace('\','/'); bytes = $_.Length; sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant() } })
@@ -182,15 +203,15 @@ jobs:
         if: matrix.id == 'windows-arm64'
         timeout-minutes: 30
         run: |
-          $ext = if ($IsWindows) { '.exe' } else { '' }
-          & "$env:GITHUB_WORKSPACE/target/release/xtask$ext" frontend-tools
+          & $env:CI_XTASK frontend-tools
           if ($LASTEXITCODE -ne 0) { throw 'Native Windows ARM frontend helpers failed' }
       - name: Instrumented native GUI build
         run: |
           $ext = if ($IsWindows) { '.exe' } else { '' }
-          & "$env:GITHUB_WORKSPACE/target/release/xtask$ext" ci-frontend --e2e
+          & $env:CI_XTASK ci-frontend --e2e
           if ($LASTEXITCODE -ne 0) { throw 'Instrumented Rust frontend build failed' }
-          ./scripts/ci/guard.ps1 -Name instrumented-desktop -WallSeconds 1800 -IdleSeconds 360 -Executable cargo -Arguments @('build','--locked','--release','--timings','-vv','-p','nvsf-desktop','--features','e2e')
+          $guardArgs = @('build','--locked','--release','--timings','-vv','-p','nvsf-desktop','--features','e2e')
+          & $env:CI_XTASK ci-guard --name instrumented-desktop --wall-seconds 1800 --idle-seconds 360 --executable cargo -- @guardArgs
           if ($LASTEXITCODE -ne 0) { throw 'Instrumented native GUI build failed' }
           New-Item -ItemType Directory -Force -Path .ci-work/e2e | Out-Null
           Copy-Item "target/release/numera-video-sub-finder$ext" '.ci-work/e2e/'
@@ -206,66 +227,69 @@ jobs:
         env:
           TARGET_ID: ${{ matrix.id }}
         run: |
-          $ext = if ($IsWindows) { '.exe' } else { '' }
-          & "$env:GITHUB_WORKSPACE/target/release/xtask$ext" ci-tests --target-id $env:TARGET_ID
+          & $env:CI_XTASK ci-tests --target-id $env:TARGET_ID
           if ($LASTEXITCODE -ne 0) { throw 'Required Rust contract suites failed' }
       - name: Actual Rust media FFI AddressSanitizer admission
         if: matrix.id == 'linux-x64'
         timeout-minutes: 19
-        run: ./scripts/ci/media-sanitizer.ps1
+        run: ./target/release/xtask ci-media-sanitizer
       - name: Owned worker process fault contracts
         timeout-minutes: 2
         run: |
-          $ext = if ($IsWindows) { '.exe' } else { '' }
-          ./scripts/ci/guard.ps1 -Name worker-faults -WallSeconds 80 -IdleSeconds 20 -Executable "$env:GITHUB_WORKSPACE/target/release/xtask$ext" -Arguments @('worker-faults','--output','.ci-work/worker-faults')
+          $guardArgs = @('worker-faults','--output','.ci-work/worker-faults')
+          & $env:CI_XTASK ci-guard --name worker-faults --wall-seconds 80 --idle-seconds 20 --executable $env:CI_XTASK -- @guardArgs
           if ($LASTEXITCODE -ne 0) { throw 'Owned worker fault or cleanup contract failed' }
           Copy-Item '.ci-work/worker-faults/worker-fault-report.json' '.ci-work/packages/reports/${{ matrix.id }}-worker-faults.json'
       - name: Missing-native bootstrap and maintenance CLI contracts
         timeout-minutes: 2
         run: |
           $ext = if ($IsWindows) { '.exe' } else { '' }
-          ./scripts/ci/guard.ps1 -Name maintenance-cli -WallSeconds 90 -IdleSeconds 30 -Executable "$env:GITHUB_WORKSPACE/target/release/xtask$ext" -Arguments @('maintenance','--cli',"target/release/nvsf$ext",'--runtimes','.ci-work/runtimes','--output','.ci-work/maintenance')
+          $guardArgs = @('maintenance','--cli',"target/release/nvsf$ext",'--runtimes','.ci-work/runtimes','--output','.ci-work/maintenance')
+          & $env:CI_XTASK ci-guard --name maintenance-cli --wall-seconds 90 --idle-seconds 30 --executable $env:CI_XTASK -- @guardArgs
           if ($LASTEXITCODE -ne 0) { throw 'Actual bootstrap/maintenance CLI witness failed' }
           Copy-Item '.ci-work/maintenance/maintenance-report.json' '.ci-work/packages/reports/${{ matrix.id }}-maintenance.json'
       - name: Native desktop package build
         timeout-minutes: 30
         run: |
-          $ext = if ($IsWindows) { '.exe' } else { '' }
-          & "$env:GITHUB_WORKSPACE/target/release/xtask$ext" ci-frontend
+          & $env:CI_XTASK ci-frontend
           if ($LASTEXITCODE -ne 0) { throw 'Production frontend build failed' }
-          ./scripts/ci/guard.ps1 -Name desktop-production -WallSeconds 1800 -IdleSeconds 360 -Executable cargo -Arguments @('tauri','build','--no-bundle','--','--locked') -WorkingDirectory "$env:GITHUB_WORKSPACE/crates/desktop"
+          $guardArgs = @('tauri','build','--no-bundle','--','--locked')
+          & $env:CI_XTASK ci-guard --name desktop-production --wall-seconds 1800 --idle-seconds 360 --executable cargo --working-directory "$env:GITHUB_WORKSPACE/crates/desktop" -- @guardArgs
           if ($LASTEXITCODE -ne 0) { throw 'Native desktop build failed' }
       - name: Actual model and extraction smoke
         run: |
           $ext = if ($IsWindows) { '.exe' } else { '' }
-          $xtask = "target/release/xtask$ext"
-          ./scripts/ci/guard.ps1 -Name provision-models -WallSeconds 1200 -IdleSeconds 240 -Executable "$env:GITHUB_WORKSPACE/$xtask" -Arguments @('runtime-models','--data-root','.ci-work/data')
+          $guardArgs = @('runtime-models','--data-root','.ci-work/data')
+          & $env:CI_XTASK ci-guard --name provision-models --wall-seconds 1200 --idle-seconds 240 --executable $env:CI_XTASK -- @guardArgs
           if ($LASTEXITCODE -ne 0) { throw 'Model provisioning failed' }
           $ffmpeg = ".ci-work/native/installed/${{ matrix.triplet }}/tools/ffmpeg/ffmpeg$ext"
-          ./scripts/ci/guard.ps1 -Name generate-fixtures -WallSeconds 120 -IdleSeconds 60 -Executable "$env:GITHUB_WORKSPACE/$xtask" -Arguments @('fixtures','--ffmpeg',"$env:GITHUB_WORKSPACE/$ffmpeg",'--output','.ci-work/fixtures')
+          $guardArgs = @('fixtures','--ffmpeg',"$env:GITHUB_WORKSPACE/$ffmpeg",'--output','.ci-work/fixtures')
+          & $env:CI_XTASK ci-guard --name generate-fixtures --wall-seconds 120 --idle-seconds 60 --executable $env:CI_XTASK -- @guardArgs
           if ($LASTEXITCODE -ne 0) { throw 'Fixture generation failed' }
-          ./scripts/ci/guard.ps1 -Name ocr-stage-evidence -WallSeconds 120 -IdleSeconds 60 -Executable "$env:GITHUB_WORKSPACE/$xtask" -Arguments @('ocr-evidence','--ffmpeg',"$env:GITHUB_WORKSPACE/$ffmpeg",'--fixture-dir','.ci-work/fixtures','--data-root','.ci-work/data','--output','.ci-work/ocr-evidence')
+          $guardArgs = @('ocr-evidence','--ffmpeg',"$env:GITHUB_WORKSPACE/$ffmpeg",'--fixture-dir','.ci-work/fixtures','--data-root','.ci-work/data','--output','.ci-work/ocr-evidence')
+          & $env:CI_XTASK ci-guard --name ocr-stage-evidence --wall-seconds 120 --idle-seconds 60 --executable $env:CI_XTASK -- @guardArgs
           if ($LASTEXITCODE -ne 0) { throw 'Generated fixture OCR evidence capture failed' }
-          ./scripts/ci/guard.ps1 -Name cli-smoke -WallSeconds 210 -IdleSeconds 90 -Executable "$env:GITHUB_WORKSPACE/$xtask" -Arguments @('smoke','--cli',"target/release/nvsf$ext",'--fixture-dir','.ci-work/fixtures','--data-root','.ci-work/data')
+          $guardArgs = @('smoke','--cli',"target/release/nvsf$ext",'--fixture-dir','.ci-work/fixtures','--data-root','.ci-work/data')
+          & $env:CI_XTASK ci-guard --name cli-smoke --wall-seconds 210 --idle-seconds 90 --executable $env:CI_XTASK -- @guardArgs
           if ($LASTEXITCODE -ne 0) { throw 'Actual native extraction smoke failed' }
       - name: Actual native Japanese specialist numeric admission
         timeout-minutes: 3
         run: |
-          $ext = if ($IsWindows) { '.exe' } else { '' }
-          ./scripts/ci/guard.ps1 -Name specialist -WallSeconds 120 -IdleSeconds 60 -Executable "$env:GITHUB_WORKSPACE/target/release/xtask$ext" -Arguments @('specialist','--fixture-dir','.ci-work/fixtures','--data-root','.ci-work/data','--output','.ci-work/specialist')
+          $guardArgs = @('specialist','--fixture-dir','.ci-work/fixtures','--data-root','.ci-work/data','--output','.ci-work/specialist')
+          & $env:CI_XTASK ci-guard --name specialist --wall-seconds 120 --idle-seconds 60 --executable $env:CI_XTASK -- @guardArgs
           if ($LASTEXITCODE -ne 0) { throw 'Actual specialist numeric model admission failed' }
           Copy-Item '.ci-work/specialist/specialist.json' '.ci-work/packages/reports/${{ matrix.id }}-specialist.json'
       - name: Explicit isolated optional visual model provisioning
         timeout-minutes: 21
         run: |
-          $ext = if ($IsWindows) { '.exe' } else { '' }
-          ./scripts/ci/guard.ps1 -Name visual-models -WallSeconds 1200 -IdleSeconds 60 -Executable "$env:GITHUB_WORKSPACE/target/release/xtask$ext" -Arguments @('visual-models','--data-root','.ci-work/visual-data')
+          $guardArgs = @('visual-models','--data-root','.ci-work/visual-data')
+          & $env:CI_XTASK ci-guard --name visual-models --wall-seconds 1200 --idle-seconds 60 --executable $env:CI_XTASK -- @guardArgs
           if ($LASTEXITCODE -ne 0) { throw 'Hash-bound optional visual model provisioning failed' }
       - name: Actual supervised optional visual numeric admission
         timeout-minutes: 3
         run: |
-          $ext = if ($IsWindows) { '.exe' } else { '' }
-          ./scripts/ci/guard.ps1 -Name visual-model -WallSeconds 120 -IdleSeconds 60 -Executable "$env:GITHUB_WORKSPACE/target/release/xtask$ext" -Arguments @('visual-model','--fixture-dir','.ci-work/fixtures','--data-root','.ci-work/visual-data','--output','.ci-work/visual-evidence')
+          $guardArgs = @('visual-model','--fixture-dir','.ci-work/fixtures','--data-root','.ci-work/visual-data','--output','.ci-work/visual-evidence')
+          & $env:CI_XTASK ci-guard --name visual-model --wall-seconds 120 --idle-seconds 60 --executable $env:CI_XTASK -- @guardArgs
           if ($LASTEXITCODE -ne 0) { throw 'Actual optional visual numeric model admission failed' }
           Copy-Item '.ci-work/visual-evidence/visual-model-report.json' '.ci-work/packages/reports/${{ matrix.id }}-visual-model.json'
       - name: Actual representative language extraction and cue recognition
@@ -273,7 +297,8 @@ jobs:
         run: |
           $ext = if ($IsWindows) { '.exe' } else { '' }
           $ffmpeg = "$env:GITHUB_WORKSPACE/.ci-work/native/installed/${{ matrix.triplet }}/tools/ffmpeg/ffmpeg$ext"
-          ./scripts/ci/guard.ps1 -Name multilingual -WallSeconds 510 -IdleSeconds 90 -Executable "$env:GITHUB_WORKSPACE/target/release/xtask$ext" -Arguments @('multilingual','--cli',"$env:GITHUB_WORKSPACE/target/release/nvsf$ext",'--ffmpeg',$ffmpeg,'--data-root','.ci-work/data','--output','.ci-work/multilingual')
+          $guardArgs = @('multilingual','--cli',"$env:GITHUB_WORKSPACE/target/release/nvsf$ext",'--ffmpeg',$ffmpeg,'--data-root','.ci-work/data','--output','.ci-work/multilingual')
+          & $env:CI_XTASK ci-guard --name multilingual --wall-seconds 510 --idle-seconds 90 --executable $env:CI_XTASK -- @guardArgs
           if ($LASTEXITCODE -ne 0) { throw 'Actual representative multilingual OCR witness failed' }
           Copy-Item '.ci-work/multilingual/multilingual-report.json' '.ci-work/packages/reports/${{ matrix.id }}-multilingual.json'
       - name: Actual native GUI extraction and correction
@@ -282,15 +307,17 @@ jobs:
           $ext = if ($IsWindows) { '.exe' } else { '' }
           $args = @('gui','--gui',".ci-work/e2e/numera-video-sub-finder$ext",'--fixture-dir','.ci-work/fixtures','--data-root','.ci-work/data','--output','.ci-work/gui-evidence')
           if ($IsLinux) {
-            ./scripts/ci/guard.ps1 -Name native-gui -WallSeconds 270 -IdleSeconds 150 -Executable xvfb-run -Arguments (@('-a','dbus-run-session','--',"$env:GITHUB_WORKSPACE/target/release/xtask$ext") + $args)
+            $guardArgs = @('-a','dbus-run-session','--',$env:CI_XTASK) + $args
+            & $env:CI_XTASK ci-guard --name native-gui --wall-seconds 270 --idle-seconds 150 --executable xvfb-run -- @guardArgs
           } else {
-            ./scripts/ci/guard.ps1 -Name native-gui -WallSeconds 270 -IdleSeconds 150 -Executable "$env:GITHUB_WORKSPACE/target/release/xtask$ext" -Arguments $args
+            $guardArgs = $args
+            & $env:CI_XTASK ci-guard --name native-gui --wall-seconds 270 --idle-seconds 150 --executable $env:CI_XTASK -- @guardArgs
           }
           if ($LASTEXITCODE -ne 0) { throw 'Actual native GUI acceptance failed' }
       - name: Assemble native artifact and provenance
         run: |
           $ext = if ($IsWindows) { '.exe' } else { '' }
-          & "target/release/xtask$ext" package --target '${{ matrix.id }}' --cli "target/release/nvsf$ext" --gui "target/release/numera-video-sub-finder$ext" --runtimes '.ci-work/runtimes' --output '.ci-work/packages'
+          & $env:CI_XTASK package --target '${{ matrix.id }}' --cli "target/release/nvsf$ext" --gui "target/release/numera-video-sub-finder$ext" --runtimes '.ci-work/runtimes' --output '.ci-work/packages'
           if ($LASTEXITCODE -ne 0) { throw 'Native artifact assembly failed' }
       - name: Authenticated candidate runtime assets and actual native health
         timeout-minutes: 4
@@ -298,13 +325,13 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ''
         run: |
-          $ext = if ($IsWindows) { '.exe' } else { '' }
-          ./scripts/ci/guard.ps1 -Name runtime-pack -WallSeconds 180 -IdleSeconds 60 -Executable "$env:GITHUB_WORKSPACE/target/release/xtask$ext" -Arguments @('runtime-pack','--target','${{ matrix.id }}','--runtimes','.ci-work/runtimes','--output','.ci-work/packages/${{ matrix.id }}')
+          $guardArgs = @('runtime-pack','--target','${{ matrix.id }}','--runtimes','.ci-work/runtimes','--output','.ci-work/packages/${{ matrix.id }}')
+          & $env:CI_XTASK ci-guard --name runtime-pack --wall-seconds 180 --idle-seconds 60 --executable $env:CI_XTASK -- @guardArgs
           if ($LASTEXITCODE -ne 0) { throw 'Runtime asset signature or actual native health failed' }
       - name: Relocated artifact-only extraction
         run: |
-          $ext = if ($IsWindows) { '.exe' } else { '' }
-          ./scripts/ci/guard.ps1 -Name standalone-smoke -WallSeconds 240 -IdleSeconds 90 -Executable "$env:GITHUB_WORKSPACE/target/release/xtask$ext" -Arguments @('standalone','--target','${{ matrix.id }}','--packages','.ci-work/packages','--fixture-dir','.ci-work/fixtures')
+          $guardArgs = @('standalone','--target','${{ matrix.id }}','--packages','.ci-work/packages','--fixture-dir','.ci-work/fixtures')
+          & $env:CI_XTASK ci-guard --name standalone-smoke --wall-seconds 240 --idle-seconds 90 --executable $env:CI_XTASK -- @guardArgs
           if ($LASTEXITCODE -ne 0) { throw 'Relocated package validation failed' }
       - name: Actual installer and archive formats
         timeout-minutes: 35
@@ -313,27 +340,31 @@ jobs:
           NVSF_WINDOWS_CODESIGN_PFX: ${{ matrix.os == 'windows' && secrets.NVSF_WINDOWS_CODESIGN_PFX || '' }}
           NVSF_WINDOWS_CODESIGN_PASSWORD: ${{ matrix.os == 'windows' && secrets.NVSF_WINDOWS_CODESIGN_PASSWORD || '' }}
         run: |
-          ./scripts/ci/bundle.ps1 -TargetId '${{ matrix.id }}' -PackagesRoot '.ci-work/packages'
+          & $env:CI_XTASK ci-bundle --target-id '${{ matrix.id }}' --packages-root '.ci-work/packages'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Signed internal updater payload and metadata candidates
         timeout-minutes: 8
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ''
         run: |
-          $ext = if ($IsWindows) { '.exe' } else { '' }
-          ./scripts/ci/guard.ps1 -Name update-assets -WallSeconds 420 -IdleSeconds 90 -Executable "$env:GITHUB_WORKSPACE/target/release/xtask$ext" -Arguments @('update-assets','--target','${{ matrix.id }}','--packages','.ci-work/packages')
+          $guardArgs = @('update-assets','--target','${{ matrix.id }}','--packages','.ci-work/packages')
+          & $env:CI_XTASK ci-guard --name update-assets --wall-seconds 420 --idle-seconds 90 --executable $env:CI_XTASK -- @guardArgs
           if ($LASTEXITCODE -ne 0) { throw 'Internal update candidate admission failed; no publication authorized' }
       - name: Actual production GUI without test listener
         timeout-minutes: 3
         run: |
-          $ext = if ($IsWindows) { '.exe' } else { '' }
           $name = if ($IsWindows) { 'Numera Video Sub Finder.exe' } else { 'numera-video-sub-finder' }
           $gui = "$env:GITHUB_WORKSPACE/.ci-work/relocated/Numera 日本 portable ${{ matrix.id }}/$name"
           $args = @('production','--gui',$gui,'--data-root','.ci-work/production-data','--output','.ci-work/production-evidence')
           if ($IsLinux) {
-            ./scripts/ci/guard.ps1 -Name production-gui -WallSeconds 90 -IdleSeconds 30 -Executable xvfb-run -Arguments @('-a','dbus-run-session','--',"$env:GITHUB_WORKSPACE/target/release/xtask$ext",'virtual-desktop','--executable',"$env:GITHUB_WORKSPACE/target/release/xtask$ext",'--arguments-json',($args | ConvertTo-Json -Compress))
+            $guardArgs = @('-a','dbus-run-session','--',$env:CI_XTASK,'virtual-desktop','--executable',$env:CI_XTASK,'--arguments-json',($args | ConvertTo-Json -Compress))
+            & $env:CI_XTASK ci-guard --name production-gui --wall-seconds 90 --idle-seconds 30 --executable xvfb-run -- @guardArgs
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           } else {
-            ./scripts/ci/guard.ps1 -Name production-gui -WallSeconds 90 -IdleSeconds 30 -Executable "$env:GITHUB_WORKSPACE/target/release/xtask$ext" -Arguments $args
+            $guardArgs = $args
+            & $env:CI_XTASK ci-guard --name production-gui --wall-seconds 90 --idle-seconds 30 --executable $env:CI_XTASK -- @guardArgs
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
           Copy-Item '.ci-work/production-evidence/production-gui-report.json' '.ci-work/packages/reports/${{ matrix.id }}-production.json'
           Copy-Item '.ci-work/gui-evidence/gui-report.json' '.ci-work/packages/reports/${{ matrix.id }}-gui.json'

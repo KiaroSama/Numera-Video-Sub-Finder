@@ -5,6 +5,7 @@ use serde_json::json;
 
 #[component]
 pub fn Extract(ui: Ui) -> impl IntoView {
+    let lang_query = RwSignal::new(String::new());
     view! {
         <div class="extract-grid">
             <section class="panel source-panel">
@@ -19,18 +20,87 @@ pub fn Extract(ui: Ui) -> impl IntoView {
                 <div class="source-line">
                     <strong dir="auto">{move || ui.source.with(|s| s.as_ref().map(|s| s.name.clone()).unwrap_or_else(|| "No video selected".into()))}</strong>
                     <span class="muted">{move || ui.source.with(|s| s.as_ref().map(|s| format!("{} × {} · {} · {}", s.media.width, s.media.height, s.media.codec,
-                        s.media.duration_ms.map(helpers::time_label).unwrap_or_else(|| "unknown duration".into()))).unwrap_or_else(|| "Choose a local video. Nothing is uploaded.".into()))}</span>
+                        s.media.duration_ms.map(helpers::time_label).unwrap_or_else(|| "unknown duration".into()))).unwrap_or_else(|| "Open a video or drag and drop video files or a folder here.".into()))}</span>
                 </div>
                 <Preview ui/>
                 <Regions ui/>
             </section>
             <section class="panel settings-panel">
                 <div class="section-title"><span class="section-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16 M4 17h16 M8 4v6 M16 14v6"/></svg></span><div><span class="eyebrow">"02 / EXTRACTION"</span><h2>"Recognition setup"</h2></div></div>
-                <label for="language">"Subtitle language"</label>
-                <select id="language" prop:value=move || ui.config.with(|c| c.language.clone()) on:change=move |e| ui.config.update(|c| c.language=event_target_value(&e))>
-                    <option value="en">"English"</option><option value="fa">"Persian / فارسی"</option><option value="ja">"Japanese / 日本語"</option>
-                    {nvsf_core::languages::catalog().iter().map(|language|view!{<option value=language.code.clone()>{format!("{} ({})",language.name,language.code)}</option>}).collect_view()}
-                </select>
+                <label for="language-search">"Subtitle language"</label>
+                <div class="language-picker">
+                    <div class="language-search-row">
+                        <input
+                            id="language-search"
+                            type="search"
+                            autocomplete="off"
+                            placeholder="Search language by name or code…"
+                            aria-label="Search subtitle language"
+                            prop:value=move || lang_query.get()
+                            on:input=move |e| lang_query.set(event_target_value(&e))
+                            on:keydown=move |e: web_sys::KeyboardEvent| {
+                                if e.key() == "Escape" {
+                                    lang_query.set(String::new());
+                                } else if e.key() == "Enter" {
+                                    let matches = helpers::language_options(&lang_query.get_untracked());
+                                    if let Some(first) = matches.first() {
+                                        ui.config.update(|c| c.language = first.code.clone());
+                                        lang_query.set(String::new());
+                                        e.prevent_default();
+                                    }
+                                }
+                            }
+                        />
+                        <Show when=move || !lang_query.get().is_empty()>
+                            <button
+                                type="button"
+                                class="clear-search"
+                                aria-label="Clear language search"
+                                on:click=move |_| lang_query.set(String::new())
+                            >"×"</button>
+                        </Show>
+                    </div>
+                    <Show when=move || !lang_query.get().trim().is_empty()>
+                        <div class="language-matches" role="listbox" aria-label="Matching subtitle languages">
+                            {move || {
+                                let matches = helpers::language_options(&lang_query.get());
+                                if matches.is_empty() {
+                                    view! { <div class="language-empty muted">"No matching language"</div> }.into_any()
+                                } else {
+                                    matches
+                                        .into_iter()
+                                        .take(30)
+                                        .map(|lang| {
+                                            let code = lang.code.clone();
+                                            let active_code = lang.code.clone();
+                                            view! {
+                                                <button
+                                                    type="button"
+                                                    role="option"
+                                                    class="language-option"
+                                                    class:active=move || ui.config.with(|c| c.language == active_code)
+                                                    on:click=move |_| {
+                                                        ui.config.update(|c| c.language = code.clone());
+                                                        lang_query.set(String::new());
+                                                    }
+                                                >{lang.label}</button>
+                                            }
+                                        })
+                                        .collect_view()
+                                        .into_any()
+                                }
+                            }}
+                        </div>
+                    </Show>
+                    <select id="language" aria-label="Selected subtitle language" prop:value=move || ui.config.with(|c| c.language.clone()) on:change=move |e| ui.config.update(|c| c.language = event_target_value(&e))>
+                        {move || {
+                            helpers::language_options(&lang_query.get())
+                                .into_iter()
+                                .map(|language| view! { <option value=language.code>{language.label}</option> })
+                                .collect_view()
+                        }}
+                    </select>
+                </div>
                 <label for="device">"Processing device"</label>
                 <select id="device" prop:value=move || ui.config.with(|c| c.device.clone()) on:change=move |e| ui.config.update(|c| c.device=event_target_value(&e))>
                     <option value="auto">"Auto · acceleration first"</option><option value="cpu">"CPU"</option><option value="cuda">"CUDA"</option>

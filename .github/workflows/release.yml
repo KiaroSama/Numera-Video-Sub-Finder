@@ -74,6 +74,7 @@ jobs:
   publish:
     needs: qualification
     if: ${{ inputs.publish_release }}
+    environment: numera-signing
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:

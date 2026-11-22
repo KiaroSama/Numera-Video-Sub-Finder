@@ -43,6 +43,7 @@ pub struct Ui {
     pub preview_busy: RwSignal<bool>,
     pub time: RwSignal<u64>,
     pub preview_generation: RwSignal<u64>,
+    pub dragging: RwSignal<bool>,
 }
 
 impl Ui {
@@ -77,6 +78,7 @@ impl Ui {
             preview_busy: RwSignal::new(false),
             time: RwSignal::new(0),
             preview_generation: RwSignal::new(0),
+            dragging: RwSignal::new(false),
         }
     }
     pub fn active(self) -> bool {
@@ -156,6 +158,51 @@ impl Ui {
                     self.time.set(0);
                     self.seek(0);
                 }
+            },
+        );
+    }
+    pub fn accept_drop(self, paths: Vec<String>) {
+        if paths.is_empty() {
+            return;
+        }
+        let config = self.config.get_untracked();
+        self.request::<crate::ipc::DropOutcome>(
+            "accept_dropped_paths",
+            json!({"paths": paths, "config": config}),
+            move |outcome| {
+                if outcome.kind == "single"
+                    && let Some(source) = outcome.source
+                {
+                    let name = source.name.clone();
+                    self.source.set(Some(source));
+                    self.time.set(0);
+                    self.seek(0);
+                    self.route.set("Extract".into());
+                    self.notice.set(format!("Loaded dropped video: {name}"));
+                    return;
+                }
+                self.queue.set(outcome.queued);
+                self.route.set("Queue".into());
+                let mut note = format!(
+                    "Added {} dropped video(s) to the queue.",
+                    outcome.added_count
+                );
+                if outcome.skipped_unsupported > 0 {
+                    note.push_str(&format!(
+                        " Skipped {} unsupported item(s).",
+                        outcome.skipped_unsupported
+                    ));
+                }
+                if outcome.truncated {
+                    note.push_str(" Reached the 100-video queue cap.");
+                }
+                if !outcome.errors.is_empty() {
+                    note.push_str(&format!(
+                        " {} file(s) failed to load.",
+                        outcome.errors.len()
+                    ));
+                }
+                self.notice.set(note);
             },
         );
     }
