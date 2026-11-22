@@ -39,7 +39,7 @@ jobs:
       CARGO_BUILD_JOBS: 2
       OMP_NUM_THREADS: 2
       NVSF_TARGET_ID: ${{ matrix.id }}
-      CI_XTASK: ${{ format('{0}/target/release/xtask{1}', github.workspace, matrix.os == 'windows' && '.exe' || '') }}
+      CI_XTASK: ${{ format('{0}/.ci-work/tools/ci-xtask{1}', github.workspace, matrix.os == 'windows' && '.exe' || '') }}
       ORT_SKIP_DOWNLOAD: 1
     defaults:
       run:
@@ -55,7 +55,12 @@ jobs:
         timeout-minutes: 20
         env:
           CARGO_HOME: ${{ github.workspace }}/.ci-work/cargo
-        run: cargo build --release -p xtask --locked
+        run: |
+          cargo build --release -p xtask --locked
+          if ($LASTEXITCODE -ne 0) { throw 'CI helper build failed' }
+          New-Item -ItemType Directory -Force -Path "$env:GITHUB_WORKSPACE/.ci-work/tools" | Out-Null
+          $ext = if ($IsWindows) { '.exe' } else { '' }
+          Copy-Item -LiteralPath "$env:GITHUB_WORKSPACE/target/release/xtask$ext" -Destination $env:CI_XTASK -Force
       - name: Project-owned working directories
         run: |
           $work = Join-Path $env:GITHUB_WORKSPACE '.ci-work'
@@ -104,7 +109,9 @@ jobs:
           key: ${{ steps.native-cache.outputs.cache-primary-key }}
       - name: Native coverage instrumentation
         if: matrix.id == 'linux-x64'
-        run: ./target/release/xtask ci-coverage --phase start
+        run: |
+          & $env:CI_XTASK ci-coverage --phase start
+          if ($LASTEXITCODE -ne 0) { throw 'Coverage instrumentation setup failed' }
       - name: Rust formatting
         run: |
           cargo fmt --all --check
@@ -232,7 +239,9 @@ jobs:
       - name: Actual Rust media FFI AddressSanitizer admission
         if: matrix.id == 'linux-x64'
         timeout-minutes: 19
-        run: ./target/release/xtask ci-media-sanitizer
+        run: |
+          & $env:CI_XTASK ci-media-sanitizer
+          if ($LASTEXITCODE -ne 0) { throw 'Native media sanitizer admission failed' }
       - name: Owned worker process fault contracts
         timeout-minutes: 2
         run: |
@@ -371,7 +380,7 @@ jobs:
       - name: Native coverage floors
         if: matrix.id == 'linux-x64'
         run: |
-          & "$env:GITHUB_WORKSPACE/target/release/xtask" ci-coverage --phase report --target '${{ matrix.target }}'
+          & $env:CI_XTASK ci-coverage --phase report --target '${{ matrix.target }}'
           if ($LASTEXITCODE -ne 0) { throw 'Retained coverage floors failed' }
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

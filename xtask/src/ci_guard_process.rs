@@ -27,11 +27,41 @@ impl Owned {
 
     pub(super) fn cleanup(&mut self, budget: Duration) -> io::Result<()> {
         let started = Instant::now();
-        if !self.active()?.is_empty() {
+        #[cfg(windows)]
+        let mut handles: std::collections::BTreeMap<u32, platform::ProcessHandle> =
+            self.boundary.active_handles()?.into_iter().collect();
+        #[cfg(windows)]
+        let needs_terminate = !handles.is_empty();
+        #[cfg(not(windows))]
+        let needs_terminate = !self.active()?.is_empty();
+        if needs_terminate {
             self.boundary.terminate()?;
         }
         loop {
-            if self.child.try_wait()?.is_some() && self.active()?.is_empty() {
+            #[cfg(windows)]
+            {
+                for (pid, handle) in self.boundary.active_handles()? {
+                    handles.entry(pid).or_insert(handle);
+                }
+                let mut still_live = std::collections::BTreeMap::new();
+                for (pid, handle) in handles {
+                    if !handle.wait(Duration::ZERO)? {
+                        still_live.insert(pid, handle);
+                    }
+                }
+                handles = still_live;
+            }
+            let tree_drained = {
+                #[cfg(windows)]
+                {
+                    handles.is_empty() && self.active()?.is_empty()
+                }
+                #[cfg(not(windows))]
+                {
+                    self.active()?.is_empty()
+                }
+            };
+            if self.child.try_wait()?.is_some() && tree_drained {
                 self.cleaned = true;
                 return Ok(());
             }
@@ -240,6 +270,14 @@ mod platform {
         }
 
         pub(super) fn active(&self) -> io::Result<Vec<u32>> {
+            Ok(self
+                .active_handles()?
+                .into_iter()
+                .map(|(pid, _)| pid)
+                .collect())
+        }
+
+        pub(super) fn active_handles(&self) -> io::Result<Vec<(u32, ProcessHandle)>> {
             let mut list = ProcessIds {
                 assigned: 0,
                 listed: 0,
@@ -271,7 +309,7 @@ mod platform {
                 // Job membership rejects a PID reused between the inventory query and OpenProcess.
                 checked(unsafe { IsProcessInJob(child.0.as_raw_handle(), job, &mut inside) })?;
                 if inside != 0 && !child.wait(Duration::ZERO)? {
-                    live.push(pid);
+                    live.push((pid, child));
                 }
             }
             Ok(live)
