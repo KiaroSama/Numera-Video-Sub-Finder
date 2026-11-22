@@ -202,7 +202,6 @@ pub(crate) fn contracts() -> Result<()> {
             match (reject, observed) {
                 (false, Ok(())) => (),
                 (true, Err(error)) if error.to_string() == "Controlled frontend build failure." => {
-                    ()
                 }
                 (_, Err(error)) => return Err(error),
                 (true, Ok(())) => {

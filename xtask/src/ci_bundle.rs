@@ -5,7 +5,7 @@ mod helpers;
 mod windows;
 
 use crate::{
-    ci_guard::{self, Result, unlinked},
+    ci_guard::{Result, unlinked},
     ci_native_helpers::{
         Member, Session, Target, admission, basename, elf, entries, files, header, json, path_text,
         safe_relative, sha,
@@ -51,7 +51,7 @@ pub(super) fn execute(id: &str, packages: &Path) -> Result<()> {
         id,
         "Desktop bundling is restricted to GitHub-hosted Actions runners.",
     )?;
-    let desktop = root.join("crates/desktop");
+    let desktop = root.join("crates").join("desktop");
     let config = json(&desktop.join("tauri.conf.json"))?;
     let version = config["version"]
         .as_str()
@@ -68,7 +68,7 @@ pub(super) fn execute(id: &str, packages: &Path) -> Result<()> {
     let base_name = format!("Numera-Video-Sub-Finder-{version}-{id}");
     let portable = helpers::owned(&root, &packages.join(&base_name))?;
     let output = helpers::owned(&root, &packages.join("installers").join(id))?;
-    let staging = helpers::owned(&root, &root.join(".ci-work/bundle").join(id))?;
+    let staging = helpers::owned(&root, &root.join(".ci-work").join("bundle").join(id))?;
     fs::create_dir_all(&staging)?;
     let stage = tempfile::Builder::new()
         .prefix("stage-")

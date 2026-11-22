@@ -117,7 +117,7 @@ fn assembly(root: &Path, state: &Path, log: &mut Log) -> Result<PathBuf> {
             started.elapsed().as_millis()
         ),
     )?;
-    directory.keep();
+    let _ = directory.keep();
     *cached = Some(Assembly {
         source: source_hash,
         runtime,

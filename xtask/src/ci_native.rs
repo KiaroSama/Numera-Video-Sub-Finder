@@ -46,12 +46,12 @@ pub(super) fn execute(id: &str, stage_media: bool) -> Result<()> {
         id,
         "Native dependency provisioning is restricted to GitHub-hosted Actions runners.",
     )?;
-    let work = root.join(".ci-work/native");
+    let work = root.join(".ci-work").join("native");
     if path_text(&work)?.contains(' ') {
         return Err("Pinned FFmpeg rejects spaces in its source build path; use a space-free hosted checkout.".into());
     }
-    let runtimes = root.join(".ci-work/runtimes");
-    let notices = root.join(".ci-work/native-notices");
+    let runtimes = root.join(".ci-work").join("runtimes");
+    let notices = root.join(".ci-work").join("native-notices");
     let run = Session::new(&root, "native", "NATIVE-CI")?;
     for dir in [
         &work,
@@ -69,7 +69,7 @@ pub(super) fn execute(id: &str, stage_media: bool) -> Result<()> {
     let mut native = Native {
         prefix: work.join("installed").join(&target.triplet),
         vcpkg: work.join("vcpkg"),
-        overlay: root.join("ci/triplets"),
+        overlay: root.join("ci").join("triplets"),
         root,
         target,
         source,
@@ -216,8 +216,8 @@ impl Native {
             .arg(format!("--overlay-triplets={}", self.overlay.display()))
             .arg(format!("--x-manifest-root={}", self.root.display()))
             .arg(format!(
-                "--x-install-root={}/installed",
-                self.work.display()
+                "--x-install-root={}",
+                self.work.join("installed").display()
             ))
             .arg("--disable-metrics");
         self.run.command(

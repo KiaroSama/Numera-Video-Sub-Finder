@@ -133,7 +133,7 @@ impl Bundle {
         fs::create_dir_all(&evidence)?;
         executable_icons::verify(
             binary,
-            &self.desktop.join("icons/icon.ico"),
+            &self.desktop.join("icons").join("icon.ico"),
             &evidence.join(format!("{label}.json")),
         )?;
         self.icons.push(label.to_owned());
@@ -155,7 +155,10 @@ impl Bundle {
             ("NVSF_SIGNING_TEMP", temp),
             ("NVSF_SIGNING_LEDGER", ledger),
             ("NVSF_SIGNING_XTASK", xtask.clone()),
-            ("NVSF_SIGNING_ICON", self.desktop.join("icons/icon.ico")),
+            (
+                "NVSF_SIGNING_ICON",
+                self.desktop.join("icons").join("icon.ico"),
+            ),
         ] {
             self.run.set(key, path);
         }

@@ -416,7 +416,9 @@ pub(crate) fn disable() -> Result<()> {
 fn signtool() -> Result<PathBuf> {
     let kits =
         PathBuf::from(env::var_os("ProgramFiles(x86)").ok_or("Windows SDK root is unavailable.")?)
-            .join("Windows Kits/10/bin");
+            .join("Windows Kits")
+            .join("10")
+            .join("bin");
     let mut versions = Vec::new();
     for entry in fs::read_dir(kits)? {
         let entry = entry?;
@@ -584,7 +586,7 @@ pub(super) fn sign_allowlisted(path: &Path) -> Result<()> {
         &mut record,
         &json!({"schema":1,"role":role,"file":file,"bytes":size,"sha256":digest}),
     )?;
-    record.keep()?;
+    let _ = record.keep()?;
     println!("development-signing role={role} file={file}");
     Ok(())
 }

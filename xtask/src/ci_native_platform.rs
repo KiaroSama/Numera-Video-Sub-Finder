@@ -107,7 +107,9 @@ pub(super) fn bootstrap(native: &mut Native) -> Result<()> {
             .get("ProgramFiles(x86)")
             .ok_or("ProgramFiles(x86) is unavailable.")?,
     )
-    .join("Microsoft Visual Studio/Installer/vswhere.exe");
+    .join("Microsoft Visual Studio")
+    .join("Installer")
+    .join("vswhere.exe");
     let arm = native.target.arch == "arm64";
     let component = if arm {
         "Microsoft.VisualStudio.Component.VC.Tools.ARM64"
@@ -155,7 +157,10 @@ pub(super) fn bootstrap(native: &mut Native) -> Result<()> {
         registry_opt_out(native, &sqm, view)?;
     }
     native.run.log("INFO", &format!("Hosted Visual Studio version={version} optional telemetry opt-outs verified views=64,32."))?;
-    let shell = vs.join("Common7/Tools/Launch-VsDevShell.ps1");
+    let shell = vs
+        .join("Common7")
+        .join("Tools")
+        .join("Launch-VsDevShell.ps1");
     if !shell.is_file() {
         return Err("Installed Visual Studio developer environment entry point is missing.".into());
     }
@@ -248,12 +253,20 @@ foreach ($name in @('PATH','INCLUDE','LIB','LIBPATH','VCINSTALLDIR','VCToolsInst
             native
                 .run
                 .get("ProgramFiles")
-                .map(|base| PathBuf::from(base).join("LLVM/bin")),
+                .map(|base| PathBuf::from(base).join("LLVM").join("bin")),
         )
         .chain([
-            vs.join("VC/Tools/LLVM/ARM64/bin"),
-            vs.join("VC/Tools/LLVM/x64/bin"),
-            vs.join("VC/Tools/LLVM/bin"),
+            vs.join("VC")
+                .join("Tools")
+                .join("LLVM")
+                .join("ARM64")
+                .join("bin"),
+            vs.join("VC")
+                .join("Tools")
+                .join("LLVM")
+                .join("x64")
+                .join("bin"),
+            vs.join("VC").join("Tools").join("LLVM").join("bin"),
         ])
         .chain(
             native
@@ -337,8 +350,8 @@ pub(super) fn export(native: &mut Native) -> Result<()> {
     native.run.export(
         "PKG_CONFIG_PATH",
         std::env::join_paths([
-            native.prefix.join("lib/pkgconfig"),
-            native.prefix.join("share/pkgconfig"),
+            native.prefix.join("lib").join("pkgconfig"),
+            native.prefix.join("share").join("pkgconfig"),
         ])?,
     )?;
     for (key, child) in [("LIB", "lib"), ("INCLUDE", "include")] {
@@ -460,7 +473,7 @@ pub(super) fn prepare_runtime(native: &mut Native) -> Result<()> {
     }
     let seeds = staged
         .into_iter()
-        .filter(|file| basename(file).is_ok_and(|name| shared_library(name)))
+        .filter(|file| basename(file).is_ok_and(shared_library))
         .chain(required.iter().map(|name| native.runtimes.join(name)))
         .collect::<std::collections::BTreeSet<_>>()
         .into_iter()
@@ -527,7 +540,8 @@ pub(super) fn closure(native: &mut Native, seeds: &[PathBuf]) -> Result<()> {
                         .get("SystemRoot")
                         .ok_or("Windows system directory is unavailable.")?,
                 )
-                .join("System32/xmllite.dll");
+                .join("System32")
+                .join("xmllite.dll");
                 let machine = pe_machine(&system)?;
                 if machine != expected_machine(&native.target.arch)
                     && !(native.target.arch == "arm64" && machine == 0xa64e)

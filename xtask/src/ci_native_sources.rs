@@ -1,10 +1,10 @@
 use super::Native;
 use crate::{
     ci_guard::{Result, unlinked},
-    ci_native_helpers::{Member, basename, entries, files, lower_hex, path_text, sha},
+    ci_native_helpers::{Member, basename, files, lower_hex, path_text, sha},
 };
 use serde_json::{Map, Value, json};
-use std::{fs, path::Path, process::Command};
+use std::{fs, process::Command};
 
 const ORT_URL: &str = "https://api.nuget.org/v3-flatcontainer/microsoft.ml.onnxruntime/1.31.0/microsoft.ml.onnxruntime.1.31.0.nupkg";
 const ORT_ARCHIVE: &str = "microsoft.ml.onnxruntime.1.31.0.nupkg";
@@ -70,12 +70,11 @@ pub(super) fn onnx(native: &mut Native) -> Result<()> {
     let prefix = format!("{}/", pin.native);
     let mut selected = std::collections::BTreeMap::new();
     for (name, size) in zip_members(native, archive_text)? {
-        if let Some(library) = ort_member(&name, &prefix) {
-            if !(1..=1_073_741_824).contains(&size)
-                || selected.insert(name, (size, library)).is_some()
-            {
-                return Err("Unbounded or duplicate selected ONNX member.".into());
-            }
+        if let Some(library) = ort_member(&name, &prefix)
+            && (!(1..=1_073_741_824).contains(&size)
+                || selected.insert(name, (size, library)).is_some())
+        {
+            return Err("Unbounded or duplicate selected ONNX member.".into());
         }
     }
     let main = if cfg!(windows) {
@@ -236,8 +235,16 @@ pub(super) fn llama(native: &mut Native) -> Result<Map<String, Value>> {
         ["-C", repo, "checkout", "--detach", COMMIT],
         (300, 120),
     )?;
-    let patch = native.root.join("ci/patches/llama-bf16-neon.patch");
-    let kernel = source.join("ggml/src/ggml-cpu/vec.cpp");
+    let patch = native
+        .root
+        .join("ci")
+        .join("patches")
+        .join("llama-bf16-neon.patch");
+    let kernel = source
+        .join("ggml")
+        .join("src")
+        .join("ggml-cpu")
+        .join("vec.cpp");
     if sha(&patch)? != PATCH
         || sha(&kernel)? != "31e43ec66a1e2920a549dd2f71e6ce474e68f2fc298c4d2942404ca327e763d1"
     {
@@ -260,7 +267,7 @@ pub(super) fn llama(native: &mut Native) -> Result<Map<String, Value>> {
     }
     let build = native.work.join("llama-build");
     let source_option = format!("-DNVSF_LLAMA_SOURCE={repo}");
-    let native_tests = native.root.join("ci/native-tests");
+    let native_tests = native.root.join("ci").join("native-tests");
     let mut configure = vec![
         "-S",
         path_text(&native_tests)?,
