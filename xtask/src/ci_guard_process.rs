@@ -416,7 +416,7 @@ mod platform {
         let mut gate = std::fs::File::from(raw_stdin);
         let mut token = [0];
         gate.read_exact(&mut token)?;
-        if token != [b'G'] {
+        if token != *b"G" {
             return Err("Invalid Windows ownership gate.".into());
         }
         let status = Command::new(executable)

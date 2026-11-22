@@ -184,6 +184,96 @@ fn default_srt_destination(
     parent.join(format!("{stem}-nvsf.srt"))
 }
 
+pub(crate) fn accept_dropped_paths_with<F>(
+    host: &Host,
+    paths: Vec<String>,
+    config: ExtractConfig,
+    mut probe: F,
+) -> Result<DropOutcome>
+where
+    F: FnMut(&Path) -> Result<nvsf_core::MediaInfo>,
+{
+    let raw_paths: Vec<PathBuf> = paths.into_iter().map(PathBuf::from).collect();
+    let resolved = resolve_dropped_paths(&raw_paths);
+    if resolved.videos.is_empty() {
+        return Err("No supported video files were found in the dropped files or folders.".into());
+    }
+
+    if resolved.videos.len() == 1 && !resolved.from_folder {
+        let source = files::grant_source_with(host, &resolved.videos[0], None, |path| probe(path))?;
+        return Ok(DropOutcome {
+            kind: "single".into(),
+            source: Some(source),
+            queued: Vec::new(),
+            added_count: 1,
+            skipped_unsupported: resolved.skipped_unsupported,
+            truncated: resolved.truncated,
+            errors: Vec::new(),
+        });
+    }
+
+    let mut reserved: HashSet<PathBuf> = {
+        let store = lock(&host.0.queue)?;
+        store.check()?;
+        store
+            .file
+            .records
+            .iter()
+            .map(|r| r.output.clone())
+            .collect()
+    };
+
+    let mut added_count = 0usize;
+    let mut errors = Vec::new();
+    for video in &resolved.videos {
+        let source = match files::grant_source_with(host, video, None, |path| probe(path)) {
+            Ok(source) => source,
+            Err(err) => {
+                errors.push(format!("{}: {err}", video.display()));
+                continue;
+            }
+        };
+        let output_path = default_srt_destination(video, &mut reserved, config.overwrite);
+        let destination = match files::grant_output(host, &output_path) {
+            Ok(dest) => dest,
+            Err(err) => {
+                errors.push(format!("{}: {err}", video.display()));
+                continue;
+            }
+        };
+        let _operation = lock(&host.0.operation)?;
+        match queue::register_with(
+            host,
+            &source.token,
+            &destination.token,
+            config.clone(),
+            |_| Ok(source.media.clone()),
+        ) {
+            Ok(_) => added_count += 1,
+            Err(err) => errors.push(format!("{}: {err}", video.display())),
+        }
+    }
+
+    let queued = lock(&host.0.queue)?.entries()?;
+    if added_count == 0 {
+        let summary = errors
+            .first()
+            .cloned()
+            .unwrap_or_else(|| "Dropped videos could not be added to the queue.".into());
+        return Err(summary);
+    }
+
+    Ok(DropOutcome {
+        kind: "queue".into(),
+        source: None,
+        queued,
+        added_count,
+        skipped_unsupported: resolved.skipped_unsupported,
+        truncated: resolved.truncated,
+        errors,
+    })
+}
+
 #[tauri::command]
 pub async fn accept_dropped_paths(
     host: tauri::State<'_, Host>,
@@ -192,90 +282,8 @@ pub async fn accept_dropped_paths(
 ) -> Result<DropOutcome> {
     let host = host.inner().clone();
     blocking(move || {
-        let raw_paths: Vec<PathBuf> = paths.into_iter().map(PathBuf::from).collect();
-        let resolved = resolve_dropped_paths(&raw_paths);
-        if resolved.videos.is_empty() {
-            return Err(
-                "No supported video files were found in the dropped files or folders.".into(),
-            );
-        }
-
-        if resolved.videos.len() == 1 && !resolved.from_folder {
-            let source = files::grant_source_with(&host, &resolved.videos[0], None, |path| {
-                files::probe_source(&host, path)
-            })?;
-            return Ok(DropOutcome {
-                kind: "single".into(),
-                source: Some(source),
-                queued: Vec::new(),
-                added_count: 1,
-                skipped_unsupported: resolved.skipped_unsupported,
-                truncated: resolved.truncated,
-                errors: Vec::new(),
-            });
-        }
-
-        let mut reserved: HashSet<PathBuf> = {
-            let store = lock(&host.0.queue)?;
-            store.check()?;
-            store
-                .file
-                .records
-                .iter()
-                .map(|r| r.output.clone())
-                .collect()
-        };
-
-        let mut added_count = 0usize;
-        let mut errors = Vec::new();
-        for video in &resolved.videos {
-            let source = match files::grant_source_with(&host, video, None, |path| {
-                files::probe_source(&host, path)
-            }) {
-                Ok(source) => source,
-                Err(err) => {
-                    errors.push(format!("{}: {err}", video.display()));
-                    continue;
-                }
-            };
-            let output_path = default_srt_destination(video, &mut reserved, config.overwrite);
-            let destination = match files::grant_output(&host, &output_path) {
-                Ok(dest) => dest,
-                Err(err) => {
-                    errors.push(format!("{}: {err}", video.display()));
-                    continue;
-                }
-            };
-            let _operation = lock(&host.0.operation)?;
-            match queue::register_with(
-                &host,
-                &source.token,
-                &destination.token,
-                config.clone(),
-                |_| Ok(source.media.clone()),
-            ) {
-                Ok(_) => added_count += 1,
-                Err(err) => errors.push(format!("{}: {err}", video.display())),
-            }
-        }
-
-        let queued = lock(&host.0.queue)?.entries()?;
-        if added_count == 0 {
-            let summary = errors
-                .first()
-                .cloned()
-                .unwrap_or_else(|| "Dropped videos could not be added to the queue.".into());
-            return Err(summary);
-        }
-
-        Ok(DropOutcome {
-            kind: "queue".into(),
-            source: None,
-            queued,
-            added_count,
-            skipped_unsupported: resolved.skipped_unsupported,
-            truncated: resolved.truncated,
-            errors,
+        accept_dropped_paths_with(&host, paths, config, |path| {
+            files::probe_source(&host, path)
         })
     })
     .await
@@ -345,5 +353,145 @@ mod tests {
         let second = default_srt_destination(&video, &mut reserved, false);
         assert_eq!(first, dir.path().join("episode.srt"));
         assert_eq!(second, dir.path().join("episode-1.srt"));
+        fs::write(&first, b"existing").expect("existing srt");
+        let mut fresh = HashSet::new();
+        let preserved = default_srt_destination(&video, &mut fresh, false);
+        assert_eq!(preserved, dir.path().join("episode-1.srt"));
+        let mut overwrite = HashSet::new();
+        let replaced = default_srt_destination(&video, &mut overwrite, true);
+        assert_eq!(replaced, first);
+    }
+
+    fn test_host(root: &Path) -> Host {
+        let paths = nvsf_app::Paths::new(Some(root)).expect("paths");
+        let log = nvsf_app::logging::Log::new(&paths, "nvsf-desktop");
+        Host::new(paths, log)
+    }
+
+    fn sample_media() -> nvsf_core::MediaInfo {
+        nvsf_core::MediaInfo {
+            width: 1280,
+            height: 720,
+            duration_ms: Some(4000),
+            codec: "h264".into(),
+            time_base_num: 1,
+            time_base_den: 1000,
+            subtitle_streams: 0,
+            rotation: 0,
+        }
+    }
+
+    #[test]
+    fn accept_dropped_single_video_opens_extract_source() {
+        let dir = tempdir().expect("tempdir");
+        let host = test_host(dir.path());
+        let video = dir.path().join("clip.mp4");
+        fs::write(&video, b"fake-mp4-bytes").expect("write video");
+        let outcome = accept_dropped_paths_with(
+            &host,
+            vec![video.to_string_lossy().into_owned()],
+            ExtractConfig::default(),
+            |_| Ok(sample_media()),
+        )
+        .expect("single drop");
+        assert_eq!(outcome.kind, "single");
+        assert!(outcome.source.is_some());
+        assert_eq!(outcome.added_count, 1);
+        assert!(outcome.queued.is_empty());
+        assert!(outcome.errors.is_empty());
+    }
+
+    #[test]
+    fn accept_dropped_folder_queues_videos_and_skips_unsupported() {
+        let dir = tempdir().expect("tempdir");
+        let host = test_host(dir.path());
+        let folder = dir.path().join("batch");
+        fs::create_dir_all(&folder).expect("mkdir");
+        let first = folder.join("a.mp4");
+        let second = folder.join("b.mkv");
+        let ignored = folder.join("notes.txt");
+        fs::write(&first, b"video-a").expect("write a");
+        fs::write(&second, b"video-b").expect("write b");
+        fs::write(&ignored, b"text").expect("write txt");
+        let outcome = accept_dropped_paths_with(
+            &host,
+            vec![folder.to_string_lossy().into_owned()],
+            ExtractConfig::default(),
+            |_| Ok(sample_media()),
+        )
+        .expect("folder drop");
+        assert_eq!(outcome.kind, "queue");
+        assert!(outcome.source.is_none());
+        assert_eq!(outcome.added_count, 2);
+        assert_eq!(outcome.skipped_unsupported, 1);
+        assert_eq!(outcome.queued.len(), 2);
+        assert!(outcome.errors.is_empty());
+    }
+
+    #[test]
+    fn accept_dropped_paths_rejects_empty_and_reports_probe_errors() {
+        let dir = tempdir().expect("tempdir");
+        let host = test_host(dir.path());
+        let note = dir.path().join("readme.txt");
+        fs::write(&note, b"text").expect("write txt");
+        let empty_err = accept_dropped_paths_with(
+            &host,
+            vec![note.to_string_lossy().into_owned()],
+            ExtractConfig::default(),
+            |_| Ok(sample_media()),
+        )
+        .expect_err("no videos");
+        assert!(empty_err.contains("No supported video files"));
+
+        let good = dir.path().join("good.mp4");
+        let bad = dir.path().join("bad.mp4");
+        fs::write(&good, b"good-video").expect("write good");
+        fs::write(&bad, b"bad-video").expect("write bad");
+        let partial = accept_dropped_paths_with(
+            &host,
+            vec![
+                good.to_string_lossy().into_owned(),
+                bad.to_string_lossy().into_owned(),
+            ],
+            ExtractConfig::default(),
+            |path| {
+                if path.ends_with("bad.mp4") {
+                    Err("corrupt stream".into())
+                } else {
+                    Ok(sample_media())
+                }
+            },
+        )
+        .expect("partial queue");
+        assert_eq!(partial.kind, "queue");
+        assert_eq!(partial.added_count, 1);
+        assert_eq!(partial.errors.len(), 1);
+        assert!(partial.errors[0].contains("corrupt stream"));
+
+        let all_fail = accept_dropped_paths_with(
+            &host,
+            vec![
+                good.to_string_lossy().into_owned(),
+                bad.to_string_lossy().into_owned(),
+            ],
+            ExtractConfig::default(),
+            |_| Err("probe unavailable".into()),
+        )
+        .expect_err("all failed");
+        assert!(all_fail.contains("probe unavailable"));
+    }
+
+    #[test]
+    fn resolve_dropped_paths_deduplicates_and_truncates_at_cap() {
+        let dir = tempdir().expect("tempdir");
+        let folder = dir.path().join("many");
+        fs::create_dir_all(&folder).expect("mkdir");
+        for idx in 0..=(MAX_DROP_FILES + 2) {
+            fs::write(folder.join(format!("clip-{idx:03}.mp4")), b"x").expect("write clip");
+        }
+        let resolved = resolve_dropped_paths(&[folder.clone(), folder]);
+        assert!(resolved.from_folder);
+        assert!(resolved.truncated);
+        assert_eq!(resolved.videos.len(), MAX_DROP_FILES);
     }
 }
