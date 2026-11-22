@@ -30,6 +30,22 @@ fn select_dir(dir: &Path) -> Result<ReadDir, ()> {
     std::fs::read_dir(dir).map_err(|_| ())
 }
 
+fn select_optional_dir(dir: &Path) -> Result<Option<ReadDir>, ()> {
+    let meta = match std::fs::symlink_metadata(dir) {
+        Ok(m) => m,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(_) => return Err(()),
+    };
+    if is_reparse_or_symlink(&meta) || !meta.is_dir() {
+        return Err(());
+    }
+    match std::fs::read_dir(dir) {
+        Ok(rd) => Ok(Some(rd)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(_) => Err(()),
+    }
+}
+
 struct FileProgress {
     root: PathBuf,
     clock: Instant,
@@ -108,10 +124,15 @@ impl FileProgress {
                         self.files = None;
                         continue;
                     }
+                    Some(Err(e)) if e.kind() == std::io::ErrorKind::NotFound => continue,
                     Some(Err(_)) => return Err(()),
                     Some(Ok(entry)) => {
                         let path = entry.path();
-                        let meta = std::fs::symlink_metadata(&path).map_err(|_| ())?;
+                        let meta = match std::fs::symlink_metadata(&path) {
+                            Ok(m) => m,
+                            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+                            Err(_) => return Err(()),
+                        };
                         if is_reparse_or_symlink(&meta) {
                             return Err(());
                         }
@@ -144,9 +165,17 @@ impl FileProgress {
                     }
                 }
             } else if let Some(next_port) = self.ports.as_mut().and_then(Iterator::next) {
-                let entry = next_port.map_err(|_| ())?;
+                let entry = match next_port {
+                    Ok(e) => e,
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+                    Err(_) => return Err(()),
+                };
                 let path = entry.path();
-                let meta = std::fs::symlink_metadata(&path).map_err(|_| ())?;
+                let meta = match std::fs::symlink_metadata(&path) {
+                    Ok(m) => m,
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+                    Err(_) => return Err(()),
+                };
                 if is_reparse_or_symlink(&meta) {
                     return Err(());
                 }
@@ -157,7 +186,7 @@ impl FileProgress {
                 if self.directories > 513 {
                     return Err(());
                 }
-                self.files = Some(select_dir(&path)?);
+                self.files = select_optional_dir(&path)?;
             } else {
                 self.ports = None;
                 self.previous = std::mem::take(&mut self.current);
