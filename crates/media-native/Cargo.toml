@@ -15,7 +15,7 @@ image.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
-ffmpeg-next = { version = "=9.0.0", default-features = false, features = ["codec", "format", "software-scaling"] }
+ffmpeg-next = { version = "=9.1.0", default-features = false, features = ["codec", "format", "software-scaling"] }
 
 [lints]
 workspace = true
