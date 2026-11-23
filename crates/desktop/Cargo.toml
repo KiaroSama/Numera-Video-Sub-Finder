@@ -33,7 +33,7 @@ tempfile.workspace = true
 tauri = { version = "=2.12.5", features = ["test"] }
 
 [build-dependencies]
-tauri-build = { version = "=2.7.4", features = [] }
+tauri-build = { version = "=2.7.6", features = [] }
 
 [lints]
 workspace = true
