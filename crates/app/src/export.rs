@@ -2,6 +2,39 @@ use crate::{Result, fail, storage::AtomicOutput};
 use nvsf_core::{Project, export_ass, export_srt, export_vtt};
 use std::path::Path;
 
+/// Retains every validated output and its admission policy until publication.
+pub struct PreparedExport {
+    outputs: Vec<(AtomicOutput, String)>,
+}
+
+impl PreparedExport {
+    /// Binds the complete output set before asking whether existing entries may be replaced.
+    pub fn for_confirmation(
+        project: &Project,
+        path: &Path,
+        format: &str,
+        bom: bool,
+        crlf: bool,
+    ) -> Result<(Self, bool)> {
+        let prepared = prepare_export(project, path, format, true, bom, crlf, |_| Ok(()))?;
+        let requires_confirmation = prepared
+            .outputs
+            .iter()
+            .any(|(output, _)| output.replaces_existing());
+        Ok((prepared, requires_confirmation))
+    }
+
+    pub fn publish(mut self) -> Result<()> {
+        // Each file is atomic; filesystems cannot atomically rename several separate track files.
+        // Write separated tracks first and publish the selected primary track last.
+        self.outputs.rotate_left(1);
+        for (output, text) in self.outputs {
+            output.write(text.as_bytes())?;
+        }
+        Ok(())
+    }
+}
+
 pub fn export_project(
     project: &Project,
     path: &Path,
@@ -20,8 +53,20 @@ pub(crate) fn export_project_checked(
     overwrite: bool,
     bom: bool,
     crlf: bool,
-    mut admit: impl FnMut(&AtomicOutput) -> Result<()>,
+    admit: impl FnMut(&AtomicOutput) -> Result<()>,
 ) -> Result<()> {
+    prepare_export(project, path, format, overwrite, bom, crlf, admit)?.publish()
+}
+
+fn prepare_export(
+    project: &Project,
+    path: &Path,
+    format: &str,
+    overwrite: bool,
+    bom: bool,
+    crlf: bool,
+    mut admit: impl FnMut(&AtomicOutput) -> Result<()>,
+) -> Result<PreparedExport> {
     project.validate()?;
     let text = match format {
         "srt" => export_srt(&project.cues, bom, crlf)?,
@@ -75,13 +120,7 @@ pub(crate) fn export_project_checked(
         admit(&output)?;
         prepared.push((output, text));
     }
-    // Each file is atomic; filesystems cannot atomically rename several separate track files.
-    // Write separated tracks first and publish the selected primary track last.
-    prepared.rotate_left(1);
-    for (output, text) in prepared {
-        output.write(text.as_bytes())?;
-    }
-    Ok(())
+    Ok(PreparedExport { outputs: prepared })
 }
 
 #[cfg(test)]

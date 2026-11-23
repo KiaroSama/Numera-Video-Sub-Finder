@@ -101,13 +101,15 @@ pub(crate) fn import_model_from(
     if !source.is_file() {
         return Err("Select a regular ONNX model file".into());
     }
-    if host.0.paths.models.join(format!("{id}.onnx")).exists() && !confirm() {
+    let (prepared, exists) =
+        nvsf_app::models::prepare_import(&host.0.paths, id, &source).map_err(|e| e.to_string())?;
+    if exists && !confirm() {
         return Ok(None);
     }
     if host.0.model_cancel.load(Ordering::Acquire) {
         return Err("Model import cancelled before activation".into());
     }
-    nvsf_app::models::import_model(&host.0.paths, id, &source).map_err(|e| e.to_string())?;
+    prepared.publish().map_err(|e| e.to_string())?;
     host.0.log.event(
         "INFO",
         "MODELS",
@@ -162,6 +164,10 @@ pub(crate) fn export_model_to(
     );
     Ok(display_name(destination))
 }
+
+#[cfg(test)]
+#[path = "model_manager_import_tests.rs"]
+mod import_tests;
 
 #[cfg(test)]
 mod tests {

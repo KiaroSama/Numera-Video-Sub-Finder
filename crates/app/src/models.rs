@@ -1,9 +1,14 @@
 use crate::{
     Paths, Result, fail,
-    storage::{hash_file, write_atomic},
+    storage::{AtomicOutput, hash_file, hash_reader},
 };
 use serde::{Deserialize, Serialize};
-use std::{fs::File, io::Read, path::Path, sync::atomic::AtomicBool};
+use std::{
+    fs::File,
+    io::{Read, Seek},
+    path::Path,
+    sync::atomic::AtomicBool,
+};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ModelSpec {
@@ -235,26 +240,78 @@ pub fn export_model(paths: &Paths, id: &str, destination: &Path) -> Result<()> {
 }
 
 pub fn import_model(paths: &Paths, id: &str, source: &Path) -> Result<()> {
+    prepare_import(paths, id, source)?.0.publish()
+}
+
+pub struct PreparedModelImport {
+    spec: ModelSpec,
+    source: File,
+    output: AtomicOutput,
+}
+
+pub fn prepare_import(
+    paths: &Paths,
+    id: &str,
+    source: &Path,
+) -> Result<(PreparedModelImport, bool)> {
     let spec = specs()?
         .into_iter()
         .find(|m| m.id == id)
         .ok_or_else(|| fail("Unknown model identifier"))?;
-    if source.metadata()?.len() != spec.bytes || hash_file(source)? != spec.sha256 {
-        return Err(fail("Import checksum mismatch"));
-    }
-    let mut bytes = Vec::with_capacity(spec.bytes as usize);
-    File::open(source)?
-        .take(spec.bytes + 1)
-        .read_to_end(&mut bytes)?;
-    use sha2::{Digest, Sha256};
-    let hash: String = Sha256::digest(&bytes)
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect();
-    if bytes.len() as u64 != spec.bytes || hash != spec.sha256 {
-        return Err(fail(
-            "Model changed during import; existing model preserved",
-        ));
-    }
-    write_atomic(&paths.models.join(format!("{id}.onnx")), &bytes, true)
+    prepare_import_with_spec(paths, spec, source)
 }
+
+fn prepare_import_with_spec(
+    paths: &Paths,
+    spec: ModelSpec,
+    source: &Path,
+) -> Result<(PreparedModelImport, bool)> {
+    if !source.is_file() {
+        return Err(fail("Select a regular ONNX model file"));
+    }
+    let source = File::open(source)?;
+    if !source.metadata()?.is_file() {
+        return Err(fail("Select a regular ONNX model file"));
+    }
+    let (output, exists) =
+        AtomicOutput::for_confirmation(&paths.models.join(format!("{}.onnx", spec.id)))?;
+    Ok((
+        PreparedModelImport {
+            spec,
+            source,
+            output,
+        },
+        exists,
+    ))
+}
+
+impl PreparedModelImport {
+    pub fn publish(mut self) -> Result<()> {
+        self.source.rewind()?;
+        if self.source.metadata()?.len() != self.spec.bytes
+            || hash_reader((&mut self.source).take(self.spec.bytes + 1))? != self.spec.sha256
+        {
+            return Err(fail("Import checksum mismatch"));
+        }
+        self.source.rewind()?;
+        let mut bytes = Vec::with_capacity(self.spec.bytes as usize);
+        (&mut self.source)
+            .take(self.spec.bytes + 1)
+            .read_to_end(&mut bytes)?;
+        use sha2::{Digest, Sha256};
+        let hash: String = Sha256::digest(&bytes)
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
+        if bytes.len() as u64 != self.spec.bytes || hash != self.spec.sha256 {
+            return Err(fail(
+                "Model changed during import; existing model preserved",
+            ));
+        }
+        self.output.write(&bytes)
+    }
+}
+
+#[cfg(test)]
+#[path = "models_import_tests.rs"]
+mod import_tests;

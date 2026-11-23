@@ -138,13 +138,15 @@ enum OpenMode {
     Read,
     Create,
     Inspect,
+    Lock,
 }
 
 fn open_relative(directory: &File, name: &OsStr, mode: OpenMode) -> io::Result<File> {
-    let (create, inspect) = match mode {
-        OpenMode::Read => (false, false),
-        OpenMode::Create => (true, false),
-        OpenMode::Inspect => (false, true),
+    let (create, inspect, lock) = match mode {
+        OpenMode::Read => (false, false, false),
+        OpenMode::Create => (true, false, false),
+        OpenMode::Inspect => (false, true, false),
+        OpenMode::Lock => (false, false, true),
     };
     validate_name(name)?;
     let mut name: Vec<_> = name.encode_wide().collect();
@@ -168,8 +170,8 @@ fn open_relative(directory: &File, name: &OsStr, mode: OpenMode) -> io::Result<F
     let mut handle = std::ptr::null_mut();
     let access = if inspect {
         SYNCHRONIZE | FILE_READ_ATTRIBUTES
-    } else if create {
-        0x00120116 | FILE_READ_ATTRIBUTES | DELETE // FILE_GENERIC_WRITE plus metadata and rename/delete.
+    } else if create || lock {
+        0x0012019f | if create { DELETE } else { 0 } // FILE_GENERIC_READ | FILE_GENERIC_WRITE; temporary publication also needs DELETE.
     } else {
         SYNCHRONIZE | FILE_READ_ATTRIBUTES | 1 // FILE_READ_DATA
     };
@@ -184,7 +186,13 @@ fn open_relative(directory: &File, name: &OsStr, mode: OpenMode) -> io::Result<F
             std::ptr::null(),
             0x80, // FILE_ATTRIBUTE_NORMAL
             if create { 1 } else { 1 | 2 | 4 },
-            if create { 2 } else { 1 }, // FILE_CREATE (exclusive) or FILE_OPEN.
+            if lock {
+                3
+            } else if create {
+                2
+            } else {
+                1
+            }, // FILE_OPEN_IF (no truncation), FILE_CREATE (exclusive), or FILE_OPEN.
             0x20 | 0x00200000 | if inspect { 0 } else { 0x40 }, // SYNCHRONOUS_IO_NONALERT | OPEN_REPARSE_POINT, optionally NON_DIRECTORY_FILE.
             std::ptr::null(),
             0,
@@ -213,6 +221,10 @@ pub(super) fn open_file(directory: &File, name: &OsStr) -> io::Result<File> {
 
 pub(super) fn create_file(directory: &File, name: &OsStr) -> io::Result<File> {
     open_relative(directory, name, OpenMode::Create)
+}
+
+pub(super) fn open_lock_file(directory: &File, name: &OsStr) -> io::Result<File> {
+    open_relative(directory, name, OpenMode::Lock)
 }
 
 pub(super) fn open_source_file(directory: &File, name: &OsStr) -> io::Result<Option<File>> {

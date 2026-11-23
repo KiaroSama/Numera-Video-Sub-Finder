@@ -70,18 +70,14 @@ pub(crate) fn import_language_from(
     source: &std::path::Path,
     confirm: impl FnOnce() -> bool,
 ) -> Result<Option<String>> {
-    if host
-        .0
-        .paths
-        .models
-        .join("tessdata")
-        .join(format!("{language}.traineddata"))
-        .exists()
-        && !confirm()
-    {
+    let (prepared, exists) =
+        nvsf_app::languages::prepare_import(&host.0.paths, language, source, &host.0.model_cancel)
+            .map_err(|e| e.to_string())?;
+    if exists && !confirm() {
         return Ok(None);
     }
-    nvsf_app::languages::import(&host.0.paths, language, source, &host.0.model_cancel)
+    prepared
+        .publish(&host.0.model_cancel)
         .map_err(|e| e.to_string())?;
     Ok(Some(language.into()))
 }
@@ -124,6 +120,10 @@ pub(crate) fn export_language_to(
     nvsf_app::languages::export(&host.0.paths, language, destination).map_err(|e| e.to_string())?;
     Ok(display_name(destination))
 }
+
+#[cfg(test)]
+#[path = "language_manager_import_tests.rs"]
+mod import_tests;
 
 #[cfg(test)]
 mod tests {

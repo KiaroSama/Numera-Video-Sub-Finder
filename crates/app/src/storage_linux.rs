@@ -106,7 +106,11 @@ pub(super) fn open_source_file(directory: &File, name: &OsStr) -> io::Result<Opt
 }
 
 pub(super) fn create_file(directory: &File, name: &OsStr) -> io::Result<File> {
-    open_relative(directory, name, 1 | 0x40 | 0x80) // O_WRONLY | O_CREAT | O_EXCL
+    open_relative(directory, name, 2 | 0x40 | 0x80) // O_RDWR | O_CREAT | O_EXCL
+}
+
+pub(super) fn open_lock_file(directory: &File, name: &OsStr) -> io::Result<File> {
+    open_relative(directory, name, 2 | 0x40 | O_NONBLOCK) // O_RDWR | O_CREAT; never truncate.
 }
 
 pub(super) fn publish(

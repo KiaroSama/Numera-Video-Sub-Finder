@@ -333,12 +333,13 @@ pub(crate) fn export_project_to(
     crlf: bool,
     confirm: impl FnOnce() -> Result<bool>,
 ) -> Result<Option<String>> {
-    let overwrite = path.exists();
+    let (prepared, overwrite) =
+        nvsf_app::export::PreparedExport::for_confirmation(project, path, format, bom, crlf)
+            .map_err(|e| e.to_string())?;
     if overwrite && !confirm()? {
         return Ok(None);
     }
-    nvsf_app::export_project(project, path, format, overwrite, bom, crlf)
-        .map_err(|e| e.to_string())?;
+    prepared.publish().map_err(|e| e.to_string())?;
     Ok(Some(display_name(path)))
 }
 

@@ -7,6 +7,9 @@ use nvsf_core::{Cue, ExtractConfig, MediaInfo, Project, Rect};
 use std::sync::atomic::Ordering;
 use tauri::Manager;
 
+#[path = "export_confirmation_tests.rs"]
+mod export_confirmation_tests;
+
 fn workspace() -> (tempfile::TempDir, tauri::App<tauri::test::MockRuntime>) {
     let directory = tempfile::tempdir().unwrap();
     let paths = nvsf_app::Paths::new(Some(directory.path())).unwrap();

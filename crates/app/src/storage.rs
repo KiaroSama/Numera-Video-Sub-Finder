@@ -24,7 +24,7 @@ pub fn hash_file(path: &Path) -> Result<String> {
     hash_reader(File::open(path)?)
 }
 
-fn hash_reader(mut file: File) -> Result<String> {
+pub(crate) fn hash_reader(mut file: impl Read) -> Result<String> {
     let mut hash = Sha256::new();
     let mut buffer = [0u8; 64 * 1024];
     loop {
@@ -167,6 +167,11 @@ impl AtomicOutput {
         })
     }
 
+    /// Returns the retained admission snapshot used for replacement publication.
+    pub(crate) fn replaces_existing(&self) -> bool {
+        self.replace_existing
+    }
+
     /// Returns one bound existence decision for overwrite confirmation and publication.
     pub fn for_confirmation(path: &Path) -> Result<(Self, bool)> {
         let entry = BoundEntry::open(path)?;
@@ -190,6 +195,14 @@ impl AtomicOutput {
             },
             self.overwrite_allowed,
         )
+    }
+
+    pub(crate) fn lock_sibling(&self, name: &OsStr) -> Result<JobLock> {
+        let file = native::open_lock_file(&self.entry.directory, name)?;
+        if !file.metadata()?.is_file() {
+            return Err(fail("Import lock must be a regular file"));
+        }
+        JobLock::from_file(file)
     }
 
     pub fn conflicts_with(&self, path: &Path) -> Result<bool> {
@@ -246,8 +259,15 @@ impl AtomicOutput {
     }
 
     pub fn write(self, bytes: &[u8]) -> Result<()> {
+        self.write_with(|file| {
+            file.write_all(bytes)?;
+            Ok(())
+        })
+    }
+
+    pub(crate) fn write_with(self, write: impl FnOnce(&mut File) -> Result<()>) -> Result<()> {
         let mut temporary = Temporary::create(&self.entry.directory)?;
-        temporary.file.write_all(bytes)?;
+        write(&mut temporary.file)?;
         temporary.file.sync_all()?;
         native::publish(
             &self.entry.directory,
@@ -333,6 +353,10 @@ impl JobLock {
             .read(true)
             .write(true)
             .open(path)?;
+        Self::from_file(file)
+    }
+
+    fn from_file(file: File) -> Result<Self> {
         file.try_lock_exclusive()
             .map_err(|_| fail("Job already open in another process"))?;
         Ok(Self(file))
@@ -343,6 +367,10 @@ impl Drop for JobLock {
         let _ = FileExt::unlock(&self.0);
     }
 }
+
+#[cfg(test)]
+#[path = "storage_import_tests.rs"]
+mod import_tests;
 
 #[cfg(test)]
 mod tests {
