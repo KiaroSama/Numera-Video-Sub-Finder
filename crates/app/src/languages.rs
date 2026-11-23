@@ -1,7 +1,13 @@
-use crate::{Paths, Result, fail, storage::hash_file};
+use crate::{
+    Paths, Result, fail,
+    storage::{AtomicOutput, JobLock, hash_file, hash_reader},
+};
 use nvsf_core::languages::{self, Language};
 use serde::Serialize;
 use std::{
+    ffi::OsStr,
+    fs::File,
+    io::{Read, Seek},
     path::{Path, PathBuf},
     sync::atomic::{AtomicBool, Ordering},
 };
@@ -88,42 +94,101 @@ pub fn install(paths: &Paths, code: &str, cancel: &AtomicBool) -> Result<()> {
 }
 
 pub fn import(paths: &Paths, code: &str, source: &Path, cancel: &AtomicBool) -> Result<()> {
-    let language = spec(code)?;
+    prepare_import(paths, code, source, cancel)?
+        .0
+        .publish(cancel)
+}
+
+pub struct PreparedLanguageImport {
+    language: Language,
+    source: File,
+    output: AtomicOutput,
+    lock: JobLock,
+}
+
+pub fn prepare_import(
+    paths: &Paths,
+    code: &str,
+    source: &Path,
+    cancel: &AtomicBool,
+) -> Result<(PreparedLanguageImport, bool)> {
+    prepare_import_with_spec(paths, spec(code)?.clone(), source, cancel)
+}
+
+fn prepare_import_with_spec(
+    paths: &Paths,
+    language: Language,
+    source: &Path,
+    cancel: &AtomicBool,
+) -> Result<(PreparedLanguageImport, bool)> {
     if cancel.load(Ordering::Acquire) {
         return Err(crate::AppError::Cancelled);
     }
-    if !source.is_file()
-        || source.metadata()?.len() != language.bytes
-        || hash_file(source)? != language.sha256
-    {
+    if !source.is_file() {
+        return Err(fail("Language import size or checksum mismatch"));
+    }
+    let source = File::open(source)?;
+    if !source.metadata()?.is_file() {
         return Err(fail("Language import size or checksum mismatch"));
     }
     let root = paths.models.join("tessdata");
     std::fs::create_dir_all(&root)?;
     let destination = root.join(format!("{}.traineddata", language.code));
-    let _lock = crate::storage::JobLock::acquire(&destination.with_extension("download.lock"))?;
-    if destination.is_symlink() {
-        return Err(fail("Language destination must not be a symlink"));
+    let (output, exists) = AtomicOutput::for_confirmation(&destination)?;
+    let lock = output.lock_sibling(OsStr::new(&format!("{}.download.lock", language.code)))?;
+    Ok((
+        PreparedLanguageImport {
+            language,
+            source,
+            output,
+            lock,
+        },
+        exists,
+    ))
+}
+
+impl PreparedLanguageImport {
+    pub fn publish(self, cancel: &AtomicBool) -> Result<()> {
+        let Self {
+            language,
+            mut source,
+            output,
+            lock,
+        } = self;
+        if cancel.load(Ordering::Acquire) {
+            return Err(crate::AppError::Cancelled);
+        }
+        source.rewind()?;
+        if source.metadata()?.len() != language.bytes
+            || hash_reader((&mut source).take(language.bytes + 1))? != language.sha256
+        {
+            return Err(fail("Language import size or checksum mismatch"));
+        }
+        source.rewind()?;
+        let result = output.write_with(move |temporary| {
+            std::io::copy(&mut (&mut source).take(language.bytes + 1), &mut *temporary)?;
+            // Retain the selected source through copying, then release it before native replacement.
+            drop(source);
+            temporary.sync_all()?;
+            if cancel.load(Ordering::Acquire) {
+                return Err(crate::AppError::Cancelled);
+            }
+            temporary.rewind()?;
+            if temporary.metadata()?.len() != language.bytes
+                || hash_reader((&mut *temporary).take(language.bytes + 1))? != language.sha256
+            {
+                return Err(fail(
+                    "Language pack changed during import; previous pack retained",
+                ));
+            }
+            if cancel.load(Ordering::Acquire) {
+                return Err(crate::AppError::Cancelled);
+            }
+            Ok(())
+        });
+        drop(lock);
+        result
     }
-    let mut temporary = tempfile::NamedTempFile::new_in(&root)?;
-    use std::io::Read;
-    std::io::copy(
-        &mut std::fs::File::open(source)?.take(language.bytes + 1),
-        &mut temporary,
-    )?;
-    temporary.as_file().sync_all()?;
-    if cancel.load(Ordering::Acquire) {
-        return Err(crate::AppError::Cancelled);
-    }
-    if temporary.as_file().metadata()?.len() != language.bytes
-        || hash_file(temporary.path())? != language.sha256
-    {
-        return Err(fail(
-            "Language pack changed during import; previous pack retained",
-        ));
-    }
-    temporary.persist(destination).map_err(|e| e.error)?;
-    Ok(())
 }
 
 pub fn export(paths: &Paths, code: &str, destination: &Path) -> Result<()> {
@@ -145,7 +210,22 @@ pub fn export(paths: &Paths, code: &str, destination: &Path) -> Result<()> {
 }
 
 pub fn fingerprint(paths: &Paths, code: &str) -> Result<String> {
+    fingerprint_with_policy(paths, code, false)
+}
+
+pub fn fingerprint_with_policy(
+    paths: &Paths,
+    code: &str,
+    required_acceleration: bool,
+) -> Result<String> {
     let language = spec(code)?;
+    let paddle = languages::paddle_model(code);
+    if required_acceleration && paddle.is_none() {
+        return Err(crate::AppError::Provider(
+            "This language uses Tesseract CPU recognition; required acceleration cannot be met"
+                .into(),
+        ));
+    }
     let mut identities = Vec::new();
     for id in [Some("det"), languages::paddle_model(code)]
         .into_iter()
@@ -157,7 +237,9 @@ pub fn fingerprint(paths: &Paths, code: &str) -> Result<String> {
             .ok_or_else(|| fail("Recognition model identity missing"))?;
         identities.push(format!("{id}:{}:{}", model.sha256, model.metadata_sha256));
     }
-    if verify(paths, code).is_ok() {
+    if required_acceleration {
+        identities.push(format!("{}:verifier-disabled-by-policy", language.code));
+    } else if verify(paths, code).is_ok() {
         identities.push(format!("{}:{}", language.code, language.sha256));
     } else if languages::paddle_model(code).is_none() {
         verify(paths, code)?;
@@ -176,3 +258,7 @@ pub fn fingerprint(paths: &Paths, code: &str) -> Result<String> {
     }
     Ok(identities.join(":"))
 }
+
+#[cfg(test)]
+#[path = "languages_import_tests.rs"]
+mod import_tests;

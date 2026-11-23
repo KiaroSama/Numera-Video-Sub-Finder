@@ -1,6 +1,39 @@
-use crate::{Result, fail, storage::write_atomic};
+use crate::{Result, fail, storage::AtomicOutput};
 use nvsf_core::{Project, export_ass, export_srt, export_vtt};
 use std::path::Path;
+
+/// Retains every validated output and its admission policy until publication.
+pub struct PreparedExport {
+    outputs: Vec<(AtomicOutput, String)>,
+}
+
+impl PreparedExport {
+    /// Binds the complete output set before asking whether existing entries may be replaced.
+    pub fn for_confirmation(
+        project: &Project,
+        path: &Path,
+        format: &str,
+        bom: bool,
+        crlf: bool,
+    ) -> Result<(Self, bool)> {
+        let prepared = prepare_export(project, path, format, true, bom, crlf, |_| Ok(()))?;
+        let requires_confirmation = prepared
+            .outputs
+            .iter()
+            .any(|(output, _)| output.replaces_existing());
+        Ok((prepared, requires_confirmation))
+    }
+
+    pub fn publish(mut self) -> Result<()> {
+        // Each file is atomic; filesystems cannot atomically rename several separate track files.
+        // Write separated tracks first and publish the selected primary track last.
+        self.outputs.rotate_left(1);
+        for (output, text) in self.outputs {
+            output.write(text.as_bytes())?;
+        }
+        Ok(())
+    }
+}
 
 pub fn export_project(
     project: &Project,
@@ -10,6 +43,30 @@ pub fn export_project(
     bom: bool,
     crlf: bool,
 ) -> Result<()> {
+    export_project_checked(project, path, format, overwrite, bom, crlf, |_| Ok(()))
+}
+
+pub(crate) fn export_project_checked(
+    project: &Project,
+    path: &Path,
+    format: &str,
+    overwrite: bool,
+    bom: bool,
+    crlf: bool,
+    admit: impl FnMut(&AtomicOutput) -> Result<()>,
+) -> Result<()> {
+    prepare_export(project, path, format, overwrite, bom, crlf, admit)?.publish()
+}
+
+fn prepare_export(
+    project: &Project,
+    path: &Path,
+    format: &str,
+    overwrite: bool,
+    bom: bool,
+    crlf: bool,
+    mut admit: impl FnMut(&AtomicOutput) -> Result<()>,
+) -> Result<PreparedExport> {
     project.validate()?;
     let text = match format {
         "srt" => export_srt(&project.cues, bom, crlf)?,
@@ -47,26 +104,25 @@ pub fn export_project(
             outputs[0].1 = outputs[1].1.clone();
         }
     }
-    // Preflight the complete set before any export can replace an existing file.
-    for (destination, _) in &outputs {
-        if destination.is_symlink() || destination.is_dir() || (!overwrite && destination.exists())
-        {
-            return Err(fail(
-                "Export set contains an existing or unsafe destination; no output changed",
-            ));
-        }
-        let parent = destination
-            .parent()
-            .filter(|p| !p.as_os_str().is_empty())
-            .unwrap_or(Path::new("."));
-        if !parent.is_dir() {
-            return Err(fail("Export destination directory unavailable"));
-        }
+    // Every generated track shares the primary's pinned parent. Admit the complete
+    // set before publication, retaining each writer through both checks and rename.
+    let mut prepared: Vec<(AtomicOutput, String)> = Vec::with_capacity(outputs.len());
+    for (destination, text) in outputs {
+        let output = match prepared.first() {
+            Some((primary, _)) => primary.sibling(
+                destination
+                    .file_name()
+                    .ok_or_else(|| fail("Missing export filename"))?,
+            )?,
+            None => AtomicOutput::new(&destination, overwrite)?,
+        };
+        output.protect_project_source(project)?;
+        admit(&output)?;
+        prepared.push((output, text));
     }
-    // Each file is atomic; filesystems cannot atomically rename several separate track files.
-    // Write separated tracks first and publish the selected primary track last.
-    for (destination, text) in outputs.iter().skip(1).chain(outputs.iter().take(1)) {
-        write_atomic(destination, text.as_bytes(), overwrite)?;
-    }
-    Ok(())
+    Ok(PreparedExport { outputs: prepared })
 }
+
+#[cfg(test)]
+#[path = "export_publication_tests.rs"]
+mod publication_tests;

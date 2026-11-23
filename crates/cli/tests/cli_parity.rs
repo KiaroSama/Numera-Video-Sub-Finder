@@ -272,6 +272,48 @@ fn project_inspect_search_edit_accept_revert_split_merge_and_save() {
 }
 
 #[test]
+fn project_merge_requires_review_and_revert_restores_both_original_subtitles() {
+    let dir = root();
+    let proj = dir.join("merged.nvsf.json");
+    let proj_str = proj.to_str().expect("utf8 path");
+    write_sample_project(&proj);
+
+    let out = nvsf(
+        &dir,
+        &[
+            "project",
+            "merge-cues",
+            proj_str,
+            "--first",
+            "1",
+            "--second",
+            "2",
+        ],
+    );
+    assert_eq!(out.status.code(), Some(0));
+    let merged = json_stdout(&out);
+    assert_eq!(merged["cue"]["text"], "Opening line\nUncertain line");
+    assert_eq!(merged["cue"]["raw_text"], "Opening line\nUncertain line");
+    assert_eq!(merged["cue"]["reviewed"], false);
+
+    let out = nvsf(&dir, &["project", "inspect", proj_str]);
+    assert_eq!(out.status.code(), Some(0));
+    let inspected = json_stdout(&out);
+    assert_eq!(inspected["counts"]["total"], 1);
+    assert_eq!(inspected["counts"]["unreviewed"], 1);
+    assert_eq!(inspected["review_needed"], true);
+
+    let out = nvsf(&dir, &["project", "revert-cue", proj_str, "--id", "1"]);
+    assert_eq!(out.status.code(), Some(0));
+    assert_eq!(
+        json_stdout(&out)["cue"]["text"],
+        "Opening line\nUncertain line"
+    );
+
+    std::fs::remove_dir_all(dir).expect("remove fixtures");
+}
+
+#[test]
 fn queue_and_preferences_and_fail_closed_gates_work_end_to_end() {
     let dir = root();
     let clip = dir.join("clip.mp4");

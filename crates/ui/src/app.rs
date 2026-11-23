@@ -31,6 +31,7 @@ pub fn mount() {
 #[component]
 fn App(initial_theme: String) -> impl IntoView {
     let ui = Ui::new(initial_theme.clone());
+    let drop_ready = RwSignal::new(false);
     crate::maintenance::watch(ui);
     if let Some(window) = web_sys::window() {
         let snapshot = Closure::<dyn FnMut(bool) -> wasm_bindgen::JsValue>::new(move |closing| {
@@ -203,9 +204,9 @@ fn App(initial_theme: String) -> impl IntoView {
                 ui.dragging.set(false);
                 if let Ok(payload) =
                     js_sys::Reflect::get(&ev, &wasm_bindgen::JsValue::from_str("payload"))
-                    && let Ok(paths) = serde_wasm_bindgen::from_value::<Vec<String>>(payload)
+                    && let Some(token) = payload.as_string()
                 {
-                    ui.accept_drop(paths);
+                    ui.accept_drop(token);
                 }
             });
         let drag_fn: js_sys::Function = drag_state_cb
@@ -220,12 +221,23 @@ fn App(initial_theme: String) -> impl IntoView {
         let drag_cb_holder = StoredValue::new_local(drag_state_cb);
         let drop_cb_holder = StoredValue::new_local(files_drop_cb);
         spawn_local(async move {
-            if let Ok(Some(u)) = ipc::listen_event("nvsf://drag-state", &drag_fn).await {
-                unlisteners.update_value(|v| v.push(u));
+            let mut ready = true;
+            for (event, callback) in [
+                ("nvsf://drag-state", drag_fn),
+                ("nvsf://files-dropped", drop_fn),
+            ] {
+                match ipc::listen_event(event, &callback).await {
+                    Ok(Some(unlisten)) => unlisteners.update_value(|v| v.push(unlisten)),
+                    Ok(None) => ready = false,
+                    Err(error) => {
+                        ready = false;
+                        ui.error.set(Some(format!(
+                            "Native file-drop subscription failed: {error}"
+                        )));
+                    }
+                }
             }
-            if let Ok(Some(u)) = ipc::listen_event("nvsf://files-dropped", &drop_fn).await {
-                unlisteners.update_value(|v| v.push(u));
-            }
+            drop_ready.set(ready);
         });
         on_cleanup(move || {
             unlisteners.with_value(|list| {
@@ -249,7 +261,7 @@ fn App(initial_theme: String) -> impl IntoView {
     let fixture_controls = ().into_any();
     view! {
         <a class="skip-link" href="#main-content">"Skip to workspace"</a>
-        <div class="app-shell">
+        <div class="app-shell" data-native-drop-ready=move ||drop_ready.get().to_string()>
             <aside class="sidebar">
                 <a class="brand" href="#extract" on:click=move |_|ui.route.set("Extract".into()) aria-label="Numera Video Sub Finder home">
                     <img src="logo.svg" width="48" height="48" alt=""/>

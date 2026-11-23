@@ -90,6 +90,56 @@ pub fn route_value(value: &str) -> Option<&'static str> {
     }
 }
 
+pub fn review_mutation_allowed(
+    project_open: bool,
+    job_state: &str,
+    busy: bool,
+    closing: bool,
+) -> bool {
+    project_open
+        && !busy
+        && !closing
+        && matches!(job_state, "idle" | "completed" | "cancelled" | "failed")
+}
+
+#[derive(Clone)]
+pub struct OcrProposal {
+    pub cue_id: u64,
+    pub revision: u64,
+    pub recognition: nvsf_core::Recognition,
+}
+
+impl OcrProposal {
+    pub fn is_current(&self, selected: Option<u64>, revision: u64) -> bool {
+        selected == Some(self.cue_id) && revision == self.revision
+    }
+
+    pub fn apply(
+        &self,
+        cues: &mut [Cue],
+        selected: Option<u64>,
+        revision: u64,
+    ) -> nvsf_core::Result<()> {
+        if !self.is_current(selected, revision) {
+            return Err(nvsf_core::Error::Invalid(
+                "The review changed; request a new OCR proposal before replacing cue text".into(),
+            ));
+        }
+        let cue = cues
+            .iter_mut()
+            .find(|cue| cue.id == self.cue_id)
+            .ok_or_else(|| nvsf_core::Error::Invalid("Cue no longer exists".into()))?;
+        let mut revised = cue.clone();
+        revised.text = self.recognition.text.clone();
+        revised.confidence = self.recognition.confidence;
+        revised.edited = true;
+        revised.reviewed = false;
+        revised.validate()?;
+        *cue = revised;
+        Ok(())
+    }
+}
+
 pub fn replace_proposal_text(cues: &mut [Cue], id: u64, text: String) -> nvsf_core::Result<()> {
     let cue = cues
         .iter_mut()
@@ -210,6 +260,99 @@ pub fn language_options(query: &str) -> Vec<LanguageOption> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ocr_proposals_reject_reused_ids_after_project_changes_or_later_edits() {
+        let mut cue = Cue::new(1, 0, 1200, 2200, "Current project 日本".into()).unwrap();
+        cue.crop = Some("current-source-crop".into());
+        cue.reviewed = true;
+        let before = vec![cue];
+        let proposal = OcrProposal {
+            cue_id: 1,
+            revision: 7,
+            recognition: nvsf_core::Recognition {
+                text: "Earlier proposal فارسی".into(),
+                confidence: Some(0.8),
+                crop: Some("proposal-crop".into()),
+            },
+        };
+        for (selected, revision) in [(Some(1), 8), (Some(1), 6), (Some(2), 7), (None, 7)] {
+            let mut cues = before.clone();
+            let mut history = nvsf_core::EditHistory::default();
+            assert!(
+                history
+                    .apply(&mut cues, |cues| proposal.apply(cues, selected, revision))
+                    .is_err()
+            );
+            assert_eq!(cues, before);
+            assert!(!history.can_undo());
+        }
+        let mut cues = before.clone();
+        let mut history = nvsf_core::EditHistory::default();
+        history
+            .apply(&mut cues, |cues| proposal.apply(cues, Some(1), 7))
+            .unwrap();
+        assert_eq!(cues[0].text, "Earlier proposal فارسی");
+        assert_eq!(cues[0].raw_text, "Current project 日本");
+        assert_eq!(cues[0].crop.as_deref(), Some("current-source-crop"));
+        assert_eq!((cues[0].start_ms, cues[0].end_ms), (1200, 2200));
+        assert_eq!(cues[0].confidence, Some(0.8));
+        assert!(cues[0].edited);
+        assert!(!cues[0].reviewed);
+        history.undo(&mut cues);
+        assert_eq!(cues, before);
+    }
+
+    #[test]
+    fn invalid_ocr_proposals_preserve_the_original_cue() {
+        let before = vec![Cue::new(1, 0, 10, 20, "Original".into()).unwrap()];
+        for (id, text, confidence) in [
+            (1, "", Some(0.8)),
+            (1, "Recognized", Some(f32::NAN)),
+            (999, "Recognized", Some(0.8)),
+        ] {
+            let proposal = OcrProposal {
+                cue_id: id,
+                revision: 7,
+                recognition: nvsf_core::Recognition {
+                    text: text.into(),
+                    confidence,
+                    crop: None,
+                },
+            };
+            let mut cues = before.clone();
+            assert!(proposal.apply(&mut cues, Some(id), 7).is_err());
+            assert_eq!(cues, before);
+        }
+    }
+
+    #[test]
+    fn review_mutations_wait_for_extraction_and_native_operations() {
+        for state in ["running", "paused", "cancelling"] {
+            assert!(
+                !review_mutation_allowed(true, state, false, false),
+                "{state}"
+            );
+        }
+        for state in ["idle", "completed", "cancelled", "failed"] {
+            assert!(
+                review_mutation_allowed(true, state, false, false),
+                "{state}"
+            );
+            assert!(
+                !review_mutation_allowed(true, state, true, false),
+                "{state}"
+            );
+            assert!(
+                !review_mutation_allowed(true, state, false, true),
+                "{state}"
+            );
+            assert!(
+                !review_mutation_allowed(false, state, false, false),
+                "{state}"
+            );
+        }
+    }
 
     #[test]
     fn language_search_filters_by_any_term_and_code() {

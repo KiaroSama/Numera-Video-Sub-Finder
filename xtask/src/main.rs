@@ -27,6 +27,7 @@ mod process;
 mod production;
 #[cfg(any(target_os = "linux", test))]
 mod production_supervisor;
+mod publication;
 mod quality;
 mod runtime_pack;
 mod source_policy;
@@ -197,6 +198,22 @@ enum Cmd {
         reports: PathBuf,
         #[arg(long)]
         source_sha: String,
+    },
+    PublicationGate {
+        #[arg(long)]
+        reports: PathBuf,
+        #[arg(long)]
+        source_sha: String,
+        #[arg(long)]
+        evidence: PathBuf,
+        #[arg(long)]
+        repository: String,
+        #[arg(long, action = clap::ArgAction::Set)]
+        publish: bool,
+        #[arg(long, action = clap::ArgAction::Set)]
+        prerelease: bool,
+        #[arg(long, default_value = "")]
+        tag: String,
     },
     RuntimeModels {
         #[arg(long)]
@@ -404,6 +421,23 @@ fn run() -> Result<(), Box<dyn Error>> {
             reports,
             source_sha,
         } => gate::release(&reports, &source_sha),
+        Cmd::PublicationGate {
+            reports,
+            source_sha,
+            evidence,
+            repository,
+            publish,
+            prerelease,
+            tag,
+        } => publication::verify(
+            &reports,
+            &source_sha,
+            &evidence,
+            &repository,
+            publish,
+            prerelease,
+            &tag,
+        ),
         Cmd::RuntimeModels { data_root } => fixture::provision_models(&data_root),
         Cmd::VisualModels { data_root } => visual_witness::provision(&data_root),
         Cmd::SourcePolicy => source_policy::verify(),

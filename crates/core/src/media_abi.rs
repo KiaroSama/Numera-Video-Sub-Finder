@@ -74,6 +74,8 @@ pub struct DecodeRequest {
     pub path: String,
     pub start_ms: u64,
     pub end_ms: Option<u64>,
+    #[serde(default)]
+    pub include_preroll: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

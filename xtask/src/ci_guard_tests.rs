@@ -175,7 +175,10 @@ pub(super) fn contracts() -> Result<()> {
         "Guard left its real regression child alive.",
     )?;
     #[cfg(windows)]
-    retained(work)?;
+    {
+        retained(work)?;
+        short_lived(work)?;
+    }
 
     let progress = work.join("buildlogs");
     for port in 0..43 {
@@ -237,11 +240,64 @@ pub(super) fn contracts() -> Result<()> {
         code == 124 && fs::read_to_string(log)?.contains("Wall timeout"),
         "Wall deadline did not override stream progress.",
     )?;
-    let cases = if cfg!(windows) { 10 } else { 9 };
+    let cases = if cfg!(windows) { 11 } else { 9 };
     println!(
         "Guard contracts passed: tests={cases} failed=0 skipped=0; Unicode, exit status, child cleanup, quiet/frozen/noisy logs, stalled/error observer ownership and platform process-handle semantics."
     );
     Ok(())
+}
+
+#[cfg(windows)]
+fn short_lived(work: &Path) -> Result<()> {
+    let started = Instant::now();
+    for (index, (payload, expected)) in [
+        ("unicode", 0),
+        ("failure", 7),
+        ("unicode", 0),
+        ("failure", 7),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let remaining = Duration::from_secs(8).saturating_sub(started.elapsed());
+        require(
+            remaining >= Duration::from_secs(1),
+            "Short-lived owned command sequence exceeded its total bound.",
+        )?;
+        let name = format!("contract-short-lived-{index}");
+        let capture = work.join(format!("{name}.stdout"));
+        let mut command = fixture_command(payload)?;
+        command.current_dir(work);
+        let outcome = run(
+            Guard {
+                name: &name,
+                wall_s: remaining.as_secs().min(2) as u32,
+                idle_s: 1,
+                capture: Some(&capture),
+                progress: None,
+                stall: false,
+            },
+            command,
+        )?;
+        require(
+            outcome.code == expected
+                && fs::read_to_string(outcome.log)?.contains("Cleanup verified pid="),
+            "Short-lived owned command lost its exit status or verified cleanup.",
+        )?;
+        require(
+            fs::read_to_string(capture)?.trim()
+                == if expected == 0 {
+                    "guard 日本 فارسی"
+                } else {
+                    ""
+                },
+            "Short-lived owned command lost its final stdout.",
+        )?;
+    }
+    require(
+        started.elapsed() < Duration::from_secs(8),
+        "Short-lived owned command sequence exceeded its total bound.",
+    )
 }
 
 fn verify_observer(

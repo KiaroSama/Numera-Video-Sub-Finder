@@ -7,6 +7,9 @@ use nvsf_core::{Cue, ExtractConfig, MediaInfo, Project, Rect};
 use std::sync::atomic::Ordering;
 use tauri::Manager;
 
+#[path = "export_confirmation_tests.rs"]
+mod export_confirmation_tests;
+
 fn workspace() -> (tempfile::TempDir, tauri::App<tauri::test::MockRuntime>) {
     let directory = tempfile::tempdir().unwrap();
     let paths = nvsf_app::Paths::new(Some(directory.path())).unwrap();
@@ -560,6 +563,108 @@ fn review_save_and_export_preserve_files_without_overwrite_confirmation() {
         files::export_project_to(&corrected, &missing, "srt", false, false, || Ok(true)).is_err()
     );
     assert_eq!(serde_json::to_vec(&corrected).unwrap(), original);
+}
+
+#[test]
+fn review_save_cannot_replace_the_source_video() {
+    let (directory, _app) = workspace();
+    let source = directory.path().join("source 日本.mp4");
+    std::fs::write(&source, b"original source media").unwrap();
+    let mut corrected = project();
+    corrected.config.input = source.to_str().unwrap().into();
+    corrected.cues[0].text = "Saved correction فارسی".into();
+    let error = files::save_project_to(&corrected, &source, || {
+        panic!("source-media replacement must be rejected before overwrite confirmation")
+    })
+    .unwrap_err();
+    assert!(error.contains("Destination resolves to source media"));
+    assert_eq!(std::fs::read(&source).unwrap(), b"original source media");
+    let destination = directory.path().join("safe-review.json");
+    files::save_project_to(&corrected, &destination, || Ok(true)).unwrap();
+    assert_eq!(
+        nvsf_app::storage::load_project(&destination).unwrap().cues,
+        corrected.cues
+    );
+    assert_eq!(std::fs::read(&source).unwrap(), b"original source media");
+}
+
+#[test]
+fn review_save_retains_its_admitted_directory_during_overwrite_confirmation() {
+    let (directory, _app) = workspace();
+    let selected = directory.path().join("selected");
+    let media = directory.path().join("media");
+    let admitted = directory.path().join("admitted");
+    std::fs::create_dir(&selected).unwrap();
+    std::fs::create_dir(&media).unwrap();
+    let source = media.join("original.mp4");
+    let destination = selected.join("original.mp4");
+    std::fs::write(&source, b"original source media").unwrap();
+    std::fs::write(&destination, b"previous review").unwrap();
+    let mut corrected = project();
+    corrected.config.input = source.to_string_lossy().into_owned();
+    corrected.source_hash = nvsf_app::storage::hash_file(&source).unwrap();
+    files::save_project_to(&corrected, &destination, || {
+        std::fs::rename(&selected, &admitted).unwrap();
+        std::fs::rename(&media, &selected).unwrap();
+        Ok(true)
+    })
+    .unwrap();
+    assert_eq!(
+        std::fs::read(&destination).unwrap(),
+        b"original source media"
+    );
+    assert_eq!(
+        nvsf_app::storage::load_project(&admitted.join("original.mp4"))
+            .unwrap()
+            .cues,
+        corrected.cues
+    );
+}
+
+#[test]
+fn review_save_requires_bound_confirmation_after_ancestor_substitution() {
+    for confirmation_error in [false, true] {
+        let (directory, _app) = workspace();
+        let selected = directory.path().join("selected");
+        let admitted = directory.path().join("admitted");
+        std::fs::create_dir(&selected).unwrap();
+        let destination = selected.join("review.json");
+        std::fs::write(&destination, b"previous corrections").unwrap();
+        let prepared = nvsf_app::storage::AtomicOutput::for_confirmation(&destination).unwrap();
+        assert!(prepared.1);
+        // Move the bound directory before the overwrite decision, leaving the displayed path absent.
+        std::fs::rename(&selected, &admitted).unwrap();
+        std::fs::create_dir(&selected).unwrap();
+        assert!(!destination.exists());
+        let mut prompted = false;
+        let result = files::save_prepared_project(&project(), &destination, prepared, || {
+            prompted = true;
+            if confirmation_error {
+                Err("confirmation failed after directory move".into())
+            } else {
+                Ok(false)
+            }
+        });
+        assert!(
+            prompted,
+            "The retained existing entry requires explicit consent"
+        );
+        if confirmation_error {
+            assert_eq!(
+                result.unwrap_err(),
+                "confirmation failed after directory move"
+            );
+        } else {
+            assert!(result.unwrap().is_none());
+        }
+        assert_eq!(
+            std::fs::read(admitted.join("review.json")).unwrap(),
+            b"previous corrections"
+        );
+        assert!(!destination.exists());
+        assert_eq!(std::fs::read_dir(&selected).unwrap().count(), 0);
+        assert_eq!(std::fs::read_dir(&admitted).unwrap().count(), 1);
+    }
 }
 
 #[test]

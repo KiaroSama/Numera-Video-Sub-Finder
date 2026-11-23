@@ -41,6 +41,80 @@ fn split_merge_and_history_keep_positive_intervals_and_originals() {
 }
 
 #[test]
+fn splitting_a_reviewed_cue_requires_review_of_both_new_intervals() {
+    let mut original = Cue::new(7, 0, 100, 900, "Reviewed text".into()).unwrap();
+    original.reviewed = true;
+    let mut cues = vec![original.clone()];
+    let mut history = EditHistory::default();
+
+    history.apply(&mut cues, |c| split_cue(c, 7, 500)).unwrap();
+
+    assert_eq!(cues.len(), 2);
+    assert_eq!((cues[0].start_ms, cues[0].end_ms), (100, 500));
+    assert_eq!((cues[1].start_ms, cues[1].end_ms), (500, 900));
+    assert!(cues.iter().all(|cue| cue.edited && !cue.reviewed));
+    assert!(history.undo(&mut cues));
+    assert_eq!(cues, vec![original]);
+    assert!(history.redo(&mut cues));
+    assert!(cues.iter().all(|cue| !cue.reviewed));
+}
+
+#[test]
+fn merging_into_a_reviewed_cue_requires_review_of_the_combined_text() {
+    for second_reviewed in [false, true] {
+        let mut first = Cue::new(1, 0, 100, 500, "First".into()).unwrap();
+        first.reviewed = true;
+        let mut second = Cue::new(2, 0, 500, 900, "Second".into()).unwrap();
+        second.reviewed = second_reviewed;
+        let original = vec![first, second];
+        let mut cues = original.clone();
+        let mut history = EditHistory::default();
+
+        history.apply(&mut cues, |c| merge_cues(c, 1, 2)).unwrap();
+
+        assert_eq!(cues.len(), 1);
+        assert_eq!(cues[0].text, "First\nSecond");
+        assert_eq!((cues[0].start_ms, cues[0].end_ms), (100, 900));
+        assert!(cues[0].edited);
+        assert!(!cues[0].reviewed);
+        assert!(history.undo(&mut cues));
+        assert_eq!(cues, original);
+        assert!(history.redo(&mut cues));
+        assert!(!cues[0].reviewed);
+    }
+}
+
+#[test]
+fn merging_corrected_cues_keeps_both_original_ocr_texts() {
+    let mut first = Cue::new(1, 0, 100, 500, "Original first".into()).unwrap();
+    first.text = "Corrected first".into();
+    first.edited = true;
+    let mut second = Cue::new(2, 0, 500, 900, "Original second".into()).unwrap();
+    second.text = "Corrected second".into();
+    second.edited = true;
+    let mut cues = vec![first, second];
+
+    merge_cues(&mut cues, 1, 2).unwrap();
+
+    assert_eq!(cues.len(), 1);
+    assert_eq!(cues[0].text, "Corrected first\nCorrected second");
+    assert_eq!(cues[0].raw_text, "Original first\nOriginal second");
+}
+
+#[test]
+fn merge_rejects_oversized_combined_original_text_without_losing_either_cue() {
+    let mut first = Cue::new(1, 0, 100, 500, "First".into()).unwrap();
+    first.raw_text = "a".repeat(40_000);
+    let mut second = Cue::new(2, 0, 500, 900, "Second".into()).unwrap();
+    second.raw_text = "b".repeat(40_000);
+    let mut cues = vec![first, second];
+    let original = cues.clone();
+
+    assert!(merge_cues(&mut cues, 1, 2).is_err());
+    assert_eq!(cues, original);
+}
+
+#[test]
 fn configuration_and_geometry_reject_every_invalid_boundary() {
     let valid = nvsf_core::ExtractConfig {
         input: "a.mp4".into(),

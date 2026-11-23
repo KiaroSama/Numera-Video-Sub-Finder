@@ -197,13 +197,15 @@ pub(crate) fn run(paths: &Paths, command: ProjectCommand, control: &Control) -> 
             overwrite,
         } => {
             let loaded = storage::load_project(&project)?;
+            let destination = storage::AtomicOutput::new(&output, overwrite)?;
+            destination.protect_project_source(&loaded)?;
             let cue = project_ops::find_cue(&loaded, id)?;
             let crop = cue
                 .crop
                 .as_deref()
                 .ok_or_else(|| nvsf_app::fail("Cue has no saved crop evidence"))?;
             let bytes = crop_evidence::read(paths, crop)?;
-            storage::write_atomic(&output, &bytes, overwrite)?;
+            destination.write(&bytes)?;
             println!(
                 "{}",
                 serde_json::to_string_pretty(&json!({
@@ -431,6 +433,66 @@ mod tests {
             completed: true,
             warnings: Vec::new(),
         }
+    }
+
+    #[test]
+    fn cue_evidence_export_preserves_source_media_even_with_overwrite() {
+        let dir =
+            std::env::temp_dir().join(format!("nvsf-evidence-source-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let paths = Paths::new(Some(&dir)).expect("paths");
+        let video = dir.join("clip.mp4");
+        let original = b"original video bytes";
+        std::fs::write(&video, original).expect("video fixture");
+        let png = crate::media_cmd::encode_rgb_png(4, 2, &[23, 42, 81].repeat(8))
+            .expect("original crop PNG");
+        let crop = paths
+            .cache
+            .join("crop-f7c6ad91e2d94cf485d1b7f2c6ef8ded2c8069e014759d4e9eefbc9ac629a2cf.png");
+        std::fs::write(&crop, &png).expect("cached crop");
+        assert_eq!(
+            crop_evidence::read(&paths, crop.to_str().unwrap()).unwrap(),
+            png
+        );
+        let mut project = sample_project(&video, storage::hash_file(&video).unwrap());
+        project.cues[0].crop = Some(crop.to_str().unwrap().into());
+        let project_path = dir.join("clip.nvsf.json");
+        storage::save_project(&project, &project_path).expect("save project");
+        let saved = std::fs::read(&project_path).unwrap();
+
+        assert!(
+            run(
+                &paths,
+                ProjectCommand::CueEvidence {
+                    project: project_path.clone(),
+                    id: 1,
+                    output: video.clone(),
+                    overwrite: true,
+                },
+                &Control::default(),
+            )
+            .is_err()
+        );
+        assert_eq!(std::fs::read(&video).unwrap(), original);
+        assert_eq!(std::fs::read(&project_path).unwrap(), saved);
+
+        let output = dir.join("evidence.png");
+        assert_eq!(
+            run(
+                &paths,
+                ProjectCommand::CueEvidence {
+                    project: project_path,
+                    id: 1,
+                    output: output.clone(),
+                    overwrite: false,
+                },
+                &Control::default(),
+            )
+            .unwrap(),
+            0
+        );
+        assert_eq!(std::fs::read(output).unwrap(), png);
+        std::fs::remove_dir_all(dir).expect("remove fixture");
     }
 
     #[test]

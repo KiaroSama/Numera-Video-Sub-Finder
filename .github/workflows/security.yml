@@ -44,9 +44,15 @@ jobs:
           "$env:GITHUB_WORKSPACE/.ci-work/tools/bin" >> $env:GITHUB_PATH
       - name: Advisory audit
         run: |
-          $guardArgs = @('audit','--json')
-          ./target/release/xtask ci-guard --name dependency-audit --wall-seconds 180 --idle-seconds 60 --executable cargo --capture-stdout-path '.ci-work/captures/audit.json' -- @guardArgs
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          foreach ($scope in @(
+            @{ Name = 'workspace'; Lock = 'Cargo.lock' },
+            @{ Name = 'fuzz'; Lock = 'fuzz/Cargo.lock' },
+            @{ Name = 'loom'; Lock = 'ci/loom/Cargo.lock' }
+          )) {
+            $guardArgs = @('audit','--file',$scope.Lock,'--json')
+            ./target/release/xtask ci-guard --name "dependency-audit-$($scope.Name)" --wall-seconds 180 --idle-seconds 60 --executable cargo --capture-stdout-path ".ci-work/captures/audit-$($scope.Name).json" -- @guardArgs
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
       - name: License and source registry policy
         run: |
           $guardArgs = @('deny','--locked','check','licenses','sources','bans')
@@ -59,7 +65,7 @@ jobs:
         with:
           name: security-evidence-${{ github.sha }}
           path: |
-            .ci-work/captures/audit.json
+            .ci-work/captures/audit-*.json
             .ci-work/logs/
           if-no-files-found: error
           retention-days: 7

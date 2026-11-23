@@ -290,7 +290,7 @@ fn export_writes_the_saved_corrections_and_refuses_silent_overwrite() {
         ],
     );
     assert_eq!(output.status.code(), Some(4));
-    assert!(stderr(&output).contains("existing or unsafe destination"));
+    assert!(stderr(&output).contains("Output exists; explicitly enable overwrite"));
     assert_eq!(std::fs::read_to_string(&srt).unwrap(), text);
     std::fs::remove_dir_all(root).unwrap();
 }

@@ -93,6 +93,29 @@ pub async fn e2e_fixture(
 }
 
 #[tauri::command]
+pub async fn e2e_drop_fixture(
+    app: tauri::AppHandle,
+    host: tauri::State<'_, Host>,
+) -> Result<String> {
+    let host = host.inner().clone();
+    crate::state::blocking(move || {
+        host.ensure_idle()?;
+        let root = PathBuf::from(
+            std::env::var_os("NVSF_E2E_FIXTURE_ROOT")
+                .ok_or_else(|| "CI fixture root not configured".to_string())?,
+        )
+        .canonicalize()
+        .map_err(|e| e.to_string())?;
+        let source = fixture_path(&root, "en.mp4", true)?;
+        if !source.is_file() {
+            return Err("CI drop fixture must be a regular file".into());
+        }
+        crate::drop::publish_native_drop(&app, &host, vec![source])
+    })
+    .await
+}
+
+#[tauri::command]
 pub async fn e2e_save_edits(host: tauri::State<'_, Host>, output_token: String) -> Result<String> {
     let host = host.inner().clone();
     crate::state::blocking(move || {

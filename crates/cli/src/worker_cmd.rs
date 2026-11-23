@@ -7,6 +7,8 @@ pub(crate) fn run_worker(
     request: &Path,
     control_dir: &Path,
     profile_directory: Option<&Path>,
+    resume_project: Option<&Path>,
+    srt_options: nvsf_app::extraction::SrtOptions,
 ) -> Result<()> {
     nvsf_app::worker::guard_parent_lifetime()?;
     use worker::protocol;
@@ -69,8 +71,10 @@ pub(crate) fn run_worker(
                 Ok(project)
             },
         )
+    } else if let Some(checkpoint) = resume_project {
+        nvsf_app::extraction::run_resuming(config, &control, progress, checkpoint)
     } else {
-        nvsf_app::extraction::run(config, &control, progress)
+        nvsf_app::extraction::run_with_srt(config, &control, progress, srt_options)
     };
     stopped.store(true, Ordering::Relaxed);
     watcher.thread().unpark();

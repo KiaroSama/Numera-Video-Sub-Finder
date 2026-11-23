@@ -1,7 +1,9 @@
-use crate::extraction::Control;
+use crate::extraction::{Control, SrtOptions};
 use crate::{AppError, Paths, Result, fail, storage::write_atomic};
 use nvsf_core::{ExtractConfig, Progress, Project};
 use serde::{Deserialize, Serialize};
+#[path = "worker_idle.rs"]
+mod idle;
 #[path = "worker_output.rs"]
 mod output;
 #[path = "worker_process.rs"]
@@ -33,7 +35,38 @@ pub fn supervise(
     control: &Control,
     callback: impl FnMut(Progress),
 ) -> Result<Project> {
-    supervise_inner(config, control, callback, None)
+    supervise_inner(config, control, callback, None, None, SrtOptions::default())
+}
+
+/// Applies encoding during the worker's first SRT publication, under its output lock.
+pub fn supervise_with_srt(
+    config: ExtractConfig,
+    control: &Control,
+    callback: impl FnMut(Progress),
+    options: SrtOptions,
+) -> Result<Project> {
+    supervise_inner(config, control, callback, None, None, options)
+}
+
+/// Runs the ordinary isolated worker against the caller's selected saved checkpoint.
+pub fn supervise_resume(
+    config: ExtractConfig,
+    control: &Control,
+    callback: impl FnMut(Progress),
+    checkpoint: &Path,
+) -> Result<Project> {
+    let checkpoint = checkpoint.canonicalize()?;
+    if !checkpoint.is_file() {
+        return Err(fail("Selected checkpoint must be a regular file"));
+    }
+    supervise_inner(
+        config,
+        control,
+        callback,
+        None,
+        Some(&checkpoint),
+        SrtOptions::default(),
+    )
 }
 
 /// Same isolated worker supervision; the worker writes provider profiles and evidence
@@ -44,7 +77,14 @@ pub fn supervise_profiled(
     callback: impl FnMut(Progress),
     profile_directory: &Path,
 ) -> Result<Project> {
-    supervise_inner(config, control, callback, Some(profile_directory))
+    supervise_inner(
+        config,
+        control,
+        callback,
+        Some(profile_directory),
+        None,
+        SrtOptions::default(),
+    )
 }
 
 fn supervise_inner(
@@ -52,6 +92,8 @@ fn supervise_inner(
     control: &Control,
     mut callback: impl FnMut(Progress),
     profile_directory: Option<&Path>,
+    selected_checkpoint: Option<&Path>,
+    options: SrtOptions,
 ) -> Result<Project> {
     config.validate()?;
     let paths = Paths::new(config.data_root.as_deref().map(Path::new))?;
@@ -73,6 +115,15 @@ fn supervise_inner(
     if let Some(directory) = profile_directory {
         command.arg("--provider-profile").arg(directory);
     }
+    if let Some(checkpoint) = selected_checkpoint {
+        command.arg("--resume-project").arg(checkpoint);
+    }
+    if options.bom {
+        command.arg("--srt-bom");
+    }
+    if options.crlf {
+        command.arg("--srt-crlf");
+    }
     command
         .env("TEMP", scratch.path())
         .env("TMP", scratch.path())
@@ -89,7 +140,7 @@ fn supervise_inner(
     let stdout = child.stdout()?;
     let mut reader = output::Output::new(stdout, job_id)?;
     let deadline = Instant::now() + Duration::from_secs(24 * 3600);
-    let mut heartbeat = Instant::now();
+    let mut heartbeat = idle::IdleWatch::new(Instant::now());
     let mut output = None;
     let mut failure = None;
     let mut exited_at = None;
@@ -103,10 +154,7 @@ fn supervise_inner(
             } else if !pause && flag.exists() {
                 std::fs::remove_file(&flag)?;
             }
-            if cancel
-                || Instant::now() >= deadline
-                || (!pause && heartbeat.elapsed() > Duration::from_secs(300))
-            {
+            if cancel || Instant::now() >= deadline || heartbeat.expired(Instant::now(), pause) {
                 let _ = write_atomic(
                     &scratch.path().join("cancel"),
                     &protocol::encode(job_id, &"cancel", 1024)?,
@@ -129,7 +177,7 @@ fn supervise_inner(
             let mut output_progress = true;
             match reader.poll()? {
                 output::Poll::Event(Event::Progress(progress)) => {
-                    heartbeat = Instant::now();
+                    heartbeat.progress(Instant::now());
                     callback(progress);
                 }
                 output::Poll::Event(Event::Completed(project)) => output = Some(*project),

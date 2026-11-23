@@ -8,6 +8,9 @@ use std::{
     path::Path,
 };
 
+#[path = "media_preview.rs"]
+mod preview;
+
 pub const NATIVE_LIBRARY_NAME: &str = if cfg!(windows) {
     "nvsf_media_native.dll"
 } else {
@@ -115,6 +118,17 @@ impl MediaRuntime {
         path: &Path,
         start_ms: u64,
         end_ms: Option<u64>,
+        consume: F,
+    ) -> Result<()> {
+        self.decode_inner(path, start_ms, end_ms, false, consume)
+    }
+
+    fn decode_inner<F: FnMut(DecodedFrame) -> Result<bool>>(
+        &self,
+        path: &Path,
+        start_ms: u64,
+        end_ms: Option<u64>,
+        include_preroll: bool,
         mut consume: F,
     ) -> Result<()> {
         if end_ms.is_some_and(|end| end <= start_ms) {
@@ -124,13 +138,14 @@ impl MediaRuntime {
             path: input_path(path)?,
             start_ms,
             end_ms,
+            include_preroll,
         })?;
         let mut state = Frames {
             consume: &mut consume,
             error: None,
             stopped: false,
             last_time: None,
-            start_ms,
+            start_ms: if include_preroll { 0 } else { start_ms },
             end_ms,
         };
         let mut error = Reply::new(MAX_ERROR_BYTES);
@@ -151,12 +166,15 @@ impl MediaRuntime {
 
 impl MediaRuntime {
     pub fn preview(&self, path: &Path, time_ms: u64) -> Result<RgbImage> {
-        let mut result = None;
-        self.decode(path, time_ms, None, |frame| {
-            result = Some(frame.image);
-            Ok(false)
-        })?;
-        result.ok_or_else(|| fail("No frame at the requested presentation time"))
+        let mut preview = preview::Preview::new(time_ms);
+        self.decode_inner(
+            path,
+            time_ms,
+            None,
+            true,
+            |frame| Ok(preview.observe(frame)),
+        )?;
+        preview.finish()
     }
 }
 

@@ -6,24 +6,42 @@ use crate::{
 use nvsf_core::ExtractConfig;
 use serde::Serialize;
 use std::{
-    collections::{HashSet, VecDeque},
-    fs,
+    collections::HashSet,
     path::{Path, PathBuf},
 };
+use tauri::Emitter;
 
-pub const MAX_DROP_DEPTH: usize = 4;
-pub const MAX_DROP_FILES: usize = queue::MAX_ENTRIES;
+#[path = "drop_scan.rs"]
+mod scan;
+use scan::resolve_dropped_paths;
+const MAX_PENDING_PATHS: usize = 1024;
 
-const VIDEO_EXTENSIONS: &[&str] = &[
-    "mp4", "mkv", "mov", "avi", "webm", "m4v", "ts", "mts", "m2ts", "mpeg", "wmv",
-];
+pub struct PendingDrop {
+    token: String,
+    paths: Vec<PathBuf>,
+    truncated: bool,
+}
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct DropResolution {
-    pub videos: Vec<PathBuf>,
-    pub skipped_unsupported: usize,
-    pub truncated: bool,
-    pub from_folder: bool,
+pub(crate) fn remember_native_drop(host: &Host, paths: Vec<PathBuf>) -> Result<String> {
+    let token = host.token("drop");
+    let truncated = paths.len() > MAX_PENDING_PATHS;
+    *lock(&host.0.pending_drop)? = Some(PendingDrop {
+        token: token.clone(),
+        paths: paths.into_iter().take(MAX_PENDING_PATHS).collect(),
+        truncated,
+    });
+    Ok(token)
+}
+
+pub(crate) fn publish_native_drop(
+    app: &tauri::AppHandle,
+    host: &Host,
+    paths: Vec<PathBuf>,
+) -> Result<String> {
+    let token = remember_native_drop(host, paths)?;
+    app.emit_to("main", "nvsf://files-dropped", &token)
+        .map_err(|e| e.to_string())?;
+    Ok(token)
 }
 
 #[derive(Clone, Serialize)]
@@ -35,128 +53,6 @@ pub struct DropOutcome {
     pub skipped_unsupported: usize,
     pub truncated: bool,
     pub errors: Vec<String>,
-}
-
-pub fn is_supported_video(path: &Path) -> bool {
-    path.extension()
-        .and_then(|ext| ext.to_str())
-        .is_some_and(|ext| {
-            VIDEO_EXTENSIONS
-                .iter()
-                .any(|allowed| ext.eq_ignore_ascii_case(allowed))
-        })
-}
-
-pub fn resolve_dropped_paths(inputs: &[PathBuf]) -> DropResolution {
-    let mut videos = Vec::new();
-    let mut seen = HashSet::new();
-    let mut skipped_unsupported = 0usize;
-    let mut truncated = false;
-    let mut from_folder = false;
-
-    for raw in inputs {
-        let Ok(meta) = fs::symlink_metadata(raw) else {
-            skipped_unsupported += 1;
-            continue;
-        };
-        if meta.file_type().is_symlink() {
-            skipped_unsupported += 1;
-            continue;
-        }
-        if meta.is_file() {
-            if is_supported_video(raw) {
-                push_canonical_video(raw, &mut seen, &mut videos, &mut truncated);
-            } else {
-                skipped_unsupported += 1;
-            }
-            continue;
-        }
-        if meta.is_dir() {
-            from_folder = true;
-            scan_directory(
-                raw,
-                &mut seen,
-                &mut videos,
-                &mut skipped_unsupported,
-                &mut truncated,
-            );
-            continue;
-        }
-        skipped_unsupported += 1;
-    }
-
-    videos.sort_by(|a, b| a.to_string_lossy().cmp(&b.to_string_lossy()));
-    DropResolution {
-        videos,
-        skipped_unsupported,
-        truncated,
-        from_folder,
-    }
-}
-
-fn push_canonical_video(
-    path: &Path,
-    seen: &mut HashSet<PathBuf>,
-    videos: &mut Vec<PathBuf>,
-    truncated: &mut bool,
-) {
-    let Ok(canonical) = path.canonicalize() else {
-        return;
-    };
-    if !canonical.is_file() {
-        return;
-    }
-    if seen.contains(&canonical) {
-        return;
-    }
-    if videos.len() >= MAX_DROP_FILES {
-        *truncated = true;
-        return;
-    }
-    seen.insert(canonical.clone());
-    videos.push(canonical);
-}
-
-fn scan_directory(
-    root: &Path,
-    seen: &mut HashSet<PathBuf>,
-    videos: &mut Vec<PathBuf>,
-    skipped_unsupported: &mut usize,
-    truncated: &mut bool,
-) {
-    let mut queue = VecDeque::new();
-    queue.push_back((root.to_path_buf(), 0usize));
-
-    while let Some((dir, depth)) = queue.pop_front() {
-        let Ok(entries) = fs::read_dir(&dir) else {
-            continue;
-        };
-        let mut children: Vec<PathBuf> = entries
-            .filter_map(|entry| entry.ok().map(|e| e.path()))
-            .collect();
-        children.sort_by(|a, b| a.to_string_lossy().cmp(&b.to_string_lossy()));
-
-        for child in children {
-            let Ok(meta) = fs::symlink_metadata(&child) else {
-                continue;
-            };
-            if meta.file_type().is_symlink() {
-                *skipped_unsupported += 1;
-                continue;
-            }
-            if meta.is_dir() {
-                if depth < MAX_DROP_DEPTH {
-                    queue.push_back((child, depth + 1));
-                }
-            } else if meta.is_file() {
-                if is_supported_video(&child) {
-                    push_canonical_video(&child, seen, videos, truncated);
-                } else {
-                    *skipped_unsupported += 1;
-                }
-            }
-        }
-    }
 }
 
 fn default_srt_destination(
@@ -186,17 +82,18 @@ fn default_srt_destination(
 
 pub(crate) fn accept_dropped_paths_with<F>(
     host: &Host,
-    paths: Vec<String>,
+    paths: Vec<PathBuf>,
     config: ExtractConfig,
     mut probe: F,
 ) -> Result<DropOutcome>
 where
     F: FnMut(&Path) -> Result<nvsf_core::MediaInfo>,
 {
-    let raw_paths: Vec<PathBuf> = paths.into_iter().map(PathBuf::from).collect();
-    let resolved = resolve_dropped_paths(&raw_paths);
+    let resolved = resolve_dropped_paths(&paths);
     if resolved.videos.is_empty() {
-        return Err("No supported video files were found in the dropped files or folders.".into());
+        return Err(resolved.errors.into_iter().next().unwrap_or_else(|| {
+            "No supported video files were found in the dropped files or folders.".into()
+        }));
     }
 
     if resolved.videos.len() == 1 && !resolved.from_folder {
@@ -208,7 +105,7 @@ where
             added_count: 1,
             skipped_unsupported: resolved.skipped_unsupported,
             truncated: resolved.truncated,
-            errors: Vec::new(),
+            errors: resolved.errors,
         });
     }
 
@@ -224,7 +121,7 @@ where
     };
 
     let mut added_count = 0usize;
-    let mut errors = Vec::new();
+    let mut errors = resolved.errors;
     for video in &resolved.videos {
         let source = match files::grant_source_with(host, video, None, |path| probe(path)) {
             Ok(source) => source,
@@ -274,15 +171,35 @@ where
     })
 }
 
+pub(crate) fn accept_native_drop_with(
+    host: &Host,
+    token: &str,
+    config: ExtractConfig,
+    probe: impl FnMut(&Path) -> Result<nvsf_core::MediaInfo>,
+) -> Result<DropOutcome> {
+    let pending = {
+        let mut pending = lock(&host.0.pending_drop)?;
+        if pending.as_ref().is_none_or(|drop| drop.token != token) {
+            return Err("Drop request expired; drop the files onto the window again".into());
+        }
+        pending.take().ok_or_else(|| {
+            "Drop request expired; drop the files onto the window again".to_string()
+        })?
+    };
+    let mut outcome = accept_dropped_paths_with(host, pending.paths, config, probe)?;
+    outcome.truncated |= pending.truncated;
+    Ok(outcome)
+}
+
 #[tauri::command]
 pub async fn accept_dropped_paths(
     host: tauri::State<'_, Host>,
-    paths: Vec<String>,
+    token: String,
     config: ExtractConfig,
 ) -> Result<DropOutcome> {
     let host = host.inner().clone();
     blocking(move || {
-        accept_dropped_paths_with(&host, paths, config, |path| {
+        accept_native_drop_with(&host, &token, config, |path| {
             files::probe_source(&host, path)
         })
     })
@@ -292,6 +209,8 @@ pub async fn accept_dropped_paths(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use scan::{MAX_DROP_DEPTH, MAX_DROP_FILES};
+    use std::fs;
     use tempfile::tempdir;
 
     #[test]
@@ -382,18 +301,82 @@ mod tests {
     }
 
     #[test]
+    fn native_drop_tokens_reject_forgery_and_replay_without_losing_pending_paths() {
+        let dir = tempdir().expect("tempdir");
+        let host = test_host(dir.path());
+        let video = dir.path().join("native drop 日本.mp4");
+        fs::write(&video, b"native-drop-video").expect("write video");
+        let reject = |token: &str| {
+            accept_native_drop_with(&host, token, ExtractConfig::default(), |_| {
+                panic!("ungranted drops must not probe media")
+            })
+            .err()
+            .expect("ungranted drop")
+        };
+        assert!(reject("invented-token").contains("Drop request expired"));
+        let token = remember_native_drop(&host, vec![video.clone()]).expect("native grant");
+        assert!(reject(&video.to_string_lossy()).contains("Drop request expired"));
+        assert!(reject("wrong-token").contains("Drop request expired"));
+        assert!(lock(&host.0.sources).unwrap().is_empty());
+        let outcome = accept_native_drop_with(&host, &token, ExtractConfig::default(), |path| {
+            assert_eq!(path, video.canonicalize().unwrap());
+            Ok(sample_media())
+        })
+        .expect("native drop admitted");
+        assert_eq!(outcome.kind, "single");
+        assert_eq!(outcome.source.unwrap().name, "native drop 日本.mp4");
+        assert_eq!(lock(&host.0.sources).unwrap().len(), 1);
+        assert!(reject(&token).contains("Drop request expired"));
+        assert_eq!(lock(&host.0.sources).unwrap().len(), 1);
+        assert_eq!(fs::read(&video).unwrap(), b"native-drop-video");
+    }
+
+    #[test]
+    fn a_new_native_drop_expires_the_previous_batch_and_caps_pending_paths() {
+        let dir = tempdir().expect("tempdir");
+        let host = test_host(dir.path());
+        let first = dir.path().join("first.mp4");
+        let second = dir.path().join("second.mp4");
+        fs::write(&first, b"first-video").unwrap();
+        fs::write(&second, b"second-video").unwrap();
+        let old = remember_native_drop(&host, vec![first.clone()]).unwrap();
+        let current = remember_native_drop(&host, vec![second.clone()]).unwrap();
+        assert_ne!(old, current);
+        assert!(
+            accept_native_drop_with(&host, &old, ExtractConfig::default(), |_| {
+                panic!("expired drop must not probe media")
+            })
+            .is_err()
+        );
+        let admitted = accept_native_drop_with(&host, &current, ExtractConfig::default(), |_| {
+            Ok(sample_media())
+        })
+        .unwrap();
+        assert_eq!(admitted.source.unwrap().name, "second.mp4");
+        let mut batch = vec![first; MAX_PENDING_PATHS];
+        batch.push(second);
+        let token = remember_native_drop(&host, batch).unwrap();
+        let capped = accept_native_drop_with(&host, &token, ExtractConfig::default(), |_| {
+            Ok(sample_media())
+        })
+        .unwrap();
+        assert_eq!(capped.kind, "single");
+        assert_eq!(capped.source.unwrap().name, "first.mp4");
+        assert!(capped.truncated);
+        assert!(lock(&host.0.queue).unwrap().entries().unwrap().is_empty());
+    }
+
+    #[test]
     fn accept_dropped_single_video_opens_extract_source() {
         let dir = tempdir().expect("tempdir");
         let host = test_host(dir.path());
         let video = dir.path().join("clip.mp4");
         fs::write(&video, b"fake-mp4-bytes").expect("write video");
-        let outcome = accept_dropped_paths_with(
-            &host,
-            vec![video.to_string_lossy().into_owned()],
-            ExtractConfig::default(),
-            |_| Ok(sample_media()),
-        )
-        .expect("single drop");
+        let outcome =
+            accept_dropped_paths_with(&host, vec![video], ExtractConfig::default(), |_| {
+                Ok(sample_media())
+            })
+            .expect("single drop");
         assert_eq!(outcome.kind, "single");
         assert!(outcome.source.is_some());
         assert_eq!(outcome.added_count, 1);
@@ -413,13 +396,11 @@ mod tests {
         fs::write(&first, b"video-a").expect("write a");
         fs::write(&second, b"video-b").expect("write b");
         fs::write(&ignored, b"text").expect("write txt");
-        let outcome = accept_dropped_paths_with(
-            &host,
-            vec![folder.to_string_lossy().into_owned()],
-            ExtractConfig::default(),
-            |_| Ok(sample_media()),
-        )
-        .expect("folder drop");
+        let outcome =
+            accept_dropped_paths_with(&host, vec![folder], ExtractConfig::default(), |_| {
+                Ok(sample_media())
+            })
+            .expect("folder drop");
         assert_eq!(outcome.kind, "queue");
         assert!(outcome.source.is_none());
         assert_eq!(outcome.added_count, 2);
@@ -434,14 +415,12 @@ mod tests {
         let host = test_host(dir.path());
         let note = dir.path().join("readme.txt");
         fs::write(&note, b"text").expect("write txt");
-        let empty_err = accept_dropped_paths_with(
-            &host,
-            vec![note.to_string_lossy().into_owned()],
-            ExtractConfig::default(),
-            |_| Ok(sample_media()),
-        )
-        .err()
-        .expect("no videos");
+        let empty_err =
+            accept_dropped_paths_with(&host, vec![note], ExtractConfig::default(), |_| {
+                Ok(sample_media())
+            })
+            .err()
+            .expect("no videos");
         assert!(empty_err.contains("No supported video files"));
 
         let good = dir.path().join("good.mp4");
@@ -450,10 +429,7 @@ mod tests {
         fs::write(&bad, b"bad-video").expect("write bad");
         let partial = accept_dropped_paths_with(
             &host,
-            vec![
-                good.to_string_lossy().into_owned(),
-                bad.to_string_lossy().into_owned(),
-            ],
+            vec![good.clone(), bad.clone()],
             ExtractConfig::default(),
             |path| {
                 if path.ends_with("bad.mp4") {
@@ -469,17 +445,12 @@ mod tests {
         assert_eq!(partial.errors.len(), 1);
         assert!(partial.errors[0].contains("corrupt stream"));
 
-        let all_fail = accept_dropped_paths_with(
-            &host,
-            vec![
-                good.to_string_lossy().into_owned(),
-                bad.to_string_lossy().into_owned(),
-            ],
-            ExtractConfig::default(),
-            |_| Err("probe unavailable".into()),
-        )
-        .err()
-        .expect("all failed");
+        let all_fail =
+            accept_dropped_paths_with(&host, vec![good, bad], ExtractConfig::default(), |_| {
+                Err("probe unavailable".into())
+            })
+            .err()
+            .expect("all failed");
         assert!(all_fail.contains("probe unavailable"));
     }
 
