@@ -54,15 +54,49 @@ fn copied_checkpoints_still_share_the_output_job_lock() {
 }
 
 #[test]
+fn default_checkpoint_extension_preserves_a_distinct_existing_json_stem() {
+    let directory = tempfile::tempdir().unwrap();
+    let output = directory.path().join("subtitles.nvsf.json");
+    let source = directory.path().join("source.mp4");
+    let expected = directory.path().join("subtitles.nvsf.nvsf.json");
+    assert_eq!(output.with_extension("nvsf.json"), expected);
+    assert_ne!(output, expected);
+    let checkpoint = Checkpoint::open(&output, None, &source).unwrap();
+    assert_eq!(
+        checkpoint.path,
+        directory
+            .path()
+            .canonicalize()
+            .unwrap()
+            .join("subtitles.nvsf.nvsf.json")
+    );
+    assert!(checkpoint.load().unwrap().is_none());
+    assert!(!output.exists());
+    assert!(!checkpoint.path.exists());
+}
+
+#[test]
 fn checkpoint_and_export_destination_must_be_distinct() {
     let directory = tempfile::tempdir().unwrap();
     let output = directory.path().join("subtitles.nvsf.json");
     let source = directory.path().join("source.mp4");
-    assert!(Checkpoint::open(&output, None, &source).is_err());
-    assert!(!output.exists());
     std::fs::write(&output, b"selected checkpoint").unwrap();
     assert!(Checkpoint::open(&output, Some(&output), &source).is_err());
     assert_eq!(std::fs::read(&output).unwrap(), b"selected checkpoint");
+    assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 1);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_default_checkpoint_symlink_to_the_output_is_rejected_before_lock_creation() {
+    let directory = tempfile::tempdir().unwrap();
+    let output = directory.path().join("subtitles.srt");
+    let source = directory.path().join("source.mp4");
+    std::fs::write(&output, b"existing subtitle output").unwrap();
+    std::os::unix::fs::symlink(&output, output.with_extension("nvsf.json")).unwrap();
+    assert!(Checkpoint::open(&output, None, &source).is_err());
+    assert_eq!(std::fs::read(&output).unwrap(), b"existing subtitle output");
+    assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 2);
 }
 
 #[test]
