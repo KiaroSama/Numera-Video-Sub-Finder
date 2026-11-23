@@ -5,6 +5,76 @@ use std::{
     time::{Duration, Instant},
 };
 
+#[cfg(test)]
+#[path = "ci_guard_inventory_tests.rs"]
+mod inventory_tests;
+
+#[cfg(any(windows, test))]
+mod inventory {
+    use super::*;
+
+    const MAX_PROCESSES: usize = 4096;
+    const MAX_QUERIES: usize = 8;
+
+    #[repr(C)]
+    pub(super) struct ProcessIds {
+        pub(super) assigned: u32,
+        pub(super) listed: u32,
+        pub(super) ids: [usize; MAX_PROCESSES],
+    }
+
+    fn rejected(list: &ProcessIds, returned: u32, attempts: usize, reason: &str) -> io::Error {
+        io::Error::other(format!(
+            "Owned job process inventory {reason}: assigned={} listed={} returned_length={returned} attempts={attempts} capacity={MAX_PROCESSES}.",
+            list.assigned, list.listed
+        ))
+    }
+
+    pub(super) fn query_with(
+        deadline: Instant,
+        mut query: impl FnMut(&mut ProcessIds) -> io::Result<u32>,
+        mut now: impl FnMut() -> Instant,
+        mut delay: impl FnMut(Duration),
+    ) -> io::Result<ProcessIds> {
+        let mut attempts = 0;
+        loop {
+            attempts += 1;
+            let mut list = ProcessIds {
+                assigned: 0,
+                listed: 0,
+                ids: [0; MAX_PROCESSES],
+            };
+            let returned = query(&mut list)?;
+            if list.assigned as usize > MAX_PROCESSES || list.listed as usize > MAX_PROCESSES {
+                return Err(rejected(&list, returned, attempts, "exceeded its bound"));
+            }
+            if list.listed >= list.assigned {
+                return Ok(list);
+            }
+            // A successful but incomplete snapshot does not establish an empty job or an overflow.
+            // Retry only inside the caller's existing deadline, without growing the owned buffer.
+            let remaining = deadline.saturating_duration_since(now());
+            if attempts >= MAX_QUERIES || remaining.is_zero() {
+                return Err(rejected(
+                    &list,
+                    returned,
+                    attempts,
+                    "remained incomplete at its retry/deadline bound",
+                ));
+            }
+            delay(super::super::POLL.min(remaining));
+            if now() >= deadline {
+                return Err(rejected(
+                    &list,
+                    returned,
+                    attempts,
+                    "remained incomplete at its deadline",
+                ));
+            }
+        }
+    }
+}
+
 pub(super) struct Owned {
     pub(super) child: Child,
     boundary: platform::Boundary,
@@ -21,26 +91,30 @@ impl Owned {
         })
     }
 
-    pub(super) fn active(&self) -> io::Result<Vec<u32>> {
-        self.boundary.active()
+    pub(super) fn active(&self, deadline: Instant) -> io::Result<Vec<u32>> {
+        self.boundary.active(deadline)
     }
 
     pub(super) fn cleanup(&mut self, budget: Duration) -> io::Result<()> {
         let started = Instant::now();
+        let deadline = started + budget;
         #[cfg(windows)]
-        let mut handles: std::collections::BTreeMap<u32, platform::ProcessHandle> =
-            self.boundary.active_handles()?.into_iter().collect();
+        let mut handles: std::collections::BTreeMap<u32, platform::ProcessHandle> = self
+            .boundary
+            .active_handles(deadline)?
+            .into_iter()
+            .collect();
         #[cfg(windows)]
         let needs_terminate = !handles.is_empty();
         #[cfg(not(windows))]
-        let needs_terminate = !self.active()?.is_empty();
+        let needs_terminate = !self.active(deadline)?.is_empty();
         if needs_terminate {
             self.boundary.terminate()?;
         }
         loop {
             #[cfg(windows)]
             {
-                for (pid, handle) in self.boundary.active_handles()? {
+                for (pid, handle) in self.boundary.active_handles(deadline)? {
                     handles.entry(pid).or_insert(handle);
                 }
                 let mut still_live = std::collections::BTreeMap::new();
@@ -54,11 +128,11 @@ impl Owned {
             let tree_drained = {
                 #[cfg(windows)]
                 {
-                    handles.is_empty() && self.active()?.is_empty()
+                    handles.is_empty() && self.active(deadline)?.is_empty()
                 }
                 #[cfg(not(windows))]
                 {
-                    self.active()?.is_empty()
+                    self.active(deadline)?.is_empty()
                 }
             };
             if self.child.try_wait()?.is_some() && tree_drained {
@@ -119,7 +193,7 @@ mod platform {
     pub(super) struct Boundary(u32);
 
     impl Boundary {
-        pub(super) fn active(&self) -> io::Result<Vec<u32>> {
+        pub(super) fn active(&self, _deadline: Instant) -> io::Result<Vec<u32>> {
             Ok(if signal(self.0, 0, true)? {
                 vec![self.0]
             } else {
@@ -157,6 +231,7 @@ mod platform {
 
 #[cfg(windows)]
 mod platform {
+    use super::inventory::{ProcessIds, query_with};
     use super::*;
     use std::{
         ffi::{OsString, c_void},
@@ -166,7 +241,6 @@ mod platform {
             io::{AsRawHandle, FromRawHandle, OwnedHandle},
             process::CommandExt,
         },
-        ptr::null_mut,
     };
 
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
@@ -178,7 +252,6 @@ mod platform {
     const JOB_OBJECT_BASIC_PROCESS_ID_LIST: i32 = 3;
     const JOB_OBJECT_EXTENDED_LIMIT_INFORMATION: i32 = 9;
     const JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE: u32 = 0x2000;
-    const MAX_PROCESSES: usize = 4096;
 
     #[repr(C)]
     #[derive(Default)]
@@ -200,13 +273,6 @@ mod platform {
         basic: BasicLimits,
         io_counters: [u64; 6],
         memory_limits: [usize; 4],
-    }
-
-    #[repr(C)]
-    struct ProcessIds {
-        assigned: u32,
-        listed: u32,
-        ids: [usize; MAX_PROCESSES],
     }
 
     #[link(name = "kernel32")]
@@ -269,36 +335,38 @@ mod platform {
             Ok(job)
         }
 
-        pub(super) fn active(&self) -> io::Result<Vec<u32>> {
+        pub(super) fn active(&self, deadline: Instant) -> io::Result<Vec<u32>> {
             Ok(self
-                .active_handles()?
+                .active_handles(deadline)?
                 .into_iter()
                 .map(|(pid, _)| pid)
                 .collect())
         }
 
-        pub(super) fn active_handles(&self) -> io::Result<Vec<(u32, ProcessHandle)>> {
-            let mut list = ProcessIds {
-                assigned: 0,
-                listed: 0,
-                ids: [0; MAX_PROCESSES],
-            };
+        pub(super) fn active_handles(
+            &self,
+            deadline: Instant,
+        ) -> io::Result<Vec<(u32, ProcessHandle)>> {
             let job = self.0.as_raw_handle();
-            // The fixed C buffer is large enough for MAX_PROCESSES; inventory overflow fails closed.
-            checked(unsafe {
-                QueryInformationJobObject(
-                    job,
-                    JOB_OBJECT_BASIC_PROCESS_ID_LIST,
-                    (&raw mut list).cast(),
-                    size_of::<ProcessIds>() as u32,
-                    null_mut(),
-                )
-            })?;
-            if list.listed < list.assigned || list.listed as usize > list.ids.len() {
-                return Err(io::Error::other(
-                    "Owned job process inventory exceeded its bound.",
-                ));
-            }
+            let list = query_with(
+                deadline,
+                |list| {
+                    let mut returned = 0;
+                    // The fixed aligned C buffer remains capped; native query errors fail closed.
+                    checked(unsafe {
+                        QueryInformationJobObject(
+                            job,
+                            JOB_OBJECT_BASIC_PROCESS_ID_LIST,
+                            (list as *mut ProcessIds).cast(),
+                            size_of::<ProcessIds>() as u32,
+                            &raw mut returned,
+                        )
+                    })?;
+                    Ok(returned)
+                },
+                Instant::now,
+                thread::sleep,
+            )?;
             let mut live = Vec::new();
             for id in &list.ids[..list.listed as usize] {
                 let pid = u32::try_from(*id).map_err(io::Error::other)?;

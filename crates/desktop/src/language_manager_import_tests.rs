@@ -13,13 +13,39 @@ fn language_import_confirmation_denial_and_integrity_error_preserve_both_directo
         std::fs::create_dir(&root).unwrap();
         std::fs::write(root.join("rus.traineddata"), b"previous pack").unwrap();
         let admitted = directory.path().join("admitted-tessdata");
+        let retained_source = directory.path().join("retained-source.traineddata");
         let mut prompted = false;
         let result = import_language_from(&host, "rus", &source, || {
             prompted = true;
             assert!(nvsf_app::storage::JobLock::acquire(&root.join("rus.download.lock")).is_err());
-            std::fs::rename(&root, &admitted).unwrap();
-            std::fs::create_dir(&root).unwrap();
-            std::fs::write(root.join("rus.traineddata"), b"unrelated replacement root").unwrap();
+            #[cfg(windows)]
+            {
+                // Retain the import lock while checking the native rename refusal.
+                let error = std::fs::rename(&root, &admitted).unwrap_err();
+                assert_eq!(error.raw_os_error(), Some(5));
+                assert!(!admitted.exists());
+                assert_eq!(
+                    std::fs::read(root.join("rus.traineddata")).unwrap(),
+                    b"previous pack"
+                );
+                assert_eq!(std::fs::read_dir(&root).unwrap().count(), 2);
+                assert!(
+                    nvsf_app::storage::JobLock::acquire(&root.join("rus.download.lock")).is_err()
+                );
+            }
+            #[cfg(not(windows))]
+            {
+                std::fs::rename(&root, &admitted).unwrap();
+                std::fs::create_dir(&root).unwrap();
+                std::fs::write(root.join("rus.traineddata"), b"unrelated replacement root")
+                    .unwrap();
+                assert!(
+                    nvsf_app::storage::JobLock::acquire(&admitted.join("rus.download.lock"))
+                        .is_err()
+                );
+            }
+            std::fs::rename(&source, &retained_source).unwrap();
+            std::fs::write(&source, b"unrelated source pathname").unwrap();
             confirm
         });
         assert!(prompted);
@@ -27,6 +53,17 @@ fn language_import_confirmation_denial_and_integrity_error_preserve_both_directo
             assert!(result.unwrap_err().contains("size or checksum mismatch"));
         } else {
             assert!(result.unwrap().is_none());
+        }
+        #[cfg(windows)]
+        {
+            assert_eq!(
+                std::fs::read(root.join("rus.traineddata")).unwrap(),
+                b"previous pack"
+            );
+            assert!(nvsf_app::storage::JobLock::acquire(&root.join("rus.download.lock")).is_ok());
+            std::fs::rename(&root, &admitted).unwrap();
+            std::fs::create_dir(&root).unwrap();
+            std::fs::write(root.join("rus.traineddata"), b"unrelated replacement root").unwrap();
         }
         assert_eq!(
             std::fs::read(admitted.join("rus.traineddata")).unwrap(),
@@ -39,5 +76,14 @@ fn language_import_confirmation_denial_and_integrity_error_preserve_both_directo
         assert_eq!(std::fs::read_dir(&admitted).unwrap().count(), 2);
         assert_eq!(std::fs::read_dir(root).unwrap().count(), 1);
         assert!(nvsf_app::storage::JobLock::acquire(&admitted.join("rus.download.lock")).is_ok());
+        assert_eq!(
+            std::fs::read(admitted.join("rus.download.lock")).unwrap(),
+            b""
+        );
+        assert_eq!(
+            std::fs::read(retained_source).unwrap(),
+            b"invalid candidate"
+        );
+        assert_eq!(std::fs::read(source).unwrap(), b"unrelated source pathname");
     }
 }

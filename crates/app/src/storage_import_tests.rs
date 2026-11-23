@@ -45,6 +45,8 @@ fn bound_import_lock_keeps_its_parent_and_releases_without_path_cleanup() {
     let selected = directory.path().join("selected");
     let admitted = directory.path().join("admitted");
     std::fs::create_dir(&selected).unwrap();
+    std::fs::write(selected.join("pack.bin"), b"retained pack").unwrap();
+    std::fs::write(selected.join("pack.download.lock"), b"admitted lock bytes").unwrap();
     let output = AtomicOutput::new(&selected.join("pack.bin"), true).unwrap();
     let guard = output
         .lock_sibling(OsStr::new("pack.download.lock"))
@@ -54,14 +56,40 @@ fn bound_import_lock_keeps_its_parent_and_releases_without_path_cleanup() {
             .lock_sibling(OsStr::new("pack.download.lock"))
             .is_err()
     );
+    #[cfg(windows)]
+    {
+        // Windows rejects directory renames while any descendant file remains open.
+        let error = std::fs::rename(&selected, &admitted).unwrap_err();
+        assert_eq!(error.raw_os_error(), Some(5));
+        assert!(!admitted.exists());
+        assert_eq!(
+            std::fs::read(selected.join("pack.bin")).unwrap(),
+            b"retained pack"
+        );
+        assert_eq!(std::fs::read_dir(&selected).unwrap().count(), 2);
+        assert!(
+            output
+                .lock_sibling(OsStr::new("pack.download.lock"))
+                .is_err()
+        );
+        drop(guard);
+        std::fs::rename(&selected, &admitted).unwrap();
+    }
+    #[cfg(not(windows))]
     std::fs::rename(&selected, &admitted).unwrap();
     std::fs::create_dir(&selected).unwrap();
     std::fs::write(selected.join("pack.download.lock"), b"unrelated lock bytes").unwrap();
+    #[cfg(windows)]
+    let guard = output
+        .lock_sibling(OsStr::new("pack.download.lock"))
+        .unwrap();
     assert!(
         output
             .lock_sibling(OsStr::new("pack.download.lock"))
             .is_err()
     );
+    assert!(JobLock::acquire(&admitted.join("pack.download.lock")).is_err());
+    assert!(JobLock::acquire(&selected.join("pack.download.lock")).is_ok());
     drop(guard);
     assert!(
         output
@@ -72,5 +100,14 @@ fn bound_import_lock_keeps_its_parent_and_releases_without_path_cleanup() {
         std::fs::read(selected.join("pack.download.lock")).unwrap(),
         b"unrelated lock bytes"
     );
-    assert_eq!(std::fs::read_dir(admitted).unwrap().count(), 1);
+    assert_eq!(
+        std::fs::read(admitted.join("pack.download.lock")).unwrap(),
+        b"admitted lock bytes"
+    );
+    assert_eq!(
+        std::fs::read(admitted.join("pack.bin")).unwrap(),
+        b"retained pack"
+    );
+    assert_eq!(std::fs::read_dir(admitted).unwrap().count(), 2);
+    assert_eq!(std::fs::read_dir(selected).unwrap().count(), 1);
 }

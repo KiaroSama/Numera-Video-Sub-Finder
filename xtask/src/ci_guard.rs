@@ -440,7 +440,10 @@ fn supervise(
             exit = Some((status.code().unwrap_or(1), Instant::now()));
         }
         if let Some((code, observed)) = exit {
-            let descendants = child.active()?;
+            let deadline = (observed + Duration::from_secs(2))
+                .min(started + wall)
+                .min(last_progress + idle);
+            let descendants = child.active(deadline)?;
             if descendants.is_empty() && pipes.closed() {
                 return Ok(code);
             }

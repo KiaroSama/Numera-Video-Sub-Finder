@@ -22,14 +22,41 @@ fn language_import_streams_to_the_admitted_parent_and_retains_its_lock_across_su
     let (prepared, exists) = prepare_import_with_spec(&paths, language, &source, &cancel).unwrap();
     assert!(exists);
     let admitted = directory.path().join("admitted-tessdata");
-    std::fs::rename(&root, &admitted).unwrap();
-    std::fs::create_dir(&root).unwrap();
-    std::fs::write(root.join("rus.traineddata"), b"unrelated replacement root").unwrap();
-    assert!(crate::storage::JobLock::acquire(&admitted.join("rus.download.lock")).is_err());
+    #[cfg(windows)]
+    {
+        // The held child lock prevents an ancestor rename on Windows.
+        let error = std::fs::rename(&root, &admitted).unwrap_err();
+        assert_eq!(error.raw_os_error(), Some(5));
+        assert!(!admitted.exists());
+        assert_eq!(
+            std::fs::read(root.join("rus.traineddata")).unwrap(),
+            b"previous pack"
+        );
+        assert_eq!(std::fs::read_dir(&root).unwrap().count(), 2);
+        assert!(crate::storage::JobLock::acquire(&root.join("rus.download.lock")).is_err());
+    }
+    #[cfg(not(windows))]
+    {
+        std::fs::rename(&root, &admitted).unwrap();
+        std::fs::create_dir(&root).unwrap();
+        std::fs::write(root.join("rus.traineddata"), b"unrelated replacement root").unwrap();
+        assert!(crate::storage::JobLock::acquire(&admitted.join("rus.download.lock")).is_err());
+    }
     let selected = directory.path().join("retained-source.traineddata");
     std::fs::rename(&source, &selected).unwrap();
     std::fs::write(&source, b"unrelated source pathname").unwrap();
     prepared.publish(&cancel).unwrap();
+    #[cfg(windows)]
+    {
+        assert_eq!(
+            std::fs::read(root.join("rus.traineddata")).unwrap(),
+            vec![b'L'; 131_079]
+        );
+        assert!(crate::storage::JobLock::acquire(&root.join("rus.download.lock")).is_ok());
+        std::fs::rename(&root, &admitted).unwrap();
+        std::fs::create_dir(&root).unwrap();
+        std::fs::write(root.join("rus.traineddata"), b"unrelated replacement root").unwrap();
+    }
     assert_eq!(
         std::fs::read(admitted.join("rus.traineddata")).unwrap(),
         vec![b'L'; 131_079]
@@ -46,6 +73,10 @@ fn language_import_streams_to_the_admitted_parent_and_retains_its_lock_across_su
     assert_eq!(std::fs::read_dir(&admitted).unwrap().count(), 2);
     assert_eq!(std::fs::read_dir(root).unwrap().count(), 1);
     assert!(crate::storage::JobLock::acquire(&admitted.join("rus.download.lock")).is_ok());
+    assert_eq!(
+        std::fs::read(admitted.join("rus.download.lock")).unwrap(),
+        b""
+    );
 }
 
 #[test]
