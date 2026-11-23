@@ -116,7 +116,18 @@ fn main() {
             }
             // Portable packages retain sibling/managed runtime resolution;
             // doctor still validates the selected runtime files.
-            app.manage(Host::new(paths, setup_log.clone()));
+            if !app.manage(Host::new(paths, setup_log.clone())) {
+                return Err("Native Host state was already managed".into());
+            }
+            #[cfg(feature = "e2e")]
+            eprintln!(
+                "[unix_ms={}] [INFO] [DESKTOP] phase=host-managed pid={}",
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis(),
+                std::process::id()
+            );
             setup_log.event("INFO", "DESKTOP", "phase=host-managed");
             updates::schedule(app.handle());
             Ok(())

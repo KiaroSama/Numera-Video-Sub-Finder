@@ -125,39 +125,31 @@ fn handshake_remaining(deadline: Instant, now: Instant) -> Result<Duration> {
 }
 
 fn host_ready(log: &str, pid: u32) -> bool {
-    log.lines().any(|line| {
-        line.contains("[INFO] [DESKTOP] phase=paths-ready ")
-            && line.ends_with(&format!(" pid={pid}"))
-    }) && log.contains("[INFO] [DESKTOP] phase=host-managed\n")
+    let marker = format!("] [INFO] [DESKTOP] phase=host-managed pid={pid}\n");
+    log.split_inclusive('\n').any(|line| {
+        line.strip_prefix("[unix_ms=")
+            .and_then(|line| line.strip_suffix(&marker))
+            .is_some_and(|timestamp| timestamp.parse::<u128>().is_ok())
+    })
 }
 
-fn host_managed(logs: &Path, pid: u32) -> Result<bool> {
-    if !logs.is_dir() {
-        return Ok(false);
+fn host_managed(capture: &Path, pid: u32) -> Result<bool> {
+    // OwnedProcess truncates this capture before spawning, so historical logs cannot admit a PID.
+    let mut file = match std::fs::File::open(capture) {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(error.into()),
+    };
+    use std::io::Read;
+    if file.metadata()?.len() > 1024 * 1024 {
+        return Err("GUI startup capture exceeds1MiB".into());
     }
-    for entry in std::fs::read_dir(logs)?.take(20) {
-        let path = entry?.path();
-        if !path
-            .file_name()
-            .is_some_and(|name| name.to_string_lossy().starts_with("nvsf-desktop_"))
-        {
-            continue;
-        }
-        let mut file = std::fs::File::open(path)?;
-        use std::io::Read;
-        if file.metadata()?.len() > 1024 * 1024 {
-            return Err("GUI startup log exceeds1MiB".into());
-        }
-        let mut log = String::new();
-        (&mut file).take(1024 * 1024 + 1).read_to_string(&mut log)?;
-        if log.len() > 1024 * 1024 {
-            return Err("GUI startup log grew beyond1MiB".into());
-        }
-        if host_ready(&log, pid) {
-            return Ok(true);
-        }
+    let mut log = Vec::new();
+    (&mut file).take(1024 * 1024 + 1).read_to_end(&mut log)?;
+    if log.len() > 1024 * 1024 {
+        return Err("GUI startup capture grew beyond1MiB".into());
     }
-    Ok(false)
+    Ok(host_ready(&String::from_utf8_lossy(&log), pid))
 }
 
 pub fn smoke(gui: &Path, fixtures: &Path, data: &Path, output: &Path) -> Result<()> {
@@ -207,7 +199,7 @@ pub fn smoke(gui: &Path, fixtures: &Path, data: &Path, output: &Path) -> Result<
         if let Some(status) = process.status()? {
             return Err(format!("GUI exited before native Host readiness: {status}").into());
         }
-        let managed = host_managed(&data.join("logs"), process.pid())?;
+        let managed = host_managed(&capture, process.pid())?;
         handshake_remaining(handshake, Instant::now())?;
         if managed {
             break;
@@ -612,12 +604,29 @@ mod readiness_tests {
     #[test]
     fn server_or_another_process_log_is_not_native_host_readiness() {
         let own = "[timestamp] [INFO] [DESKTOP] phase=paths-ready elapsed_ms=1 pid=42\n";
-        let managed = "[timestamp] [INFO] [DESKTOP] phase=host-managed\n";
+        let managed = "[unix_ms=1795406672000] [INFO] [DESKTOP] phase=host-managed pid=42\n";
         assert!(!host_ready("", 42));
         assert!(!host_ready(own, 42));
-        assert!(!host_ready(managed, 42));
-        assert!(!host_ready(&format!("{own}{managed}"), 4));
-        assert!(host_ready(&format!("{own}{managed}"), 42));
+        assert!(!host_ready(
+            "[timestamp] [INFO] [DESKTOP] phase=host-managed\n",
+            42
+        ));
+        assert!(!host_ready(managed, 4));
+        assert!(!host_ready(managed, 420));
+        assert!(!host_ready(managed.trim_end_matches('\n'), 42));
+        assert!(!host_ready(
+            "[unix_ms=1795406672000] [INFO] [DESKTOP] phase=host-man",
+            42
+        ));
+        assert!(!host_ready(
+            "[unix_ms=1795406672000] [INFO] [DESKTOP] phase=host-managed pid=42 extra\n",
+            42
+        ));
+        assert!(host_ready(managed, 42));
+        assert!(host_ready(
+            &format!("{own}{managed}partial later output"),
+            42
+        ));
         let start = Instant::now();
         let deadline = start + Duration::from_secs(45);
         assert_eq!(
@@ -626,5 +635,85 @@ mod readiness_tests {
         );
         assert!(handshake_remaining(deadline, deadline).is_err());
         assert!(handshake_remaining(deadline, deadline + Duration::from_secs(1)).is_err());
+    }
+
+    #[test]
+    fn native_host_readiness_ignores_unrelated_and_stale_log_history() {
+        let root = tempfile::tempdir().unwrap();
+        let logs = root.path().join("data/logs");
+        std::fs::create_dir_all(&logs).unwrap();
+        for index in 0..25 {
+            std::fs::write(
+                logs.join(format!("nvsf-worker_{index}.log")),
+                b"old worker\n",
+            )
+            .unwrap();
+        }
+        let marker = "[unix_ms=1795406672000] [INFO] [DESKTOP] phase=host-managed pid=42\n";
+        std::fs::write(logs.join("nvsf-desktop_old.log"), marker).unwrap();
+        std::fs::write(
+            logs.join("nvsf-desktop_oversized.log"),
+            vec![b'x'; 1024 * 1024 + 1],
+        )
+        .unwrap();
+        let capture = root.path().join("gui-captured.log");
+        assert!(!host_managed(&capture, 42).unwrap());
+        std::fs::write(&capture, b"[INFO] [DESKTOP] phase=paths-start pid=42\n").unwrap();
+        assert!(!host_managed(&capture, 42).unwrap());
+        std::fs::write(&capture, marker).unwrap();
+        assert!(host_managed(&capture, 42).unwrap());
+        std::fs::write(&capture, [0xff, b'\n', 0xe2, 0x82]).unwrap();
+        assert!(!host_managed(&capture, 42).unwrap());
+        let mut native_output = vec![0xff, b'\n'];
+        native_output.extend_from_slice(marker.as_bytes());
+        native_output.extend_from_slice(&[0xe2, 0x82]);
+        std::fs::write(&capture, native_output).unwrap();
+        assert!(host_managed(&capture, 42).unwrap());
+        assert_eq!(std::fs::read_dir(logs).unwrap().count(), 27);
+    }
+
+    #[test]
+    fn native_host_readiness_refuses_an_oversized_owned_capture() {
+        let root = tempfile::tempdir().unwrap();
+        let capture = root.path().join("gui-captured.log");
+        let mut bytes =
+            b"[unix_ms=1795406672000] [INFO] [DESKTOP] phase=host-managed pid=42\n".to_vec();
+        bytes.resize(1024 * 1024, b' ');
+        std::fs::write(&capture, &bytes).unwrap();
+        assert!(host_managed(&capture, 42).unwrap());
+        bytes.push(b' ');
+        std::fs::write(&capture, bytes).unwrap();
+        assert!(
+            host_managed(&capture, 42)
+                .unwrap_err()
+                .to_string()
+                .contains("1MiB")
+        );
+    }
+
+    #[test]
+    fn owned_process_admission_discards_a_previous_capture_even_with_the_same_pid() {
+        let root = tempfile::tempdir().unwrap();
+        let capture = root.path().join("gui-captured.log");
+        std::fs::write(
+            &capture,
+            b"[unix_ms=1795406672000] [INFO] [DESKTOP] phase=host-managed pid=42\n",
+        )
+        .unwrap();
+        assert!(host_managed(&capture, 42).unwrap());
+        let mut command = Command::new(root.path().join("missing-child-executable"));
+        let error = OwnedProcess::spawn(&mut command, &capture)
+            .err()
+            .expect("the nonexistent executable must not start");
+        if std::env::var("GITHUB_ACTIONS").as_deref() == Ok("true") {
+            assert_eq!(
+                error.downcast_ref::<std::io::Error>().unwrap().kind(),
+                std::io::ErrorKind::NotFound
+            );
+        } else {
+            assert_eq!(error.to_string(), "CI subprocess execution is hosted-only");
+        }
+        assert!(std::fs::read(&capture).unwrap().is_empty());
+        assert!(!host_managed(&capture, 42).unwrap());
     }
 }
