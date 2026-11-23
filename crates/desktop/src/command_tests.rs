@@ -16,6 +16,7 @@ fn workspace() -> (tempfile::TempDir, tauri::App<tauri::test::MockRuntime>) {
     let log = nvsf_app::logging::Log::new(&paths, "nvsf-desktop");
     let app = tauri::test::mock_builder()
         .manage(Host::new(paths, log))
+        .manage(files::ProjectFiles::default())
         .build(tauri::test::mock_context(tauri::test::noop_assets()))
         .unwrap();
     (directory, app)
@@ -47,6 +48,23 @@ fn project() -> Project {
         active_appearances: vec![],
         completed: false,
         warnings: vec![],
+    }
+}
+
+#[test]
+fn desktop_workflow_commands_are_registered_in_both_manifests() {
+    for command in [
+        "save_project_as",
+        "restart_app",
+        "preview_initial_frame",
+        "confirm_close",
+    ] {
+        let entry = format!("\"{command}\"");
+        assert!(include_str!("../build.rs").contains(&entry), "{command}");
+        assert!(
+            include_str!("../permissions/workspace.toml").contains(&entry),
+            "{command}"
+        );
     }
 }
 
@@ -101,26 +119,24 @@ fn history_grants_expire_on_refresh_and_open_preserves_saved_corrections() {
     )
     .unwrap();
     std::fs::create_dir(host.inner().0.paths.projects.join("directory.json")).unwrap();
-    let entries = tauri::async_runtime::block_on(files::list_history(host.clone())).unwrap();
+    let list = || tauri::async_runtime::block_on(files::list_history(host.clone(), app.state()));
+    let open = |token| {
+        tauri::async_runtime::block_on(files::open_history(host.clone(), app.state(), token))
+    };
+    let entries = list().unwrap();
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0].name, "review.json");
     let old = entries[0].token.clone();
-    let entries = tauri::async_runtime::block_on(files::list_history(host.clone())).unwrap();
-    assert_ne!(entries[0].token, old);
-    assert!(tauri::async_runtime::block_on(files::open_history(host.clone(), old)).is_err());
-    let opened =
-        tauri::async_runtime::block_on(files::open_history(host.clone(), entries[0].token.clone()))
-            .unwrap();
-    assert_eq!(opened.cues, saved.cues);
+    let token = list().unwrap()[0].token.clone();
+    assert_ne!(token, old);
+    assert!(open(old).is_err());
+    assert_eq!(open(token.clone()).unwrap().cues, saved.cues);
     assert_eq!(
         files::current_project(host.clone()).unwrap().unwrap().cues,
         saved.cues
     );
     host.inner().0.source_busy.store(true, Ordering::Release);
-    assert!(
-        tauri::async_runtime::block_on(files::open_history(host.clone(), entries[0].token.clone()))
-            .is_err()
-    );
+    assert!(open(token).is_err());
     host.inner().0.source_busy.store(false, Ordering::Release);
 }
 
@@ -404,12 +420,8 @@ fn review_commands_reject_invalid_identity_without_loading_native_resources() {
         before
     );
     assert_eq!(std::fs::read(source).unwrap(), b"original source");
-    assert_eq!(
-        std::fs::read_dir(&host.inner().0.paths.cache)
-            .unwrap()
-            .count(),
-        0
-    );
+    let cache = std::fs::read_dir(&host.inner().0.paths.cache).unwrap();
+    assert_eq!(cache.count(), 0);
 }
 
 #[test]
@@ -424,35 +436,18 @@ fn native_file_grants_validate_identity_and_limits_before_publication() {
         assert_eq!(path, canonical);
         Ok(project().media)
     };
-    assert!(
-        files::grant_source_with(host.inner(), directory.path(), None, |_| panic!(
-            "directory"
-        ))
-        .is_err()
-    );
-    assert!(
-        files::grant_source_with(
-            host.inner(),
-            &directory.path().join("missing"),
-            None,
-            |_| panic!("missing")
-        )
-        .is_err()
-    );
+    let grant = |path: &std::path::Path, hash| {
+        files::grant_source_with(host.inner(), path, hash, |_| panic!("unexpected probe"))
+    };
+    assert!(grant(directory.path(), None).is_err());
+    assert!(grant(&directory.path().join("missing"), None).is_err());
     assert_eq!(
-        files::grant_source_with(host.inner(), &source, Some("wrong"), |_| panic!(
-            "identity mismatch"
-        ))
-        .err()
-        .unwrap(),
+        grant(&source, Some("wrong")).err().unwrap(),
         "Selected video does not match the project's source fingerprint"
     );
-    assert_eq!(
-        files::grant_source_with(host.inner(), &source, None, |_| Err("probe failed".into()))
-            .err()
-            .unwrap(),
-        "probe failed"
-    );
+    let probe_error =
+        files::grant_source_with(host.inner(), &source, None, |_| Err("probe failed".into()));
+    assert_eq!(probe_error.err().unwrap(), "probe failed");
     assert!(lock(&host.inner().0.sources).unwrap().is_empty());
     host.inner().0.closing.store(true, Ordering::Release);
     assert!(files::grant_source_with(host.inner(), &source, None, |_| panic!("closing")).is_err());
@@ -511,28 +506,22 @@ fn review_save_and_export_preserve_files_without_overwrite_confirmation() {
     let original = serde_json::to_vec(&corrected).unwrap();
     let saved = directory.path().join("saved review.json");
     std::fs::write(&saved, b"existing review").unwrap();
-    assert!(
-        files::save_project_to(&corrected, &saved, || Ok(false))
-            .unwrap()
-            .is_none()
-    );
+    let save = |decision: crate::state::Result<bool>| {
+        files::save_project_to(&corrected, &saved, || decision)
+    };
+    assert!(save(Ok(false)).unwrap().is_none());
     assert_eq!(std::fs::read(&saved).unwrap(), b"existing review");
     assert_eq!(
-        files::save_project_to(&corrected, &saved, || Err("confirmation failed".into()))
-            .unwrap_err(),
+        save(Err("confirmation failed".into())).unwrap_err(),
         "confirmation failed"
     );
     assert_eq!(std::fs::read(&saved).unwrap(), b"existing review");
     assert_eq!(
-        files::save_project_to(&corrected, &saved, || Ok(true))
-            .unwrap()
-            .as_deref(),
+        save(Ok(true)).unwrap().as_deref(),
         Some("saved review.json")
     );
-    assert_eq!(
-        nvsf_app::storage::load_project(&saved).unwrap().cues,
-        corrected.cues
-    );
+    let reopened = nvsf_app::storage::load_project(&saved).unwrap();
+    assert_eq!(reopened.cues, corrected.cues);
     let missing = directory.path().join("missing/review.json");
     assert!(files::save_project_to(&corrected, &missing, || Ok(true)).is_err());
     assert!(!missing.exists());
@@ -637,30 +626,32 @@ fn review_save_requires_bound_confirmation_after_ancestor_substitution() {
         std::fs::create_dir(&selected).unwrap();
         assert!(!destination.exists());
         let mut prompted = false;
-        let result = files::save_prepared_project(&project(), &destination, prepared, || {
+        let confirm = || {
             prompted = true;
             if confirmation_error {
-                Err("confirmation failed after directory move".into())
-            } else {
-                Ok(false)
+                return Err("confirmation failed after directory move".into());
             }
-        });
+            Ok(false)
+        };
+        let result = files::save_prepared_project(
+            &project(),
+            &destination,
+            prepared,
+            confirm,
+            files::write_project,
+        );
         assert!(
             prompted,
             "The retained existing entry requires explicit consent"
         );
-        if confirmation_error {
-            assert_eq!(
-                result.unwrap_err(),
-                "confirmation failed after directory move"
-            );
+        let expected = if confirmation_error {
+            Err("confirmation failed after directory move".into())
         } else {
-            assert!(result.unwrap().is_none());
-        }
-        assert_eq!(
-            std::fs::read(admitted.join("review.json")).unwrap(),
-            b"previous corrections"
-        );
+            Ok(None)
+        };
+        assert_eq!(result, expected);
+        let bytes = std::fs::read(admitted.join("review.json")).unwrap();
+        assert_eq!(bytes, b"previous corrections");
         assert!(!destination.exists());
         assert_eq!(std::fs::read_dir(&selected).unwrap().count(), 0);
         assert_eq!(std::fs::read_dir(&admitted).unwrap().count(), 1);
@@ -714,66 +705,41 @@ fn denied_resource_commands_do_not_start_network_or_native_inference() {
     let (_directory, app) = workspace();
     let host = app.state::<Host>();
     tauri::async_runtime::block_on(async {
-        assert!(
-            runtime_manager::repair_runtimes(host.clone(), false)
-                .await
-                .unwrap_err()
-                .contains("approval")
-        );
-        assert!(
-            language_manager::install_language(host.clone(), "fra".into(), false)
-                .await
-                .is_err()
-        );
-        assert!(
-            language_manager::install_language(host.clone(), "../eng".into(), true)
-                .await
-                .is_err()
-        );
-        assert!(
-            visual_retry::install_visual_retry(host.clone(), false)
-                .await
-                .is_err()
-        );
-        assert_eq!(
+        let repair = runtime_manager::repair_runtimes(host.clone(), false).await;
+        assert!(repair.unwrap_err().contains("approval"));
+        for (language, consent) in [("fra", false), ("../eng", true)] {
+            let install =
+                language_manager::install_language(host.clone(), language.into(), consent);
+            assert!(install.await.is_err());
+        }
+        let install = visual_retry::install_visual_retry(host.clone(), false).await;
+        assert!(install.is_err());
+        let regions =
             recognition::suggest_regions(host.clone(), "missing".into(), "invalid-language".into())
-                .await
-                .err()
-                .unwrap(),
+                .await;
+        assert_eq!(
+            regions.err().unwrap(),
             "Choose a language from the official catalog"
         );
+        let invalid = Rect {
+            x: -1.0,
+            ..Rect::default()
+        };
+        let cue =
+            recognition::recognize_cue(host.clone(), "missing".into(), 1, "en".into(), invalid, 0)
+                .await;
         assert_eq!(
-            recognition::recognize_cue(
-                host.clone(),
-                "missing".into(),
-                1,
-                "en".into(),
-                Rect {
-                    x: -1.0,
-                    ..Rect::default()
-                },
-                0
-            )
-            .await
-            .err()
-            .unwrap(),
+            cue.err().unwrap(),
             "Invalid input: region must be finite, nonempty and inside the image"
         );
     });
     assert!(!host.inner().0.model_busy.load(Ordering::Acquire));
-    assert_eq!(
-        std::fs::read_dir(&host.inner().0.paths.cache)
-            .unwrap()
-            .count(),
-        0
-    );
+    let cache = std::fs::read_dir(&host.inner().0.paths.cache).unwrap();
+    assert_eq!(cache.count(), 0);
     let status = updates::set_update_checks(host.clone(), false).unwrap();
     assert!(!status.enabled);
-    assert!(
-        !nvsf_app::updates::preferences(&host.inner().0.paths)
-            .unwrap()
-            .enabled
-    );
+    let preferences = nvsf_app::updates::preferences(&host.inner().0.paths).unwrap();
+    assert!(!preferences.enabled);
     updates::cancel_update(host.clone());
     crate::set_unsaved(host.clone(), true).unwrap();
     assert!(host.inner().0.unsaved.load(Ordering::Acquire));

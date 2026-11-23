@@ -66,7 +66,7 @@ pub fn Evidence(ui: Ui) -> impl IntoView {
                     </Show>
                 </figure>
                 <figure><figcaption>{move ||format!("Candidate source region · {}",helpers::time_label(ui.time.get()))}</figcaption>
-                    <Show when=move ||region().is_some()&&!ui.preview_url.get().is_empty() fallback=||view!{<p class="hint">"Link the original video and seek to a frame to compare."</p>}>
+                    <Show when=move ||ui.review_source_linked()&&region().is_some()&&!ui.preview_url.get().is_empty() fallback=||view!{<p class="hint">"Link the original video and seek to a frame to compare."</p>}>
                         <div class="candidate-crop" style=move ||region().and_then(|r|ui.source.with(|s|s.as_ref().map(|s|format!("aspect-ratio:{} / {}",r.width*f64::from(s.media.width),r.height*f64::from(s.media.height))))).unwrap_or_default()>
                             <img src=move ||ui.preview_url.get() alt="Unmasked candidate region from the selected source frame" style=move ||region().map(|r|format!("width:{}%;left:{}%;top:{}%",100.0/r.width,-100.0*r.x/r.width,-100.0*r.y/r.height)).unwrap_or_default()/>
                         </div>

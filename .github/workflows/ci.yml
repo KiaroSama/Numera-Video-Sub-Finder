@@ -133,8 +133,8 @@ jobs:
           if ($LASTEXITCODE -ne 0 -or [IO.File]::ReadAllText("$env:GITHUB_WORKSPACE/.ci-work/tools/tauri-version.txt",[Text.Encoding]::UTF8).Trim() -ne 'tauri-cli 2.12.4') { throw 'Installed Tauri CLI version mismatch' }
           "$env:GITHUB_WORKSPACE/.ci-work/tools/bin" >> $env:GITHUB_PATH
           $env:PATH = "$env:GITHUB_WORKSPACE/.ci-work/tools/bin$([IO.Path]::PathSeparator)$env:PATH"
-          $guardArgs = @('tauri','icon','assets/logo.svg','--output','crates/desktop/icons')
-          & $env:CI_XTASK ci-guard --name native-icons --wall-seconds 60 --idle-seconds 20 --executable cargo -- @guardArgs
+          $guardArgs = @('generate-icons','--output','crates/desktop/icons')
+          & $env:CI_XTASK ci-guard --name native-icons --wall-seconds 60 --idle-seconds 20 --executable $env:CI_XTASK -- @guardArgs
           if ($LASTEXITCODE -ne 0) { throw 'Native icon generation failed' }
       - name: Core and native static analysis
         run: |
@@ -330,7 +330,7 @@ jobs:
           $xtask = Join-Path $env:GITHUB_WORKSPACE "target/release/xtask$ext"
           $args = @('gui','--gui',".ci-work/e2e/numera-video-sub-finder$ext",'--fixture-dir','.ci-work/fixtures','--data-root','.ci-work/data','--output','.ci-work/gui-evidence')
           if ($IsLinux) {
-            $guardArgs = @('-a','dbus-run-session','--',$xtask) + $args
+            $guardArgs = @('-a','-s','-screen 0 1600x1000x24','dbus-run-session','--',$xtask) + $args
             & $env:CI_XTASK ci-guard --name native-gui --wall-seconds 270 --idle-seconds 150 --executable xvfb-run -- @guardArgs
           } else {
             $guardArgs = $args
@@ -390,7 +390,7 @@ jobs:
           $gui = "$env:GITHUB_WORKSPACE/.ci-work/relocated/Numera 日本 portable ${{ matrix.id }}/$name"
           $args = @('production','--gui',$gui,'--data-root','.ci-work/production-data','--output','.ci-work/production-evidence')
           if ($IsLinux) {
-            $guardArgs = @('-a','dbus-run-session','--',$xtask,'virtual-desktop','--executable',$xtask,'--arguments-json',($args | ConvertTo-Json -Compress))
+            $guardArgs = @('-a','-s','-screen 0 1600x1000x24','dbus-run-session','--',$xtask,'virtual-desktop','--executable',$xtask,'--arguments-json',($args | ConvertTo-Json -Compress))
             & $env:CI_XTASK ci-guard --name production-gui --wall-seconds 90 --idle-seconds 30 --executable xvfb-run -- @guardArgs
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           } else {

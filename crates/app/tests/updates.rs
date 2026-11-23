@@ -21,7 +21,7 @@ fn release_metadata_rejects_untrusted_targets_and_denied_channels() {
             .unwrap()
             .is_none()
     );
-    assert!(updates::manifest(&encode(&manifest), "0.1.0", "windows-aarch64-nsis").is_err());
+    assert!(updates::manifest(&encode(&manifest), "0.1.0", "windows-aarch64-msi").is_err());
     let mut untrusted = manifest.clone();
     untrusted["platforms"]["linux-x86_64-appimage"]["url"] =
         "https://example.com/app.AppImage".into();
@@ -62,7 +62,7 @@ fn signed_metadata_and_payloads_refuse_invalid_signatures_formats_and_architectu
     elf[18..20].copy_from_slice(&62u16.to_le_bytes());
     assert!(validate(&elf, "linux-x86_64-appimage").is_ok());
     assert!(validate(&elf, "linux-aarch64-appimage").is_err());
-    assert!(validate(&elf, "windows-x86_64-nsis").is_err());
+    assert!(validate(&elf, "windows-x86_64-msi").is_err());
     assert_eq!(
         validate(&elf, "darwin-aarch64-app")
             .unwrap_err()
@@ -74,18 +74,14 @@ fn signed_metadata_and_payloads_refuse_invalid_signatures_formats_and_architectu
         assert!(validate(b"PK\x03\x04", target).is_ok());
     }
     assert!(validate(&elf, "linux-x86_64-unknown").is_err());
-    let mut pe = vec![0; 70];
-    pe[..2].copy_from_slice(b"MZ");
-    pe[60..64].copy_from_slice(&64u32.to_le_bytes());
-    pe[64..68].copy_from_slice(b"PE\0\0");
-    pe[68..70].copy_from_slice(&0x14cu16.to_le_bytes());
-    assert!(validate(&pe, "windows-x86_64-nsis").is_ok());
-    assert!(
-        validate(&pe, "windows-aarch64-nsis").is_ok(),
-        "NSIS stub is x86; signed inventory binds application architecture"
-    );
-    pe[60..64].copy_from_slice(&u32::MAX.to_le_bytes());
-    assert!(validate(&pe, "windows-x86_64-nsis").is_err());
+    let msi = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1";
+    for target in ["windows-x86_64-msi", "windows-aarch64-msi"] {
+        assert!(validate(msi, target).is_ok());
+        assert!(validate(&msi[..7], target).is_err());
+        assert!(validate(b"MZ\0\0\0\0\0\0", target).is_err());
+    }
+    assert!(validate(msi, "windows-x86_64-nsis").is_err());
+    assert!(validate(msi, "linux-aarch64-msi").is_err());
 }
 
 #[test]

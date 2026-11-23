@@ -18,7 +18,7 @@ pub fn FixtureControls(ui: Ui) -> impl IntoView {
     view! {<section class="panel e2e-controls">
         <h2>"CI fixture admission (test artifact only)"</h2>
         <button id="e2e-load" data-testid="e2e-load-fixture" on:click={move |_|ui.request::<Grant>("e2e_fixture",json!({"fixture":"en.mp4","output":"ui-en.srt"}),move |grant|{
-            ui.source.set(Some(grant.source));ui.output.set(Some(grant.output));ui.seek(0);
+            ui.output.set(Some(grant.output));ui.admit_video(grant.source, false);
         })} disabled=move ||ui.busy.get()>"Admit English CI fixture"</button>
         <button data-testid="e2e-save-edits" disabled=move ||ui.busy.get()||ui.preview_busy.get()||ui.project.with(Option::is_none)||ui.draft_dirty.get() on:click=move |_|{
             let Some(project)=ui.project.get_untracked()else{return;};let Some(output)=ui.output.get_untracked()else{return;};

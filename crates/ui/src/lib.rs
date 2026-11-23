@@ -1,6 +1,25 @@
 pub mod helpers;
 
 #[cfg(target_arch = "wasm32")]
+mod close_modal;
+#[cfg(any(target_arch = "wasm32", test))]
+mod hotkeys;
+#[cfg(target_arch = "wasm32")]
+mod player;
+#[cfg(target_arch = "wasm32")]
+mod roi_editor;
+#[cfg(any(target_arch = "wasm32", test))]
+mod roi_geometry;
+#[cfg(target_arch = "wasm32")]
+mod studio_state;
+#[cfg(target_arch = "wasm32")]
+mod toolbar;
+#[cfg(any(target_arch = "wasm32", test))]
+mod undo;
+#[cfg(target_arch = "wasm32")]
+mod update_banner;
+
+#[cfg(target_arch = "wasm32")]
 mod app;
 #[cfg(all(target_arch = "wasm32", feature = "e2e"))]
 mod e2e;

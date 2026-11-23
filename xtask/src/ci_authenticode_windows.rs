@@ -11,9 +11,9 @@ use std::{
     env,
     ffi::{OsString, c_void},
     fs,
-    io::Write,
+    io::{Read, Seek, Write},
     mem::size_of,
-    os::windows::{ffi::OsStrExt, io::AsRawHandle},
+    os::windows::{ffi::OsStrExt, fs::OpenOptionsExt, io::AsRawHandle},
     path::{Path, PathBuf},
     process::{Command, Stdio},
     ptr::{null, null_mut},
@@ -290,19 +290,70 @@ fn hash(bytes: &[u8]) -> String {
         .collect()
 }
 
+fn read_msi(path: &Path) -> Result<(fs::File, u64, String)> {
+    if !unlinked(path)?.is_file() {
+        return Err("A regular MSI signature input is required.".into());
+    }
+    // Hold the exact file against write/delete throughout the SIP and WinTrust checks.
+    let mut file = fs::OpenOptions::new().read(true).share_mode(1).open(path)?;
+    let size = file.metadata()?.len();
+    if !(512..=nvsf_app::updates::MAX_UPDATE_BYTES).contains(&size) {
+        return Err("MSI signature input exceeds its byte bound.".into());
+    }
+    let mut header = [0; 8];
+    file.read_exact(&mut header)?;
+    if header != *b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1" {
+        return Err("MSI signature input is not an OLE compound document.".into());
+    }
+    let mut digest = Sha256::new();
+    digest.update(header);
+    let mut chunk = [0; 65_536];
+    loop {
+        let count = file.read(&mut chunk)?;
+        if count == 0 {
+            break;
+        }
+        digest.update(&chunk[..count]);
+    }
+    file.rewind()?;
+    let digest = digest
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    Ok((file, size, digest))
+}
+
 pub(crate) fn verify(path: &Path, pin: &str) -> Result<Value> {
     admitted()?;
     if !valid_pin(pin) {
         return Err("Invalid development signer SHA256 pin.".into());
     }
     let resolved = std::path::absolute(path)?;
-    let (file, bytes) = read_image(&resolved)?;
+    let msi = resolved
+        .extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("msi"));
+    let (file, bytes, digest, pe) = if msi {
+        let (file, bytes, digest) = read_msi(&resolved)?;
+        (file, bytes, digest, None)
+    } else {
+        let (file, bytes) = read_image(&resolved)?;
+        let digest = hash(&bytes);
+        (file, bytes.len() as u64, digest, Some(bytes))
+    };
     let path = wide(&resolved)?;
-    let embedded = embedded(&bytes)?;
-    if Sha256::digest(embedded) != Sha256::digest(queried_cms(&path)?) {
-        return Err("Native CMS query differs from the exact PE signature blob.".into());
-    }
-    let cms: Cms = serde_json::from_slice(&powershell(CMS, &STANDARD.encode(embedded), None)?)?;
+    // The Windows SIP reads the embedded MSI signature stream. Keep the PE cross-check unchanged.
+    let native = queried_cms(&path)?;
+    let message = if let Some(pe) = &pe {
+        let blob = embedded(pe)?;
+        if Sha256::digest(blob) != Sha256::digest(&native) {
+            return Err("Native CMS query differs from the exact PE signature blob.".into());
+        }
+        blob
+    } else {
+        native.as_slice()
+    };
+    let cms: Cms = serde_json::from_slice(&powershell(CMS, &STANDARD.encode(message), None)?)?;
     if cms.detached || cms.count != 1 || cms.content_type != "1.3.6.1.4.1.311.2.1.4" {
         return Err("Exactly one embedded Authenticode signer is required.".into());
     }
@@ -329,7 +380,7 @@ pub(crate) fn verify(path: &Path, pin: &str) -> Result<Value> {
         return Err("Expected ordinary untrusted-root policy result was not observed.".into());
     }
     Ok(
-        json!({"schema":1,"policy":"development-pinned-integrity","certificate_sha256":actual,"sha256":hash(&bytes),"bytes":bytes.len(),"cms_signature_valid":true,"native_hash_status":"0x00000000","ordinary_trust_status":"0x800b0109","publicly_trusted":false,"timestamp":"absent","revocation":"NOT_CHECKED_OFFLINE"}),
+        json!({"schema":1,"policy":"development-pinned-integrity","certificate_sha256":actual,"sha256":digest,"bytes":bytes,"cms_signature_valid":true,"native_hash_status":"0x00000000","ordinary_trust_status":"0x800b0109","publicly_trusted":false,"timestamp":"absent","revocation":"NOT_CHECKED_OFFLINE"}),
     )
 }
 
@@ -516,10 +567,11 @@ pub(super) fn sign_allowlisted(path: &Path) -> Result<()> {
     let main = fs::canonicalize(get("NVSF_SIGNING_MAIN")?)?;
     let payload = fs::canonicalize(get("NVSF_SIGNING_PAYLOAD")?)?;
     let release = fs::canonicalize(get("NVSF_SIGNING_RELEASE")?)?;
-    let temp = fs::canonicalize(get("NVSF_SIGNING_TEMP")?)?;
     let ledger = get("NVSF_SIGNING_LEDGER")?;
-    let xtask = get("NVSF_SIGNING_XTASK")?;
-    let icon = get("NVSF_SIGNING_ICON")?;
+    let wix = release
+        .join("wix")
+        .join(get("NVSF_SIGNING_ARCH")?)
+        .join("wix");
     if !unlinked(path)?.is_file() {
         return Err("Signing input must be a regular file inside the owning checkout.".into());
     }
@@ -536,46 +588,25 @@ pub(super) fn sign_allowlisted(path: &Path) -> Result<()> {
         .eq_ignore_ascii_case(&main.to_string_lossy())
     {
         "gui"
+    } else if path.parent() == Some(release.join("bundle").join("msi").as_path())
+        && path
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("msi"))
+    {
+        "msi"
+    } else if path.parent() == Some(wix.as_path())
+        && matches!(file, "WixUIExtension.dll" | "WixUtilExtension.dll")
+    {
+        "preserved-wix-tool"
     } else if verify(&path, SIGNER_SHA256).is_ok() {
         "already-pinned"
-    } else if under(&path, &payload) || under(&path, &release.join("nsis")) {
+    } else if under(&path, &payload) {
         "preserved-vendor"
-    } else if under(&path, &release.join("bundle/nsis"))
-        && file.to_ascii_lowercase().ends_with("-setup.exe")
-    {
-        "setup"
-    } else if under(&path, &temp) {
-        "uninstaller"
     } else {
         return Err(format!("Unexpected signing request outside the allowlist: {file}").into());
     };
-    if matches!(role, "gui" | "setup" | "uninstaller") {
+    if matches!(role, "gui" | "msi") {
         sign(&path)?;
-    }
-    if role == "uninstaller" {
-        let scratch = tempfile::Builder::new()
-            .prefix("uninstaller-icons-")
-            .tempdir_in(&ledger)?;
-        let name = scratch
-            .path()
-            .file_name()
-            .ok_or("Missing uninstaller icon evidence identity.")?;
-        let record = scratch.path().join("icons.json");
-        let status = Command::new(xtask)
-            .args(["executable-icons", "--binary"])
-            .arg(&path)
-            .arg("--icon")
-            .arg(icon)
-            .arg("--output")
-            .arg(&record)
-            .env_remove(PFX)
-            .env_remove(PASSWORD)
-            .status()?;
-        if !status.success() {
-            return Err("Uninstaller icon resources differ from the approved logo.".into());
-        }
-        fs::rename(record, ledger.join(name).with_extension(".json"))?;
-        scratch.close()?;
     }
     let (size, digest) = sha256_hex(&path)?;
     let mut record = tempfile::Builder::new()

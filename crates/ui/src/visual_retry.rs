@@ -50,8 +50,8 @@ pub fn VisualCue(ui: Ui) -> impl IntoView {
     view! {<details><summary>"Optional local visual crop retry"</summary>
         <p class="hint">"Uses only the original selected cue crop on this device. No translation, timestamps, tools or cloud service. Model/runtime must already be explicitly provisioned. Budget: 256 output tokens, 4096 context, 1,003,520 crop pixels, 120 s wall / 60 s idle. A proposal is not accepted dialogue."</p>
         <label class="check"><input type="checkbox" data-testid="visual-cue-opt-in" disabled=move ||active.get() prop:checked=move ||enabled.get() on:change=move |e|enabled.set(event_target_checked(&e))/><span>"Enable a local visual proposal for this cue"</span></label>
-        <div class="button-row"><button data-testid="visual-cue-run" disabled=move ||!enabled.get()||ui.busy.get()||ui.active()||ui.draft_dirty.get()||ui.source.with(Option::is_none) on:click=move |_|{
-            if !enabled.get_untracked()||ui.busy.get_untracked(){return;}
+        <div class="button-row"><button data-testid="visual-cue-run" disabled=move ||!enabled.get()||ui.busy.get()||ui.active()||ui.draft_dirty.get()||!ui.review_source_linked() on:click=move |_|{
+            if !enabled.get_untracked()||ui.busy.get_untracked()||!ui.review_source_linked(){return;}
             let Some(source)=ui.source.get_untracked()else{return;};let Some(cue)=ui.selected_cue()else{return;};
             let region=ui.project.with_untracked(|p|p.as_ref().and_then(|p|p.config.regions.get(cue.track as usize).copied()));
             let Some(region)=region else{ui.error.set(Some("Cue track has no original crop region".into()));return;};

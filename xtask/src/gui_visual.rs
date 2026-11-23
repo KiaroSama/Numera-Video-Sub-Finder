@@ -1,4 +1,5 @@
 use super::gui::{Driver, Result, decode_base64};
+use crate::ci_icons;
 use serde_json::{Value, json};
 use std::path::Path;
 
@@ -9,22 +10,17 @@ pub fn icons(output: &Path) -> Result<()> {
         ("32x32.png", 32),
         ("128x128.png", 128),
         ("128x128@2x.png", 256),
+        ("icon.png", 512),
     ] {
-        let path = root.join(file);
-        let pixels = image::open(&path)?.to_rgba8();
-        if pixels.dimensions() != (size, size)
-            || pixels.get_pixel(0, 0)[3] != 0
-            || pixels.get_pixel(size - 1, size - 1)[3] != 0
-            || pixels.get_pixel(size / 2, size / 2)[3] != 255
-        {
-            return Err(format!("Native circular icon geometry/alpha failed: {file}").into());
+        let pixels = image::open(root.join(file))?;
+        if pixels.color() != image::ColorType::Rgba8 {
+            return Err(format!("Native icon is not a 32-bit RGBA PNG: {file}").into());
         }
+        ci_icons::check_alpha(&pixels.into_rgba8(), size)?;
         records.push(json!({"file":file,"width":size,"height":size,"transparent_corners":true,"opaque_center":true}));
     }
-    let bytes = std::fs::read(root.join("icon.ico"))?;
-    if !bytes.starts_with(b"\0\0\x01\0") || bytes.len() < 32 {
-        return Err("Native icon container missing or malformed: icon.ico".into());
-    }
+    let sizes = ci_icons::validate_ico(&std::fs::read(root.join("icon.ico"))?)?;
+    records.push(json!({"file":"icon.ico","sizes":sizes,"encoding":"PNG RGBA8","transparent_corners":true,"opaque_center":true}));
     std::fs::write(
         output.join("native-logo.json"),
         serde_json::to_vec_pretty(&records)?,
@@ -104,8 +100,8 @@ pub fn preview_navigation(driver: &Driver, output: &Path) -> Result<()> {
         .into());
     }
     driver.click("button[aria-label='Remove exclusion 1']")?;
-    driver.click(".preview-controls button:last-child")?;
-    driver.wait("const v=document.querySelector('.preview-viewport'),f=document.querySelector('.frame');return v&&f&&Math.abs(f.getBoundingClientRect().width-v.clientWidth)<2&&v.scrollLeft===0&&v.scrollTop===0&&document.querySelectorAll('.roi.excluded').length===0;", 5)?;
+    driver.click("button[title='Reset zoom (Ctrl+0)']")?;
+    driver.wait("const v=document.querySelector('.preview-viewport'),f=document.querySelector('.frame');if(!v||!f)return false;const r=f.getBoundingClientRect(),fit=Math.min(v.clientWidth,v.clientHeight*r.width/r.height);return Math.abs(r.width-fit)<2&&v.scrollLeft===0&&v.scrollTop===0&&document.querySelectorAll('.roi.excluded').length===0;", 5)?;
     std::fs::write(
         output.join("preview-navigation.json"),
         serde_json::to_vec_pretty(
@@ -122,11 +118,11 @@ pub fn layout(driver: &Driver, output: &Path) -> Result<()> {
             .script("return innerWidth;")?
             .as_f64()
             .ok_or("Missing viewport width")?;
-        for width in [720, 1280] {
+        for (width, height) in [(960, 640), (1280, 860)] {
             driver.request(
                 reqwest::Method::POST,
                 "/window/rect",
-                json!({"width":width,"height":860}),
+                json!({"width":width,"height":height}),
             )?;
             driver.wait(&format!("return Math.abs(innerWidth-{prior_width})>20 && !!document.querySelector('.app-shell');"), 5)?;
             let bounds = driver.script("return {width:innerWidth,scroll:document.documentElement.scrollWidth,client:document.documentElement.clientWidth,frame:document.querySelector('.source-frame').getBoundingClientRect().width};")?;

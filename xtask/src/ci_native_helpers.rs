@@ -97,8 +97,8 @@ pub(super) fn admission(id: &str, diagnostic: &str) -> Result<(PathBuf, Target, 
             "arm64-linux",
             &["appimage", "deb", "rpm", "tar.gz"],
         ),
-        "windows-x64" => ("x86_64-pc-windows-msvc", "x64-windows", &["nsis", "zip"]),
-        "windows-arm64" => ("aarch64-pc-windows-msvc", "arm64-windows", &["nsis", "zip"]),
+        "windows-x64" => ("x86_64-pc-windows-msvc", "x64-windows", &["msi", "zip"]),
+        "windows-arm64" => ("aarch64-pc-windows-msvc", "arm64-windows", &["msi", "zip"]),
         _ => return Err("Unsupported desktop target.".into()),
     };
     let mut actual = target

@@ -1,4 +1,5 @@
-use crate::{helpers, state::Ui};
+use crate::{helpers, player::Preview, roi_editor::Regions, state::Ui};
+use leptos::ev;
 use leptos::prelude::*;
 use nvsf_core::Rect;
 use serde_json::json;
@@ -6,27 +7,49 @@ use serde_json::json;
 #[component]
 pub fn Extract(ui: Ui) -> impl IntoView {
     let lang_query = RwSignal::new(String::new());
+    let split = NodeRef::<leptos::html::Div>::new();
+    let width = RwSignal::new(340i32);
+    let drag = RwSignal::new(None::<(i32, i32)>);
+    let max_width = move || {
+        split
+            .get_untracked()
+            .map_or(620, |el| (el.client_width() - 486).clamp(260, 620))
+    };
+    let movement = window_event_listener(ev::mousemove, move |event| {
+        if let Some((x, initial)) = drag.get_untracked() {
+            width.set((initial + x - event.client_x()).clamp(260, max_width()));
+        }
+    });
+    let release = window_event_listener(ev::mouseup, move |_| drag.set(None));
+    let blur = window_event_listener(ev::blur, move |_| drag.set(None));
+    on_cleanup(move || {
+        movement.remove();
+        release.remove();
+        blur.remove();
+    });
     view! {
-        <div class="extract-grid">
-            <section class="panel source-panel">
-                <div class="panel-heading"><div class="section-title"><span class="section-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m10 9 5 3-5 3z"/></svg></span><div><span class="eyebrow">"01 / SOURCE"</span><h2>"Source video"</h2></div></div>
-                    <div class="button-row"><button on:click=move |_| ui.pick_source() disabled=move || ui.busy.get()>"Open video"</button>
-                    <button disabled=move ||ui.busy.get()||ui.active()||ui.source.with(Option::is_none) on:click=move |_|{
-                        if let Some(source)=ui.source.get_untracked(){ui.request::<Vec<Rect>>("suggest_regions",json!({"token":source.token,"language":ui.config.with_untracked(|c|c.language.clone())}),move |regions|{
-                            ui.config.update(|c|c.regions=regions);ui.notice.set("Region proposals loaded. Inspect every proposal before extraction; scene text is not accepted automatically.".into());
-                        });}
-                    }>"Suggest subtitle regions"</button></div>
-                </div>
+        <div class="extract-grid" node_ref=split style=move ||format!("--inspector-w:{}px",width.get())>
+            <section class="panel source-panel" aria-label="Video stage">
                 <div class="source-line">
-                    <strong dir="auto">{move || ui.source.with(|s| s.as_ref().map(|s| s.name.clone()).unwrap_or_else(|| "No video selected".into()))}</strong>
-                    <span class="muted">{move || ui.source.with(|s| s.as_ref().map(|s| format!("{} × {} · {} · {}", s.media.width, s.media.height, s.media.codec,
-                        s.media.duration_ms.map(helpers::time_label).unwrap_or_else(|| "unknown duration".into()))).unwrap_or_else(|| "Open a video or drag and drop video files or a folder here.".into()))}</span>
+                    <strong dir="auto" title=move ||ui.source.with(|s|s.as_ref().map(|s|s.name.clone()).unwrap_or_default())>{move ||ui.source.with(|s|s.as_ref().map(|s|s.name.clone()).unwrap_or_else(||"No video selected".into()))}</strong>
+                    <span class="muted mono">{move ||ui.source.with(|s|s.as_ref().map(|s|format!("{} × {} · {}",s.media.width,s.media.height,s.media.codec)).unwrap_or_default())}</span>
                 </div>
-                <Preview ui/>
-                <Regions ui/>
+                <Preview ui editor=true/>
             </section>
-            <section class="panel settings-panel">
-                <div class="section-title"><span class="section-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16 M4 17h16 M8 4v6 M16 14v6"/></svg></span><div><span class="eyebrow">"02 / EXTRACTION"</span><h2>"Recognition setup"</h2></div></div>
+            <div id="inspector-splitter" class="inspector-splitter" role="separator" aria-label="Resize inspector" tabindex="0"
+                aria-orientation="vertical" aria-controls="extract-inspector" aria-valuemin="260" aria-valuemax="620"
+                aria-valuenow=move ||width.get().to_string()
+                on:mousedown=move |event|if event.button()==0 {event.prevent_default();drag.set(Some((event.client_x(),width.get_untracked().min(max_width()))));}
+                on:keydown:undelegated=move |event| {
+                    let next=match event.key().as_str() {
+                        "ArrowLeft"=>width.get_untracked()+24,"ArrowRight"=>width.get_untracked()-24,
+                        "Home"=>260,"End"=>max_width(),_=>return,
+                    };
+                    event.prevent_default();width.set(next.clamp(260,max_width()));
+                }></div>
+            <section id="extract-inspector" class="panel settings-panel" aria-label="Extraction inspector">
+                <div class="panel-heading"><h2>"Inspector"</h2></div>
+                <div class="inspector-section">
                 <label for="language-search">"Subtitle language"</label>
                 <div class="language-picker">
                     <div class="language-search-row">
@@ -38,8 +61,10 @@ pub fn Extract(ui: Ui) -> impl IntoView {
                             aria-label="Search subtitle language"
                             prop:value=move || lang_query.get()
                             on:input=move |e| lang_query.set(event_target_value(&e))
-                            on:keydown=move |e: web_sys::KeyboardEvent| {
-                                if e.key() == "Escape" {
+                            on:keydown:undelegated=move |e: web_sys::KeyboardEvent| {
+                                if e.is_composing() || e.key_code() == 229 {return;}
+                                if e.key() == "Escape" && !lang_query.get_untracked().is_empty() {
+                                    e.prevent_default();
                                     lang_query.set(String::new());
                                 } else if e.key() == "Enter" {
                                     let matches = helpers::language_options(&lang_query.get_untracked());
@@ -106,138 +131,44 @@ pub fn Extract(ui: Ui) -> impl IntoView {
                     <option value="auto">"Auto · acceleration first"</option><option value="cpu">"CPU"</option><option value="cuda">"CUDA"</option>
                     <option value="directml">"DirectML"</option>
                 </select>
-                <p class="hint">"Availability is checked by the backend. Unverified acceleration is never reported as working."</p>
                 <label for="quality">"Sampling quality"</label>
                 <select id="quality" prop:value=move || ui.config.with(|c| c.quality.clone()) on:change=move |e| ui.config.update(|c| c.quality=event_target_value(&e))>
-                    <option value="accurate">"Accurate · every presented frame"</option><option value="balanced">"Balanced"</option><option value="fast">"Fast · reduced coverage"</option>
+                    <option value="accurate">"Accurate · every frame"</option><option value="balanced">"Balanced"</option><option value="fast">"Fast · reduced coverage"</option>
                 </select>
+                </div>
+                <div class="inspector-section">
+                    <Regions ui/>
+                    <button class="wide" disabled=move ||ui.busy.get()||ui.closing.get()||ui.active()||ui.source.with(Option::is_none) on:click=move |_|{
+                        if let Some(source)=ui.source.get_untracked(){ui.request::<Vec<Rect>>("suggest_regions",json!({"token":source.token,"language":ui.config.with_untracked(|c|c.language.clone())}),move |regions|{
+                            if !regions.is_empty() {
+                                ui.studio.roi_drag.set(None);ui.studio.roi.set(None);
+                                ui.edit_extract(|c|c.regions=regions);
+                                ui.notice.set("Region suggestions loaded. Check them before extracting.".into());
+                            } else {ui.notice.set("No subtitle regions suggested.".into());}
+                        });}
+                    }>"Suggest subtitle regions"</button>
+                </div>
                 <details class="advanced"><summary>"Range and safety options"</summary>
                     <label for="range-start">"Start (milliseconds)"</label>
-                    <input id="range-start" type="number" min="0" prop:value=move || ui.config.with(|c| c.start_ms.to_string()) on:change=move |e| match event_target_value(&e).parse() { Ok(v)=>ui.config.update(|c|c.start_ms=v),Err(_)=>ui.error.set(Some("Start must be a nonnegative integer".into())) }/>
+                    <input id="range-start" type="number" min="0" prop:value=move || ui.config.with(|c| c.start_ms.to_string()) on:change=move |e| match event_target_value(&e).parse() { Ok(v)=>ui.set_start(v),Err(_)=>ui.error.set(Some("Start must be a nonnegative integer".into())) }/>
                     <label for="range-end">"End (milliseconds, empty = entire video)"</label>
                     <input id="range-end" type="number" min="1" prop:value=move || ui.config.with(|c| c.end_ms.map(|v|v.to_string()).unwrap_or_default()) on:change=move |e| {
-                        let value=event_target_value(&e); if value.is_empty(){ui.config.update(|c|c.end_ms=None);}else{match value.parse(){Ok(v)=>ui.config.update(|c|c.end_ms=Some(v)),Err(_)=>ui.error.set(Some("End must be a positive integer".into()))}}
+                        let value=event_target_value(&e); if value.is_empty(){ui.set_end(None);}else{match value.parse(){Ok(v)=>ui.set_end(Some(v)),Err(_)=>ui.error.set(Some("End must be a positive integer".into()))}}
                     }/>
                     <label class="check"><input type="checkbox" prop:checked=move || ui.config.with(|c|c.gpu_required) on:change=move |e|ui.config.update(|c|c.gpu_required=event_target_checked(&e))/><span>"Require proven GPU execution"</span></label>
                     <label class="check"><input type="checkbox" prop:checked=move || ui.config.with(|c|c.normalize_persian) on:change=move |e|ui.config.update(|c|c.normalize_persian=event_target_checked(&e))/><span>"Explicit Persian normalization"</span></label>
                     <label class="check"><input type="checkbox" prop:checked=move || ui.config.with(|c|c.overwrite) on:change=move |e|ui.config.update(|c|c.overwrite=event_target_checked(&e))/><span>"Allow replacing the selected output"</span></label>
                 </details>
-                <hr/><span class="eyebrow">"03 / DESTINATION"</span>
+                <hr/><h3>"Output"</h3>
                 <button class="wide" disabled=move || ui.busy.get() on:click={move |_|ui.request::<Option<crate::ipc::Destination>>("choose_output",json!({}),move |d|if let Some(d)=d{ui.output.set(Some(d));})}>"Choose SRT destination"</button>
                 <p class="hint" dir="auto">{move ||ui.output.with(|d|d.as_ref().map(|d|d.name.clone()).unwrap_or_else(||"Choose where to save your subtitles.".into()))}</p>
                 <div class="action-stack">
-                    <button id="extract-start" class="primary wide" disabled=move ||ui.busy.get()||ui.active()||ui.source.with(Option::is_none)||ui.output.with(Option::is_none) on:click=move |_|if let Some(q)=ui.current_queue(){ui.begin(q);}>"Extract subtitles"</button>
+                    <button id="extract-start" class="primary wide" title="Extract subtitles (Ctrl+Enter)" disabled=move ||!ui.can_extract() on:click=move |_|ui.start_extraction()>"Extract subtitles"</button>
                     <button class="wide" disabled=move ||ui.busy.get()||ui.source.with(Option::is_none)||ui.output.with(Option::is_none) on:click=move |_|{
                         ui.add_queue();
                     }>"Add to queue"</button>
                 </div>
-                <p class="hint">"Direct SRT plus a recoverable review project. Missing models and processing failures are shown, never replaced with sample results."</p>
             </section>
         </div>
-    }
-}
-
-#[component]
-pub fn Preview(ui: Ui) -> impl IntoView {
-    let begin = RwSignal::new(None::<(f64, f64)>);
-    let exclusion = RwSignal::new(false);
-    let bounds = NodeRef::<leptos::html::Div>::new();
-    let viewport = NodeRef::<leptos::html::Div>::new();
-    let zoom = RwSignal::new(100u32);
-    let pan = move |x: i32, y: i32| {
-        begin.set(None);
-        if let Some(element) = viewport.get() {
-            element.set_scroll_left(element.scroll_left().saturating_add(x));
-            element.set_scroll_top(element.scroll_top().saturating_add(y));
-        }
-    };
-    Effect::new(move |_| {
-        let _ = ui
-            .source
-            .with(|source| source.as_ref().map(|s| s.token.clone()));
-        zoom.set(100);
-        pan(-i32::MAX, -i32::MAX);
-    });
-    let point = move |e: &web_sys::MouseEvent| {
-        bounds.get().and_then(|element| {
-            let r = element.get_bounding_client_rect();
-            helpers::frame_point(
-                f64::from(e.client_x()),
-                f64::from(e.client_y()),
-                [r.left(), r.top(), r.width(), r.height()],
-            )
-        })
-    };
-    view! {
-        <div class="preview-shell" aria-busy=move ||ui.preview_busy.get()>
-            <Show when=move ||!ui.preview_url.get().is_empty() fallback=||view!{<div class="preview-empty"><svg viewBox="0 0 48 48" aria-hidden="true"><rect x="7" y="12" width="34" height="24" rx="3"/><path d="m20 18 10 6-10 6z"/></svg><strong>"Original frame preview"</strong><p>"Open a video to inspect subtitles and adjust regions."</p></div>}>
-                <div class="preview-viewport" node_ref=viewport tabindex="0" role="region" aria-label="Source frame viewport; use scrollbars or pan controls to move the zoomed image">
-                <div class="frame" node_ref=bounds style=move ||ui.source.with(|s|s.as_ref().map(|s|format!("width:{}%;aspect-ratio:{} / {}",zoom.get(),s.media.width,s.media.height)).unwrap_or_default())
-                    on:mousedown=move |e|{if e.button()==0{begin.set(point(&e));}}
-                    on:mouseup=move |e|{
-                        if let (Some(a),Some(b))=(begin.get_untracked(),point(&e)){
-                            match Rect::new(a.0.min(b.0),a.1.min(b.1),(a.0-b.0).abs(),(a.1-b.1).abs()){
-                                Ok(r) if r.width>0.005&&r.height>0.005=>ui.config.update(|c|{
-                                    if exclusion.get_untracked(){if c.exclusions.len()<32{c.exclusions.push(r);}}
-                                    else if c.regions.len()<8{c.regions.push(r);}
-                                }), _=>{}
-                            }
-                        }begin.set(None);
-                    } on:mouseleave=move |_|begin.set(None)>
-                    <img class="source-frame" src=move ||ui.preview_url.get() alt="Original decoded source frame; drag to add a region, or use normalized coordinates below" draggable="false"/>
-                    {move ||ui.config.with(|c|c.regions.iter().copied().enumerate().map(|(i,r)|view!{<div class="roi" style=helpers::region_style(r)><span>{format!("R{}",i+1)}</span></div>}).collect_view())}
-                    {move ||ui.config.with(|c|c.exclusions.iter().copied().enumerate().map(|(i,r)|view!{<div class="roi excluded" style=helpers::region_style(r)><span>{format!("Exclude {}",i+1)}</span></div>}).collect_view())}
-                </div>
-                </div>
-            </Show>
-            <Show when=move ||ui.preview_busy.get()><span class="preview-loading" role="status">"Decoding source frame…"</span></Show>
-        </div>
-        <div class="button-row preview-controls" role="group" aria-label="Preview navigation">
-            <label>"Zoom"<select aria-label="Preview zoom" prop:value=move ||zoom.get().to_string() on:change=move |e|{
-                if let Ok(value)=event_target_value(&e).parse::<u32>() && [100,150,200,300,400].contains(&value){begin.set(None);zoom.set(value);}
-            }><option value="100">"Fit · 100%"</option><option value="150">"150%"</option><option value="200">"200%"</option><option value="300">"300%"</option><option value="400">"400%"</option></select></label>
-            <button aria-label="Pan preview left" disabled=move ||zoom.get()==100 on:click=move |_|pan(-120,0)>"Left"</button>
-            <button aria-label="Pan preview right" disabled=move ||zoom.get()==100 on:click=move |_|pan(120,0)>"Right"</button>
-            <button aria-label="Pan preview up" disabled=move ||zoom.get()==100 on:click=move |_|pan(0,-120)>"Up"</button>
-            <button aria-label="Pan preview down" disabled=move ||zoom.get()==100 on:click=move |_|pan(0,120)>"Down"</button>
-            <button on:click=move |_|{zoom.set(100);pan(-i32::MAX,-i32::MAX);}>"Reset view"</button>
-        </div>
-        <div class="scrubber">
-            <button title="Previous 100 milliseconds" disabled=move ||ui.busy.get()||ui.closing.get()||ui.source.with(Option::is_none) on:click=move |_|ui.seek(ui.time.get_untracked().saturating_sub(100))>"−100 ms"</button>
-            <input aria-label="Preview position in milliseconds" type="range" min="0" max=move ||ui.source.with(|s|s.as_ref().and_then(|s|s.media.duration_ms).unwrap_or(60_000).to_string()) step="1" prop:value=move ||ui.time.get().to_string()
-                disabled=move ||ui.busy.get()||ui.closing.get()||ui.source.with(Option::is_none) on:input=move |e|if let Ok(t)=event_target_value(&e).parse(){ui.time.set(t);} on:change=move |_|ui.seek(ui.time.get_untracked())/>
-            <button title="Next 100 milliseconds" disabled=move ||ui.busy.get()||ui.closing.get()||ui.source.with(Option::is_none) on:click=move |_|ui.seek(ui.time.get_untracked().saturating_add(100))>"+100 ms"</button>
-            <output class="mono">{move ||helpers::time_label(ui.time.get())}</output>
-        </div>
-        <label class="check draw-mode"><input type="checkbox" prop:checked=move ||exclusion.get() on:change=move |e|exclusion.set(event_target_checked(&e))/><span>"Draw exclusion instead of subtitle region"</span></label>
-    }
-}
-
-#[component]
-fn Regions(ui: Ui) -> impl IntoView {
-    let value = RwSignal::new("0,0.7,1,0.3".to_string());
-    let exclude = RwSignal::new(false);
-    view! {
-        <details class="regions" open>
-            <summary>"Subtitle regions and exclusions"</summary>
-            <p class="hint">"Normalized x,y,width,height (0 to 1). The initial bottom region is a manual starting point, not a detected subtitle. Draw on the preview or edit coordinates."</p>
-            <div class="region-list">{move ||ui.config.with(|c|c.regions.iter().copied().enumerate().map(|(i,r)|view!{
-                <label class="region-row"><span>{format!("Region {}",i+1)}</span><input aria-label=format!("Region {} normalized coordinates",i+1) prop:value=format!("{:.4},{:.4},{:.4},{:.4}",r.x,r.y,r.width,r.height)
-                    on:change={move |e|match event_target_value(&e).parse::<Rect>(){Ok(r)=>ui.config.update(|c|if let Some(old)=c.regions.get_mut(i){*old=r;}),Err(e)=>ui.error.set(Some(e.to_string()))}}/>
-                    <button aria-label=format!("Remove region {}",i+1) on:click=move |_|ui.config.update(|c|if c.regions.len()>1&&i<c.regions.len(){c.regions.remove(i);})>"Remove"</button></label>
-            }).collect_view())}</div>
-            <div class="region-list">{move ||ui.config.with(|c|c.exclusions.iter().copied().enumerate().map(|(i,r)|view!{
-                <label class="region-row"><span>{format!("Exclude {}",i+1)}</span><input aria-label=format!("Exclusion {} normalized coordinates",i+1) prop:value=format!("{:.4},{:.4},{:.4},{:.4}",r.x,r.y,r.width,r.height)
-                    on:change={move |e|match event_target_value(&e).parse::<Rect>(){Ok(r)=>ui.config.update(|c|if let Some(old)=c.exclusions.get_mut(i){*old=r;}),Err(e)=>ui.error.set(Some(e.to_string()))}}/>
-                    <button aria-label=format!("Remove exclusion {}",i+1) on:click=move |_|ui.config.update(|c|if i<c.exclusions.len(){c.exclusions.remove(i);})>"Remove"</button></label>
-            }).collect_view())}</div>
-            <div class="region-add"><label for="new-region" class="sr-only">"New normalized region coordinates"</label>
-                <input id="new-region" prop:value=move ||value.get() on:input=move |e|value.set(event_target_value(&e))/>
-                <label class="check"><input type="checkbox" on:change=move |e|exclude.set(event_target_checked(&e))/><span>"Exclude"</span></label>
-                <button on:click={move |_|match value.get_untracked().parse::<Rect>(){
-                    Ok(r)=>ui.config.update(|c|{let regions=if exclude.get_untracked(){&mut c.exclusions}else{&mut c.regions};let max=if exclude.get_untracked(){32}else{8};if regions.len()<max{regions.push(r);}else{ui.error.set(Some("Region limit reached (8 regions / 32 exclusions)".into()));}}),Err(e)=>ui.error.set(Some(e.to_string()))
-                }}>"Add region"</button>
-            </div>
-        </details>
     }
 }

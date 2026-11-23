@@ -6,7 +6,7 @@
 
 [![Final verification](https://github.com/KiaroSama/Numera-Video-Sub-Finder/actions/workflows/verify.yml/badge.svg)](https://github.com/KiaroSama/Numera-Video-Sub-Finder/actions/workflows/verify.yml)
 [![License GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-2563eb)](LICENSE)
-[![Version 0.4.0](https://img.shields.io/badge/version-0.4.0-059669)](Cargo.toml)
+[![Version 0.5.0](https://img.shields.io/badge/version-0.5.0-059669)](Cargo.toml)
 [![Rust 1.100.0 toolchain](https://img.shields.io/badge/rust-1.100.0-8b5cf6)](rust-toolchain.toml)
 [![Runs on Windows and Linux, x64 and ARM64](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%28x64%2C%20ARM64%29-0891b2)](ci/targets.json)
 [![Project guides](https://img.shields.io/badge/docs-project%20guides-1d4ed8)](docs/architecture.md)
@@ -29,9 +29,9 @@ An offline-first desktop workspace for extracting visible, burned-in subtitles f
 
 ## Status
 
-Active 0.x releases follow sequential minor versions (`0.2.0`, `0.3.0`, `0.4.0`, ...) with matching Git tags and GitHub Releases built on exact verified commits. The live CI badge is authoritative for hosted checks. See [validation status](docs/validation.md) for current verification coverage and remaining external gates. Android and iPhone applications are not included.
+Active 0.x releases follow sequential minor versions (`0.2.0`, `0.3.0`, `0.4.0`, `0.5.0`, ...) with matching Git tags and GitHub Releases built on exact verified commits. The live CI badge is authoritative for hosted checks. See [validation status](docs/validation.md) for current verification coverage and remaining external gates. Android and iPhone applications are not included.
 
-The four native 64-bit targets are Windows x64, Windows ARM64, Linux x64 and Linux ARM64. All 32-bit builds are excluded. Hosted CPU CI is separate from real-device accelerator qualification. Windows binaries and NSIS installers are signed with the project owner's self-signed Authenticode certificate (`D-014`, thumbprint `B2A45C4E8257197BBF067ED94F83E626AC6CE1C5`); no public CA certificate is used. Verify downloaded packages against the published `SHA256SUMS.txt`.
+The four native 64-bit targets are Windows x64, Windows ARM64, Linux x64 and Linux ARM64. All 32-bit builds are excluded. Hosted CPU CI is separate from real-device accelerator qualification. Windows binaries and MSI installers are signed with the project owner's self-signed Authenticode certificate (`D-014`, thumbprint `B2A45C4E8257197BBF067ED94F83E626AC6CE1C5`); no public CA certificate is used. Verify downloaded packages against the published `SHA256SUMS.txt`. Users upgrading from a `0.4.0` or earlier NSIS installation should uninstall the old NSIS build once before installing the `0.5.0` MSI package.
 
 ## Installation and setup
 
@@ -39,13 +39,14 @@ Download the matching 64-bit package for your OS and architecture from [GitHub R
 
 ## Workflow
 
-1. Load media either through the native **Open video** dialog or by dragging and dropping onto the window:
-   - Drop a **single video file** (`.mp4`, `.mkv`, `.mov`, `.avi`, `.webm`, `.m4v`, `.ts`, `.mts`, `.m2ts`, `.mpeg`, `.wmv`) to open it directly in **Extract**, then pick an `.srt` destination.
+1. Load media either through the native **Open video** dialog (`Ctrl+O`) or by dragging and dropping onto the window:
+   - Drop a **single video file** (`.mp4`, `.mkv`, `.mov`, `.avi`, `.webm`, `.m4v`, `.ts`, `.mts`, `.m2ts`, `.mpeg`, `.wmv`) to open it directly in **Extract**, where the preview automatically seeks past a black opening frame when present, then pick an `.srt` destination.
    - Drop **multiple video files or a folder** (scanned up to 4 levels deep, up to 100 videos; symlinks and unsupported files are skipped) to queue them automatically in **Queue** with sibling `.srt` outputs.
-2. Pick the subtitle language using the searchable **Subtitle language** box: type any part of the English name, native name (`فارسی`, `日本語`), or language code (`fa`, `ja`, `chi_sim`, `fra`) to filter all 126 languages live, press `Enter` or click a match, then set subtitle regions, exclusions, source-time range, quality, and device policy. Compatible admitted Paddle recognizers are used where available; other languages require their selected Tesseract pack. English, Persian and Japanese keep their original qualification targets; catalog availability does not certify accuracy. Automatic region detection gives editable suggestions; scene signs are not accepted as dialogue on their own.
-3. Start extraction. Pause and cancel controls keep compatible checkpoints; missing models return an actionable error instead of downloading during inference.
-4. Review original frames, edit text and times, split or merge cues, undo or redo changes, and explicitly accept re-recognition proposals.
-5. Save the project or export SRT, WebVTT, basic ASS, or JSON evidence. Replacing an existing file requires confirmation; raw OCR and user edits stay separate.
+2. Frame the subtitle band directly on the resizable preview canvas: drag to draw a new subtitle or exclusion region with a live preview box, drag any of the 8 corner/edge handles or 4 separating guide lines to resize it, or move the box directly. Use **Play/Pause** (`Space`), **Stop**, frame stepping (`Left`/`Right`, `Shift+Left`/`Shift+Right`), **Set start** (`I`), and **Set end** (`O`) to inspect timing before extraction.
+3. Pick the subtitle language using the searchable **Subtitle language** box: type any part of the English name, native name (`فارسی`, `日本語`), or language code (`fa`, `ja`, `chi_sim`, `fra`) to filter all 126 languages live, press `Enter` or click a match, then set quality and device policy. Compatible admitted Paddle recognizers are used where available; other languages require their selected Tesseract pack. English, Persian and Japanese keep their original qualification targets; catalog availability does not certify accuracy. Automatic region detection gives editable suggestions; scene signs are not accepted as dialogue on their own.
+4. Start extraction (`Ctrl+Enter`). Pause and cancel controls keep compatible checkpoints; missing models return an actionable error instead of downloading during inference.
+5. Review original frames, edit text and times, split or merge cues, undo or redo changes (`Ctrl+Z` / `Ctrl+Y` in both **Extract** and **Review**), and explicitly accept re-recognition proposals.
+6. Use **Save** (`Ctrl+S`), **Save As** (`Ctrl+Shift+S`), or export SRT, WebVTT, basic ASS, or JSON evidence. Closing with unsaved edits prompts you to save and exit, exit without saving, or cancel. Press `F1` at any time to view all keyboard shortcuts.
 
 Monochrome Dark and Light themes run locally: first launch follows the operating system color scheme until you switch themes with the single-click toggle, which plays a native Rust/WASM WebGL1 brushed-silver sweep (`glimm`) and honors `prefers-reduced-motion`. There are no remote fonts, cloud transcription or authored JavaScript application components. Generated Tauri/WASM glue is required by the frameworks.
 

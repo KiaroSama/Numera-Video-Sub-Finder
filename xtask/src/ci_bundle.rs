@@ -243,7 +243,7 @@ impl Bundle {
         #[cfg(windows)]
         identity.close()?;
         let report = json!({"schema":1,"source_sha":self.source,"target":self.target.id,"passed":true,"tests":checks,"failed":0,"skipped":0,"status":STATUS,"signing":signing,"signatures":self.signatures,"icon_checks":self.icons,"formats":artifacts,"files":helpers::inventory(&self.output, &self.packages)?,"proof":proof,
-            "qualification":{"installer_lifecycle":"NOT_RUN","installed_launch":"NOT_RUN","physical_gpu":"NOT_RUN","production_signing":if cfg!(windows) { "development-self-signed-untrusted-root-untimestamped" } else { "NOT_RUN" }, "linuxdeploy_modified_elf_byte_parity":"NOT_CLAIMED","microsoft_redistribution_rights":if cfg!(windows) { "NOT_VALIDATED" } else { "NOT_APPLICABLE" },"windows_webview":if cfg!(windows) { "system WebView2 required for portable GUI; NSIS bootstrap may require internet" } else { "NOT_APPLICABLE" },"compression_thread_count":"NOT_MEASURED","linux_bundler_cpu_capacity":if cfg!(windows) { "NOT_APPLICABLE" } else { &cpus }}});
+            "qualification":{"installer_lifecycle":"NOT_RUN","installed_launch":"NOT_RUN","physical_gpu":"NOT_RUN","production_signing":if cfg!(windows) { "development-self-signed-untrusted-root-untimestamped" } else { "NOT_RUN" }, "linuxdeploy_modified_elf_byte_parity":"NOT_CLAIMED","microsoft_redistribution_rights":if cfg!(windows) { "NOT_VALIDATED" } else { "NOT_APPLICABLE" },"windows_webview":if cfg!(windows) { "system WebView2 required for portable GUI; MSI bootstrap may require internet" } else { "NOT_APPLICABLE" },"compression_thread_count":"NOT_MEASURED","linux_bundler_cpu_capacity":if cfg!(windows) { "NOT_APPLICABLE" } else { &cpus }}});
         let reports = helpers::owned(&self.root, &self.packages.join("reports"))?;
         fs::create_dir_all(&reports)?;
         helpers::write_json(
@@ -433,7 +433,7 @@ impl Bundle {
 
     fn inspect_format(&mut self, format: &str, payload: &[Member]) -> Result<PathBuf> {
         let (suffix, magic): (&str, &[u8]) = match format {
-            "nsis" if cfg!(windows) => ("-setup.exe", b"MZ"),
+            "msi" if cfg!(windows) => (".msi", b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"),
             "appimage" if !cfg!(windows) => (".AppImage", b"\x7fELF"),
             "deb" if !cfg!(windows) => (".deb", b"!<arch>\n"),
             "rpm" if !cfg!(windows) => (".rpm", b"\xed\xab\xee\xdb"),
@@ -454,7 +454,7 @@ impl Bundle {
         let inspect = self.stage.path().join(format!("inspect-{format}"));
         fs::create_dir(&inspect)?;
         #[cfg(windows)]
-        self.inspect_nsis(&dest, &inspect, payload)?;
+        self.inspect_msi(&dest, &inspect, payload)?;
         #[cfg(not(windows))]
         self.inspect_linux(format, &dest, &inspect, payload)?;
         Ok(dest)

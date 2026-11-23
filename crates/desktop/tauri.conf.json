@@ -2,7 +2,7 @@
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Numera Video Sub Finder",
   "mainBinaryName": "numera-video-sub-finder",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "identifier": "com.numera.video-sub-finder",
   "build": {
     "frontendDist": "../ui/dist"
@@ -13,10 +13,10 @@
       {
         "label": "main",
         "title": "Numera Video Sub Finder",
-        "width": 1280,
-        "height": 860,
-        "minWidth": 720,
-        "minHeight": 580,
+        "width": 1440,
+        "height": 900,
+        "minWidth": 960,
+        "minHeight": 640,
         "visible": false,
         "dragDropEnabled": true
       }
@@ -31,16 +31,17 @@
   "bundle": {
     "active": true,
     "targets": [
-      "nsis",
-      "appimage",
+      "msi",
       "deb",
-      "rpm"
+      "rpm",
+      "appimage"
     ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
-      "icons/icon.ico"
+      "icons/icon.ico",
+      "icons/icon.png"
     ],
     "resources": {
       "../../assets/logo.svg": "assets/logo.svg"
@@ -55,10 +56,8 @@
         "type": "downloadBootstrapper",
         "silent": true
       },
-      "nsis": {
-        "installMode": "currentUser",
-        "installerIcon": "icons/icon.ico",
-        "uninstallerIcon": "icons/icon.ico"
+      "wix": {
+        "language": "en-US"
       }
     },
     "category": "Utility",

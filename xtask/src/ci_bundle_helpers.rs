@@ -78,7 +78,7 @@ pub(super) fn archive_bytes(source: &Path, extract: &Path) -> Result<()> {
 
 pub(super) fn marker(format: &str) -> Result<&'static [u8]> {
     match format {
-        "nsis" => Ok(b"__TAURI_BUNDLE_TYPE_VAR_NSS"),
+        "msi" => Ok(b"__TAURI_BUNDLE_TYPE_VAR_MSI"),
         "deb" => Ok(b"__TAURI_BUNDLE_TYPE_VAR_DEB"),
         "rpm" => Ok(b"__TAURI_BUNDLE_TYPE_VAR_RPM"),
         "appimage" => Ok(b"__TAURI_BUNDLE_TYPE_VAR_APP"),
@@ -224,9 +224,19 @@ mod tests {
     }
 
     #[test]
+    fn msi_marker_matches_the_runtime_bundle_type() -> Result<()> {
+        let replacement = marker("msi")?;
+        assert_eq!(replacement, b"__TAURI_BUNDLE_TYPE_VAR_MSI");
+        let mut binary = ORIGINAL_MARKER.to_vec();
+        patch_marker(&mut binary, replacement)?;
+        assert_eq!(binary, replacement);
+        Ok(())
+    }
+
+    #[test]
     fn rejects_duplicate_unpatched_gui_markers() {
         let mut bytes = ORIGINAL_MARKER.repeat(2);
-        assert!(patch_marker(&mut bytes, marker("nsis").expect("known format")).is_err());
+        assert!(patch_marker(&mut bytes, marker("msi").expect("known format")).is_err());
         assert_eq!(bytes, ORIGINAL_MARKER.repeat(2));
     }
 }

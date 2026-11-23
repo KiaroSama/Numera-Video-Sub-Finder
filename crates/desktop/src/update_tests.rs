@@ -128,14 +128,34 @@ fn native_close_joins_the_owned_hourly_scheduler() {
 }
 
 #[test]
-fn discovered_release_is_only_an_offer_and_a_failed_check_clears_it() {
+fn pending_restart_status_survives_a_new_update_check() {
+    let directory = tempfile::tempdir().unwrap();
+    let paths = nvsf_app::Paths::new(Some(directory.path())).unwrap();
+    let log = nvsf_app::logging::Log::new(&paths, "nvsf-desktop");
+    let host = Host::new(paths, log);
+    {
+        let mut status = host.0.maintenance.status.lock().unwrap();
+        status.state = "installed".into();
+        status.restart_required = true;
+    }
+    let status = tauri::async_runtime::block_on(updates::check_with(&host, true, async {
+        panic!("a pending restart must not be replaced by a fresh metadata check")
+    }))
+    .unwrap();
+    assert!(status.restart_required);
+    assert_eq!(status.state, "installed");
+    assert!(host.shutdown());
+}
+
+#[test]
+fn automatic_check_surfaces_an_offer_and_a_failed_check_clears_it() {
     let directory = tempfile::tempdir().unwrap();
     let paths = nvsf_app::Paths::new(Some(directory.path())).unwrap();
     let log = nvsf_app::logging::Log::new(&paths, "nvsf-desktop");
     let host = Host::new(paths, log);
     let mut platforms = std::collections::BTreeMap::new();
     for os in ["windows", "linux"] {
-        for format in ["portable", "nsis", "msi", "appimage", "deb", "rpm"] {
+        for format in ["portable", "msi", "appimage", "deb", "rpm"] {
             platforms.insert(
                 format!("{os}-{}-{format}", std::env::consts::ARCH),
                 nvsf_app::updates::Artifact {
@@ -152,11 +172,16 @@ fn discovered_release_is_only_an_offer_and_a_failed_check_clears_it() {
         notes: "Fixture offer".into(),
         platforms,
     };
-    let status = tauri::async_runtime::block_on(updates::check_with(&host, true, async {
+    let status = tauri::async_runtime::block_on(updates::check_with(&host, false, async {
         Ok(Some(manifest))
     }))
     .unwrap();
     assert_eq!(status.state, "available");
+    assert_eq!(
+        updates::update_status_inner(&host).unwrap().state,
+        "available"
+    );
+    assert!(!status.restart_required);
     assert_eq!(status.version.as_deref(), Some("0.2.0"));
     assert!(status.token.is_some());
     assert_eq!(status.total, 123);

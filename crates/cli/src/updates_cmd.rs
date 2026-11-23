@@ -138,12 +138,9 @@ pub(crate) fn run_updates(paths: &Paths, command: UpdatesCommand, control: &Cont
 }
 
 pub(crate) fn validate_format(format: &str) -> Result<()> {
-    if !matches!(
-        format,
-        "portable" | "nsis" | "msi" | "appimage" | "deb" | "rpm"
-    ) {
+    if !matches!(format, "portable" | "msi" | "appimage" | "deb" | "rpm") {
         return Err(AppError::InvalidConfig(
-            "Update format must be portable, nsis, msi, appimage, deb or rpm".into(),
+            "Update format must be portable, msi, appimage, deb or rpm".into(),
         ));
     }
     Ok(())

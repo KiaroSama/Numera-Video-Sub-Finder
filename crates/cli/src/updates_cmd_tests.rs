@@ -71,9 +71,10 @@ fn preferences_round_trip_and_updates_config_share_store() {
 #[test]
 fn updates_download_and_format_validation_fail_closed() {
     let paths = temp_paths();
-    for valid in ["portable", "nsis", "appimage", "deb", "rpm"] {
+    for valid in ["portable", "msi", "appimage", "deb", "rpm"] {
         validate_format(valid).expect("valid format");
     }
+    assert!(validate_format("nsis").is_err());
     assert!(validate_format("dmg").is_err());
 
     let err = run_updates(

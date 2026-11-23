@@ -9,6 +9,10 @@ fn main() {
         attributes.app_manifest(tauri_build::AppManifest::new().commands(&[
             "ui_ready",
             "set_unsaved",
+            "save_project_as",
+            "restart_app",
+            "preview_initial_frame",
+            "confirm_close",
             "update_status",
             "check_updates",
             "set_update_checks",

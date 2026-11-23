@@ -5,6 +5,7 @@ mod ci_crt;
 mod ci_frontend;
 mod ci_fuzz;
 mod ci_guard;
+mod ci_icons;
 mod ci_media_sanitizer;
 mod ci_native;
 mod ci_native_helpers;
@@ -17,6 +18,7 @@ mod fixture;
 mod gate;
 mod gui;
 mod gui_failure;
+mod gui_studio;
 mod gui_visual;
 mod maintenance;
 mod multilingual;
@@ -146,6 +148,10 @@ enum Cmd {
         target: String,
         #[arg(long)]
         packages: PathBuf,
+    },
+    GenerateIcons {
+        #[arg(long, default_value = "crates/desktop/icons")]
+        output: PathBuf,
     },
     ExecutableIcons {
         #[arg(long)]
@@ -394,6 +400,7 @@ fn run() -> Result<(), Box<dyn Error>> {
             output,
         } => runtime_pack::generate(&target, &runtimes, &output),
         Cmd::UpdateAssets { target, packages } => update_assets::generate(&target, &packages),
+        Cmd::GenerateIcons { output } => ci_icons::generate(&output),
         Cmd::ExecutableIcons {
             binary,
             icon,

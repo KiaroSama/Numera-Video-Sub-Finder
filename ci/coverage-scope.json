@@ -2,21 +2,149 @@
   "schema": 1,
   "approval": "D012",
   "exclusions": [
-    {"path":"crates/desktop/src/files.rs","start":16,"end":26,"source_sha256":"9fbd4f323f8bf25aa3ce0581a9fb1311528529df00fa638e2c9ad7226a3d9d02","category":"native-dialog","reason":"Native source picker invocation; cancellation and grants remain measured.","acceptance":"OPEN: native source selection/cancellation on all desktops, unchanged grants after cancellation."},
-    {"path":"crates/desktop/src/files.rs","start":46,"end":52,"source_sha256":"9fbd4f323f8bf25aa3ce0581a9fb1311528529df00fa638e2c9ad7226a3d9d02","category":"native-dialog","reason":"Native output picker invocation only.","acceptance":"OPEN: native output selection/cancellation and preservation of existing files."},
-    {"path":"crates/desktop/src/files.rs","start":249,"end":255,"source_sha256":"9fbd4f323f8bf25aa3ce0581a9fb1311528529df00fa638e2c9ad7226a3d9d02","category":"native-dialog","reason":"Native project save picker invocation only.","acceptance":"OPEN: native project save selection/cancellation, retained overwrite consent and corrections."},
-    {"path":"crates/desktop/src/files.rs","start":281,"end":287,"source_sha256":"9fbd4f323f8bf25aa3ce0581a9fb1311528529df00fa638e2c9ad7226a3d9d02","category":"native-dialog","reason":"Native subtitle export picker invocation only.","acceptance":"OPEN: native export selection/cancellation and no unapproved replacement."},
-    {"path":"crates/desktop/src/files.rs","start":354,"end":359,"source_sha256":"9fbd4f323f8bf25aa3ce0581a9fb1311528529df00fa638e2c9ad7226a3d9d02","category":"native-dialog","reason":"Native project open picker invocation only.","acceptance":"OPEN: native project selection/cancellation, original workspace retained on cancellation."},
-    {"path":"crates/desktop/src/resume.rs","start":40,"end":43,"source_sha256":"6fd41897866d15ad432af829c7cc637221957a2bd1c8652318024554890796ef","category":"native-dialog","reason":"Native source regrant picker invocation only.","acceptance":"OPEN: native source regrant/cancellation with exact original fingerprint and state preservation."},
-    {"path":"crates/desktop/src/resume.rs","start":48,"end":53,"source_sha256":"6fd41897866d15ad432af829c7cc637221957a2bd1c8652318024554890796ef","category":"native-dialog","reason":"Native output regrant picker invocation only.","acceptance":"OPEN: native output regrant/cancellation, reject incompatible destination without mutation."},
-    {"path":"crates/desktop/src/model_manager.rs","start":132,"end":138,"source_sha256":"ba660f64b7ff0a0ac827c8a59dad3500a66cd8b0a9904e95585eef29c577b851","category":"native-dialog","reason":"Native verified-model export picker invocation only.","acceptance":"OPEN: select/cancel model export, retain verified resource and no-clobber destination."},
-    {"path":"crates/desktop/src/language_manager.rs","start":96,"end":102,"source_sha256":"04679aa8cf54b9b47fb54e5c831487cdcf0a446dcd303dda71c7b1bd85c3fdab","category":"native-dialog","reason":"Native language export picker invocation only.","acceptance":"OPEN: select/cancel language export, verify resource integrity and previous file preservation."},
-    {"path":"crates/desktop/src/updates.rs","start":531,"end":536,"source_sha256":"85cc44d7b5dee88a31ce6a29281eef786769ab9a385ce95d05a02e86659d8617","category":"native-dialog","reason":"Native verified-update save picker invocation only.","acceptance":"OPEN: select/cancel update save, retain authenticated payload and existing destination."},
-    {"path":"crates/desktop/src/updates.rs","start":338,"end":339,"source_sha256":"85cc44d7b5dee88a31ce6a29281eef786769ab9a385ce95d05a02e86659d8617","category":"installation-network","reason":"External update payload HTTP get/send only.","acceptance":"OPEN: authenticated payload transfer, denial/interruption/tamper and previous app/data preservation."},
-    {"path":"crates/app/src/model_download.rs","start":115,"end":115,"source_sha256":"0b57db5a875a432ba39bb0ff2e074bdbdcabfb31e1abcbc54640f2a9092b02fe","category":"installation-network","reason":"External immutable-resource HTTP send only.","acceptance":"OPEN: admitted-resource transfer, range resume, interruption and safe activation."},
-    {"path":"crates/app/src/updates.rs","start":293,"end":294,"source_sha256":"9c4e337e202b5c2e7fb7eb72125705ebbc6e8e3980885afef970fcaf60282737","category":"installation-network","reason":"Official metadata HTTP send/await only.","acceptance":"OPEN: bounded official discovery, offline/missing release and no pre-consent payload."},
-    {"path":"crates/app/src/updates.rs","start":308,"end":309,"source_sha256":"9c4e337e202b5c2e7fb7eb72125705ebbc6e8e3980885afef970fcaf60282737","category":"installation-network","reason":"Official signature HTTP send/await only.","acceptance":"OPEN: bounded signature transfer and authenticated metadata rejection on failure/tamper."},
-    {"path":"crates/app/src/runtimes.rs","start":261,"end":261,"source_sha256":"20c3cd186b8fc3c9d833269104740bc02c2a9f65e1793d9fbae5b611032ac26f","category":"installation-network","reason":"External runtime metadata HTTP send only.","acceptance":"OPEN: bounded matching signed runtime metadata transfer, malformed/offline failure preservation."},
-    {"path":"crates/app/src/runtimes.rs","start":288,"end":289,"source_sha256":"20c3cd186b8fc3c9d833269104740bc02c2a9f65e1793d9fbae5b611032ac26f","category":"installation-network","reason":"External runtime payload HTTP get/send only.","acceptance":"OPEN: authenticated repair transfer, denied/cancelled/tampered/wrong-target with old pack retained."}
+    {
+      "path": "crates/desktop/src/files.rs",
+      "start": 40,
+      "end": 50,
+      "source_sha256": "1a63eb010203cc85266d28081e6e145a42f1394bdef0decaf6363ff3bf70d3a7",
+      "category": "native-dialog",
+      "reason": "Native source picker invocation; cancellation and grants remain measured.",
+      "acceptance": "OPEN: native source selection/cancellation on all desktops, unchanged grants after cancellation."
+    },
+    {
+      "path": "crates/desktop/src/files.rs",
+      "start": 70,
+      "end": 76,
+      "source_sha256": "1a63eb010203cc85266d28081e6e145a42f1394bdef0decaf6363ff3bf70d3a7",
+      "category": "native-dialog",
+      "reason": "Native output picker invocation only.",
+      "acceptance": "OPEN: native output selection/cancellation and preservation of existing files."
+    },
+    {
+      "path": "crates/desktop/src/files.rs",
+      "start": 413,
+      "end": 419,
+      "source_sha256": "1a63eb010203cc85266d28081e6e145a42f1394bdef0decaf6363ff3bf70d3a7",
+      "category": "native-dialog",
+      "reason": "Native project save picker invocation only.",
+      "acceptance": "OPEN: native project save selection/cancellation, retained overwrite consent and corrections."
+    },
+    {
+      "path": "crates/desktop/src/files.rs",
+      "start": 492,
+      "end": 498,
+      "source_sha256": "1a63eb010203cc85266d28081e6e145a42f1394bdef0decaf6363ff3bf70d3a7",
+      "category": "native-dialog",
+      "reason": "Native subtitle export picker invocation only.",
+      "acceptance": "OPEN: native export selection/cancellation and no unapproved replacement."
+    },
+    {
+      "path": "crates/desktop/src/files.rs",
+      "start": 571,
+      "end": 576,
+      "source_sha256": "1a63eb010203cc85266d28081e6e145a42f1394bdef0decaf6363ff3bf70d3a7",
+      "category": "native-dialog",
+      "reason": "Native project open picker invocation only.",
+      "acceptance": "OPEN: native project selection/cancellation, original workspace retained on cancellation."
+    },
+    {
+      "path": "crates/desktop/src/resume.rs",
+      "start": 40,
+      "end": 43,
+      "source_sha256": "6fd41897866d15ad432af829c7cc637221957a2bd1c8652318024554890796ef",
+      "category": "native-dialog",
+      "reason": "Native source regrant picker invocation only.",
+      "acceptance": "OPEN: native source regrant/cancellation with exact original fingerprint and state preservation."
+    },
+    {
+      "path": "crates/desktop/src/resume.rs",
+      "start": 48,
+      "end": 53,
+      "source_sha256": "6fd41897866d15ad432af829c7cc637221957a2bd1c8652318024554890796ef",
+      "category": "native-dialog",
+      "reason": "Native output regrant picker invocation only.",
+      "acceptance": "OPEN: native output regrant/cancellation, reject incompatible destination without mutation."
+    },
+    {
+      "path": "crates/desktop/src/model_manager.rs",
+      "start": 132,
+      "end": 138,
+      "source_sha256": "ba660f64b7ff0a0ac827c8a59dad3500a66cd8b0a9904e95585eef29c577b851",
+      "category": "native-dialog",
+      "reason": "Native verified-model export picker invocation only.",
+      "acceptance": "OPEN: select/cancel model export, retain verified resource and no-clobber destination."
+    },
+    {
+      "path": "crates/desktop/src/language_manager.rs",
+      "start": 96,
+      "end": 102,
+      "source_sha256": "04679aa8cf54b9b47fb54e5c831487cdcf0a446dcd303dda71c7b1bd85c3fdab",
+      "category": "native-dialog",
+      "reason": "Native language export picker invocation only.",
+      "acceptance": "OPEN: select/cancel language export, verify resource integrity and previous file preservation."
+    },
+    {
+      "path": "crates/desktop/src/updates.rs",
+      "start": 534,
+      "end": 539,
+      "source_sha256": "6dfe9bb3baff0a2b1c8c1a93ed28351ae4ee365e35f92e4a0c310ae39d0ac5c3",
+      "category": "native-dialog",
+      "reason": "Native verified-update save picker invocation only.",
+      "acceptance": "OPEN: select/cancel update save, retain authenticated payload and existing destination."
+    },
+    {
+      "path": "crates/desktop/src/updates.rs",
+      "start": 338,
+      "end": 339,
+      "source_sha256": "6dfe9bb3baff0a2b1c8c1a93ed28351ae4ee365e35f92e4a0c310ae39d0ac5c3",
+      "category": "installation-network",
+      "reason": "External update payload HTTP get/send only.",
+      "acceptance": "OPEN: authenticated payload transfer, denial/interruption/tamper and previous app/data preservation."
+    },
+    {
+      "path": "crates/app/src/model_download.rs",
+      "start": 115,
+      "end": 115,
+      "source_sha256": "0b57db5a875a432ba39bb0ff2e074bdbdcabfb31e1abcbc54640f2a9092b02fe",
+      "category": "installation-network",
+      "reason": "External immutable-resource HTTP send only.",
+      "acceptance": "OPEN: admitted-resource transfer, range resume, interruption and safe activation."
+    },
+    {
+      "path": "crates/app/src/updates.rs",
+      "start": 293,
+      "end": 294,
+      "source_sha256": "9c4e337e202b5c2e7fb7eb72125705ebbc6e8e3980885afef970fcaf60282737",
+      "category": "installation-network",
+      "reason": "Official metadata HTTP send/await only.",
+      "acceptance": "OPEN: bounded official discovery, offline/missing release and no pre-consent payload."
+    },
+    {
+      "path": "crates/app/src/updates.rs",
+      "start": 308,
+      "end": 309,
+      "source_sha256": "9c4e337e202b5c2e7fb7eb72125705ebbc6e8e3980885afef970fcaf60282737",
+      "category": "installation-network",
+      "reason": "Official signature HTTP send/await only.",
+      "acceptance": "OPEN: bounded signature transfer and authenticated metadata rejection on failure/tamper."
+    },
+    {
+      "path": "crates/app/src/runtimes.rs",
+      "start": 261,
+      "end": 261,
+      "source_sha256": "20c3cd186b8fc3c9d833269104740bc02c2a9f65e1793d9fbae5b611032ac26f",
+      "category": "installation-network",
+      "reason": "External runtime metadata HTTP send only.",
+      "acceptance": "OPEN: bounded matching signed runtime metadata transfer, malformed/offline failure preservation."
+    },
+    {
+      "path": "crates/app/src/runtimes.rs",
+      "start": 288,
+      "end": 289,
+      "source_sha256": "20c3cd186b8fc3c9d833269104740bc02c2a9f65e1793d9fbae5b611032ac26f",
+      "category": "installation-network",
+      "reason": "External runtime payload HTTP get/send only.",
+      "acceptance": "OPEN: authenticated repair transfer, denied/cancelled/tampered/wrong-target with old pack retained."
+    }
   ]
 }

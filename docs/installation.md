@@ -8,8 +8,8 @@ Use only the project's [official Releases](https://github.com/KiaroSama/Numera-V
 
 | Computer | Architecture | Intended downloads | Current prerequisite/baseline |
 |---|---|---|---|
-| Windows | x64 | current-user NSIS setup or portable ZIP | Windows 10 1809+ declared; system WebView2 |
-| Windows | ARM64 | ARM64 application NSIS setup or portable ZIP | native ARM64 Windows; system WebView2 |
+| Windows | x64 | per-machine MSI installer or portable ZIP | Windows 10 1809+ declared; system WebView2 |
+| Windows | ARM64 | ARM64 per-machine MSI installer or portable ZIP | native ARM64 Windows; system WebView2 |
 | Linux | x64 | AppImage, deb, rpm or portable tar.gz | Ubuntu 24.04/glibc 2.39 build baseline; WebKitGTK 4.1/system graphics libraries |
 | Linux | ARM64 | ARM64 AppImage, deb, rpm or portable tar.gz | same declared Linux baseline on ARM64 |
 
@@ -19,7 +19,7 @@ Check your operating system's About/System information screen before downloading
 
 1. Download only your target's asset, accompanying checksum/provenance/signature information and required notices. Compare the exact file size and SHA-256 with the published inventory. A checksum detects byte changes; authenticity also requires the approved signature/trust path.
 2. Windows development executables/installers require the exact pinned self-signed Authenticode identity described below; this does not make the publisher publicly trusted. Linux packages remain unsigned at the native package level; check their published inventory and any separately supplied updater/detached authentication according to its documented purpose. The existing updater key/signatures are unchanged and are not Authenticode or native deb/rpm signatures. Do not install when required signatures are absent, unexpected, expired or invalid.
-3. NSIS: run the verified current-user setup. It may fetch Microsoft's WebView2 bootstrapper if WebView2 is missing. Portable ZIP: extract the complete directory into a writable location; do not run directly inside the ZIP or separate the GUI, `nvsf.exe`, `runtimes`, data and notices.
+3. MSI: run the verified per-machine `.msi` installer (users upgrading from `0.4.0` or earlier NSIS installs should uninstall the old NSIS package once first). It may fetch Microsoft's WebView2 bootstrapper if WebView2 is missing. Portable ZIP: extract the complete directory into a writable location; do not run directly inside the ZIP or separate the GUI, `nvsf.exe`, `runtimes`, data and notices.
 4. Linux: use your distribution's normal package installer for deb/rpm, or mark the verified AppImage executable and run it. Extract portable tar.gz completely before launching. System-library compatibility must match the build baseline.
 5. Keep OS security enabled. Do not disable SmartScreen or signature checks to make an unverified package run.
 
@@ -27,7 +27,7 @@ Minimum-OS and clean-install behavior remain unqualified until their dedicated t
 
 ### Windows development signature check
 
-Implemented, pending hosted verification: the signing path covers the portable GUI and `nvsf.exe`, NSIS-packaged GUI, embedded NSIS uninstaller and final setup. Vendor DLLs are not re-signed. This does not mean a new verified download or release is available yet.
+The signing path covers the portable GUI and `nvsf.exe`, the MSI-packaged GUI, and the final `.msi` installer. Vendor DLLs are not re-signed.
 
 The development signer is self-signed `CN=Numera Video Sub Finder`, RSA 3072 with code-signing EKU `1.3.6.1.5.5.7.3.3`, expiring 2027-11-03. Its public certificate DER SHA-256 pin is:
 

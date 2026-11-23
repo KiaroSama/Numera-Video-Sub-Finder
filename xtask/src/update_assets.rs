@@ -12,7 +12,7 @@ fn asset_target(target: &str, format: &str) -> Result<String> {
         _ => return Err("Unsupported update architecture".into()),
     };
     let (os, format) = match (os, format) {
-        ("windows", "nsis") => ("windows", "nsis"),
+        ("windows", "msi") => ("windows", "msi"),
         ("windows", "zip") => ("windows", "portable"),
         ("linux", "appimage" | "deb" | "rpm") => ("linux", format),
         ("linux", "tar.gz") => ("linux", "portable"),
@@ -28,7 +28,8 @@ mod tests {
     #[test]
     fn native_package_formats_map_to_explicit_application_update_targets() {
         for (target, format, expected) in [
-            ("windows-arm64", "nsis", "windows-aarch64-nsis"),
+            ("windows-arm64", "msi", "windows-aarch64-msi"),
+            ("windows-x64", "msi", "windows-x86_64-msi"),
             ("windows-x64", "zip", "windows-x86_64-portable"),
             ("linux-arm64", "appimage", "linux-aarch64-appimage"),
             ("linux-x64", "deb", "linux-x86_64-deb"),
@@ -37,7 +38,8 @@ mod tests {
             assert_eq!(asset_target(target, format).unwrap(), expected);
         }
         for (target, format) in [
-            ("linux-arm64", "nsis"),
+            ("linux-arm64", "msi"),
+            ("windows-arm64", "nsis"),
             ("windows-x86", "zip"),
             ("unsupported-x64", "tar.gz"),
         ] {
@@ -129,7 +131,7 @@ pub fn generate(target: &str, packages: &Path) -> Result<()> {
             return Err("Native update input differs from bundle inventory".into());
         }
         let extension = match format {
-            "nsis" => "exe",
+            "msi" => "msi",
             "zip" => "zip",
             "appimage" => "AppImage",
             "deb" => "deb",

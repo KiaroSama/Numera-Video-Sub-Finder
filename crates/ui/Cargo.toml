@@ -24,7 +24,7 @@ web-sys = { version = "=0.3.106", features = [
   "Window", "Document", "Element", "HtmlElement", "HtmlCanvasElement", "HtmlInputElement",
   "HtmlTextAreaElement", "CssStyleDeclaration", "Performance", "Storage", "Location",
   "MediaQueryList", "Blob", "BlobPropertyBag", "Url", "KeyboardEvent", "MouseEvent",
-  "Event", "EventTarget", "DomRect", "HtmlImageElement", "WebGlRenderingContext",
+  "Event", "EventTarget", "DomRect", "HtmlDialogElement", "HtmlImageElement", "WebGlRenderingContext",
   "WebGlProgram", "WebGlShader", "WebGlBuffer", "WebGlUniformLocation", "WebGlContextAttributes"
 ] }
 

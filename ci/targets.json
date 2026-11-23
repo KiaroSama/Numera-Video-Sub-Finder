@@ -58,7 +58,7 @@
       "arch": "x64",
       "triplet": "x64-windows",
       "package_formats": [
-        "nsis",
+        "msi",
         "zip"
       ],
       "minimum_os": "Windows10 1809",
@@ -80,7 +80,7 @@
       "arch": "arm64",
       "triplet": "arm64-windows",
       "package_formats": [
-        "nsis",
+        "msi",
         "zip"
       ],
       "minimum_os": "Windows10 1809",

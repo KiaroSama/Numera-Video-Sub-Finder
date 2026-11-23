@@ -38,6 +38,17 @@ pub async fn listen_event(
     Ok(unlisten.dyn_into::<js_sys::Function>().ok())
 }
 
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn e2e_mode() -> bool {
+    cfg!(feature = "e2e")
+        || web_sys::window().is_some_and(|window| {
+            js_sys::Reflect::get(&window, &"__NVSF_E2E__".into())
+                .ok()
+                .and_then(|value| value.as_bool())
+                == Some(true)
+        })
+}
+
 pub async fn call<T: DeserializeOwned>(
     command: &str,
     args: serde_json::Value,

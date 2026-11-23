@@ -37,6 +37,29 @@ fn set_unsaved(host: tauri::State<'_, Host>, dirty: bool) -> state::Result<()> {
 }
 
 #[tauri::command]
+fn restart_app(app: tauri::AppHandle, host: tauri::State<'_, Host>) -> state::Result<()> {
+    let host = host.inner();
+    if host.0.unsaved.load(std::sync::atomic::Ordering::Acquire) {
+        return Err("Save or discard the current corrections before restarting".into());
+    }
+    host.0
+        .log
+        .event("INFO", "DESKTOP", "phase=restart-requested");
+    let host = host.clone();
+    tauri::async_runtime::spawn(async move {
+        if let Err(error) = close::request_exit(app.clone(), host.clone(), true).await {
+            use tauri_plugin_dialog::DialogExt;
+            host.0.log.event("WARNING", "DESKTOP", &error);
+            app.dialog()
+                .message(error)
+                .title("Restart deferred")
+                .show(|_| {});
+        }
+    });
+    Ok(())
+}
+
+#[tauri::command]
 fn ui_ready(
     window: tauri::WebviewWindow,
     host: tauri::State<'_, Host>,
@@ -67,6 +90,8 @@ fn ui_ready(
     host.0
         .log
         .event("INFO", "DESKTOP", "phase=window-show-accepted");
+    let app = window.app_handle().clone();
+    tauri::async_runtime::spawn_blocking(move || updates::schedule(&app));
     Ok(())
 }
 
@@ -129,9 +154,10 @@ fn main() {
                 std::process::id()
             );
             setup_log.event("INFO", "DESKTOP", "phase=host-managed");
-            updates::schedule(app.handle());
             Ok(())
         })
+        .manage(close::CloseSession::default())
+        .manage(files::ProjectFiles::default())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build());
     #[cfg(feature = "e2e")]
@@ -140,6 +166,8 @@ fn main() {
         ($($extra:path),* $(,)?) => { tauri::generate_handler![
             ui_ready,
             set_unsaved,
+            restart_app,
+            close::confirm_close,
             updates::update_status,
             updates::check_updates,
             updates::set_update_checks,
@@ -151,6 +179,7 @@ fn main() {
             drop::accept_dropped_paths,
             files::choose_output,
             files::preview_frame,
+            files::preview_initial_frame,
             jobs::start_job,
             queue::queue_list,
             queue::queue_add,
@@ -163,6 +192,7 @@ fn main() {
             files::current_project,
             files::replace_project,
             files::save_project,
+            files::save_project_as,
             files::export_project,
             files::pick_project,
             files::list_history,

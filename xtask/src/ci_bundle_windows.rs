@@ -3,9 +3,14 @@ use crate::{
     ci_authenticode::{self, SIGNER_SHA256},
     ci_crt,
     ci_guard::Result,
-    ci_native_helpers::{Member, basename, crt_directory, entries, files, json, path_text, sha},
+    ci_guard::unlinked,
+    ci_native_helpers::{
+        Member, basename, crt_directory, entries, json, path_text, safe_relative, sha,
+    },
     ci_notices, executable_icons,
 };
+use base64::{Engine as _, engine::general_purpose::STANDARD};
+use serde::Deserialize;
 use serde_json::{Value, json};
 use std::{
     collections::{BTreeSet, VecDeque},
@@ -57,6 +62,150 @@ pub(super) fn signed_gui(expected: Vec<u8>, path: &Path) -> Result<()> {
         );
     }
     Ok(())
+}
+
+#[derive(Deserialize)]
+struct MsiInventory {
+    template: String,
+    language: String,
+    product_icon: String,
+    shortcut_icon: String,
+    files: Vec<MsiFile>,
+}
+
+#[derive(Deserialize)]
+struct MsiFile {
+    id: String,
+    path: String,
+    bytes: u64,
+}
+
+// Dark extracts the cabinet by File-table key, not by the installed filename.
+const MSI_TABLES: &str = r#"
+$ErrorActionPreference = 'Stop'
+[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
+$options = [Xml.XmlReaderSettings]::new()
+$options.DtdProcessing = [Xml.DtdProcessing]::Prohibit
+$options.MaxCharactersInDocument = 4194304
+$reader = [Xml.XmlReader]::Create($env:NVSF_MSI_TABLES, $options)
+try { $xml = [Xml.XmlDocument]::new(); $xml.Load($reader) } finally { $reader.Dispose() }
+function Rows([string]$table) {
+    $xml.SelectNodes("/*[local-name()='wixOutput' and @type='Product']/*[local-name()='table' and @name='$table']/*[local-name()='row']")
+}
+function Fields($row) { $row.SelectNodes("*[local-name()='field']") | ForEach-Object { $_.InnerText } }
+function LongName([string]$name) { ($name -split '\|')[-1] }
+$directories = @{}
+foreach ($row in (Rows 'Directory')) {
+    $key, $parent, $name = Fields $row
+    $directories.Add($key, @($parent, (LongName (($name -split ':')[0]))))
+}
+$components = @{}
+foreach ($row in (Rows 'Component')) {
+    $fields = @(Fields $row)
+    $components.Add($fields[0], $fields[2])
+}
+$files = @(foreach ($row in (Rows 'File')) {
+    $fields = @(Fields $row)
+    $id, $component, $name, $size = $fields[0..3]
+    $path = LongName $name
+    $dir = $components[$component]
+    $depth = 0
+    while ($dir -cne 'INSTALLDIR') {
+        if (++$depth -gt 16 -or !$dir -or !$directories.ContainsKey($dir)) {
+            throw 'MSI file is not rooted under INSTALLDIR'
+        }
+        $dir, $folder = $directories[$dir]
+        if ($folder -cne '.') { $path = "$folder/$path" }
+    }
+    @{id=$id; path=$path; bytes=[UInt64]$size}
+})
+$properties = @{}
+foreach ($row in (Rows 'Property')) { $key, $value = Fields $row; $properties.Add($key, $value) }
+$template = foreach ($row in (Rows '_SummaryInformation')) {
+    $key, $value = Fields $row
+    if ($key -ceq '7') { $value }
+}
+$shortcut = foreach ($row in (Rows 'Shortcut')) {
+    $fields = @(Fields $row)
+    if ($fields[0] -ceq 'ApplicationStartMenuShortcut') { $fields[8] }
+}
+[Console]::WriteLine((@{
+    template=$template; language=$properties.ProductLanguage; product_icon=$properties.ARPPRODUCTICON;
+    shortcut_icon=$shortcut; files=$files
+} | ConvertTo-Json -Compress -Depth 4))
+"#;
+
+fn restore_msi_files(cabinet: &Path, installed: &Path, rows: Vec<MsiFile>) -> Result<()> {
+    if !unlinked(cabinet)?.is_dir()
+        || rows.is_empty()
+        || rows.len() > 4096
+        || rows.len() != entries(cabinet)?.len()
+    {
+        return Err("MSI cabinet differs from its bounded File table.".into());
+    }
+    let mut ids = BTreeSet::new();
+    let mut paths = BTreeSet::new();
+    for row in rows {
+        if !safe_relative(&row.id)
+            || !row
+                .id
+                .bytes()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, b'_' | b'.'))
+            || !safe_relative(&row.path)
+            || row.path.contains(['<', '>', '"', '|', '?', '*'])
+            || !ids.insert(row.id.to_ascii_lowercase())
+            || !paths.insert(row.path.to_ascii_lowercase())
+        {
+            return Err("Invalid or duplicate MSI File table path.".into());
+        }
+        let src = cabinet.join(row.id);
+        let metadata = unlinked(&src)?;
+        if !metadata.is_file() || metadata.len() != row.bytes {
+            return Err("MSI cabinet member differs from its File table size.".into());
+        }
+        let dest = installed.join(row.path);
+        fs::create_dir_all(dest.parent().ok_or("Missing MSI file parent directory.")?)?;
+        fs::rename(src, dest)?;
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cabinet_ids_restore_only_the_declared_install_paths() -> Result<()> {
+        let root = tempfile::tempdir()?;
+        let cabinet = root.path().join("File");
+        let installed = root.path().join("installed");
+        fs::create_dir(&cabinet)?;
+        fs::create_dir(&installed)?;
+        fs::write(cabinet.join("Path"), b"binary")?;
+        let member = |id: &str, path: &str, bytes| MsiFile {
+            id: id.into(),
+            path: path.into(),
+            bytes,
+        };
+        assert!(
+            restore_msi_files(&cabinet, &installed, vec![member("Path", "../escape", 6)]).is_err()
+        );
+        assert!(
+            restore_msi_files(
+                &cabinet,
+                &installed,
+                vec![member("Path", "runtimes/exe", 5)]
+            )
+            .is_err()
+        );
+        restore_msi_files(
+            &cabinet,
+            &installed,
+            vec![member("Path", "runtimes/exe", 6)],
+        )?;
+        assert_eq!(fs::read(installed.join("runtimes/exe"))?, b"binary");
+        Ok(())
+    }
 }
 
 impl Bundle {
@@ -144,21 +293,18 @@ impl Bundle {
         let xtask = env::current_exe()?;
         let ledger = self.stage.path().join("signing-ledger");
         fs::create_dir(&ledger)?;
-        let temp = fs::canonicalize(PathBuf::from(
-            env::var_os("TEMP").ok_or("Missing owned Windows temp directory.")?,
-        ))?;
+        let temp = self.stage.path().join("wix-temp");
+        fs::create_dir(&temp)?;
+        // Tauri copies renamed sidecars into TEMP while constructing the MSI.
+        self.run.set("TEMP", &temp);
+        self.run.set("TMP", &temp);
+        self.run.set("NVSF_SIGNING_ARCH", &self.target.arch);
         for (key, path) in [
             ("NVSF_SIGNING_ROOT", self.root.clone()),
             ("NVSF_SIGNING_MAIN", self.main.clone()),
             ("NVSF_SIGNING_PAYLOAD", self.payload.clone()),
             ("NVSF_SIGNING_RELEASE", self.release.clone()),
-            ("NVSF_SIGNING_TEMP", temp),
             ("NVSF_SIGNING_LEDGER", ledger),
-            ("NVSF_SIGNING_XTASK", xtask.clone()),
-            (
-                "NVSF_SIGNING_ICON",
-                self.desktop.join("icons").join("icon.ico"),
-            ),
         ] {
             self.run.set(key, path);
         }
@@ -167,72 +313,137 @@ impl Bundle {
         )
     }
 
-    pub(super) fn inspect_nsis(
+    pub(super) fn inspect_msi(
         &mut self,
         setup: &Path,
         inspect: &Path,
         payload: &[Member],
     ) -> Result<()> {
+        let signature = ci_authenticode::verify(setup, SIGNER_SHA256)?;
+        if ci_authenticode::verify(setup, &"0".repeat(64)).is_ok() {
+            return Err("MSI signature accepted the wrong signer pin.".into());
+        }
+        let dark = helpers::owned(
+            &self.root,
+            &self.stage.path().join("cargo/.tauri/WixTools314/dark.exe"),
+        )?;
+        let tables = inspect.join("package.wixout");
         self.command(
-            "nsis-content",
-            "7z.exe",
+            "msi-content",
+            dark,
             [
-                "x",
-                "-y",
-                "-mmt2",
-                "-sccUTF-8",
-                &format!("-o{}", inspect.display()),
+                "-nologo",
+                "-xo",
+                "-x",
+                path_text(inspect)?,
                 path_text(setup)?,
+                path_text(&tables)?,
             ],
             (180, 90),
             false,
             None,
         )?;
-        let cli = files(inspect)?
-            .into_iter()
-            .filter(|path| basename(path).is_ok_and(|name| name.eq_ignore_ascii_case("nvsf.exe")))
-            .collect::<Vec<_>>();
-        let [cli] = cli.as_slice() else {
-            return Err("NSIS extraction must contain exactly one native CLI.".into());
+        let metadata = unlinked(&tables)?;
+        if !metadata.is_file() || metadata.len() > 4 * 1024 * 1024 {
+            return Err("WiX installer table export exceeds its byte budget.".into());
+        }
+        let rows = self.read_msi_tables(&tables)?;
+        let arch = if self.target.arch == "arm64" {
+            "Arm64"
+        } else {
+            "x64"
         };
-        let bin = cli.parent().ok_or("Missing NSIS binary directory.")?;
-        self.installed(bin, bin, "nsis", payload)?;
+        let (platform, language) = rows
+            .template
+            .split_once(';')
+            .ok_or("Missing MSI platform and language summary.")?;
+        if !platform.eq_ignore_ascii_case(arch)
+            || !matches!(language, "0" | "1033")
+            || rows.language != "1033"
+        {
+            return Err(format!(
+                "Unexpected MSI platform or language: {} / {}",
+                rows.template, rows.language
+            )
+            .into());
+        }
+        let cabinet = inspect.join("File");
+        let bin = inspect.join("installed");
+        fs::create_dir(&bin)?;
+        restore_msi_files(&cabinet, &bin, rows.files)?;
+        self.installed(&bin, &bin, "msi", payload)?;
         let gui = bin.join("numera-video-sub-finder.exe");
-        self.icon(&gui, "nsis-gui")?;
-        self.icon(cli, "nsis-cli")?;
-        self.icon(setup, "nsis-setup")?;
-        for (role, file) in [("nsis-gui", gui.as_path()), ("nsis-setup", setup)] {
-            self.signatures
-                .push(json!({"role":role,"evidence":ci_authenticode::verify(file,SIGNER_SHA256)?}));
+        let cli = bin.join("nvsf.exe");
+        self.icon(&gui, "msi-gui")?;
+        self.icon(&cli, "msi-cli")?;
+        if rows.product_icon != "ProductIcon" || rows.shortcut_icon != "ProductIcon" {
+            return Err("MSI product and Start menu shortcut must use the approved icon.".into());
         }
-        let mut roles = BTreeSet::new();
-        let mut uninstaller_icons = false;
-        for file in entries(&self.stage.path().join("signing-ledger"))? {
-            let name = basename(&file)?;
-            if !name.ends_with(".json") {
-                continue;
+        let icon = helpers::owned(&self.root, &inspect.join("Icon/ProductIcon"))?;
+        let approved = self.desktop.join("icons/icon.ico");
+        let metadata = unlinked(&icon)?;
+        if !metadata.is_file() || metadata.len() > 8 * 1024 * 1024 {
+            return Err("MSI ProductIcon exceeds its byte budget.".into());
+        }
+        let bytes = fs::read(&icon)?;
+        crate::ci_icons::validate_ico(&bytes)?;
+        if bytes != fs::read(approved)? {
+            return Err("MSI ProductIcon differs from the approved icon bytes.".into());
+        }
+        self.icons.push("msi-product-icon".to_owned());
+        for (role, file) in [("gui", gui.as_path()), ("msi", setup)] {
+            let member = Member::read(file, &self.root)?;
+            let name = basename(file)?;
+            let mut count = 0;
+            for record in entries(&self.stage.path().join("signing-ledger"))? {
+                let record = json(&record)?;
+                if record["role"] == role {
+                    if record["file"] != name
+                        || record["bytes"] != member.bytes
+                        || record["sha256"] != member.sha256
+                    {
+                        return Err(
+                            format!("Signer ledger does not bind the MSI {role} bytes.").into()
+                        );
+                    }
+                    count += 1;
+                }
             }
-            if name.starts_with("uninstaller-icons-") {
-                uninstaller_icons = true;
-            } else {
-                roles.insert(
-                    json(&file)?["role"]
-                        .as_str()
-                        .ok_or("Missing signer role.")?
-                        .to_owned(),
-                );
+            if count != 1 {
+                return Err(format!("Custom signer did not observe exactly one {role}.").into());
             }
         }
-        for role in ["gui", "uninstaller", "setup"] {
-            if !roles.contains(role) {
-                return Err(format!("Custom signer did not observe required role: {role}.").into());
-            }
-        }
-        if !uninstaller_icons {
-            return Err("Uninstaller icon evidence is missing.".into());
-        }
-        self.signatures.push(json!({"role":"nsis-uninstaller","evidence":"signed, pinned-verified and icon-checked by the allowlisted custom signer before NSIS embedding"}));
+        self.signatures.extend([
+            json!({"role":"msi-gui","evidence":ci_authenticode::verify(&gui,SIGNER_SHA256)?}),
+            json!({"role":"msi-cli","evidence":ci_authenticode::verify(&cli,SIGNER_SHA256)?}),
+            json!({"role":"msi-installer","evidence":signature}),
+        ]);
         Ok(())
+    }
+
+    fn read_msi_tables(&mut self, tables: &Path) -> Result<MsiInventory> {
+        let encoded = STANDARD.encode(
+            MSI_TABLES
+                .encode_utf16()
+                .flat_map(u16::to_le_bytes)
+                .collect::<Vec<_>>(),
+        );
+        self.run.set("NVSF_MSI_TABLES", tables);
+        let output = self.command(
+            "msi-tables",
+            "pwsh.exe",
+            [
+                "-NoLogo",
+                "-NoProfile",
+                "-NonInteractive",
+                "-EncodedCommand",
+                &encoded,
+            ],
+            (30, 15),
+            true,
+            None,
+        )?;
+        Ok(serde_json::from_str(&output)?)
     }
 
     pub(super) fn zip(&mut self, members: &[Member], signing: &str) -> Result<PathBuf> {

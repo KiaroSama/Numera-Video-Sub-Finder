@@ -1,9 +1,33 @@
 use crate::state::{self, Destination, Host, Result, Source, blocking, display_name, lock};
-use nvsf_app::native_request::{self, Operation, Response};
+use nvsf_app::{
+    native_request::{self, Operation, Response},
+    storage::AtomicOutput,
+};
 use nvsf_core::Project;
 use serde::Serialize;
-use std::path::PathBuf;
+use std::{
+    io::Cursor,
+    path::{Path, PathBuf},
+    sync::{Arc, Mutex, atomic::Ordering},
+    time::Duration,
+};
+use tauri::Manager;
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
+
+#[derive(Clone, Default)]
+pub(crate) struct ProjectFiles(Arc<Mutex<ProjectPaths>>);
+
+#[derive(Default)]
+struct ProjectPaths {
+    active: Option<(Option<String>, PathBuf)>,
+    generation: u64,
+    recent: Vec<(PathBuf, String)>,
+    recent_grants: std::collections::HashMap<String, String>,
+}
+
+fn job_id(host: &Host) -> Result<Option<String>> {
+    Ok(lock(&host.0.job)?.as_ref().map(|job| job.id.clone()))
+}
 
 #[tauri::command]
 pub async fn pick_source(
@@ -150,41 +174,116 @@ pub async fn preview_frame(
     token: String,
     time_ms: u64,
 ) -> Result<tauri::ipc::Response> {
-    let host = host.inner().clone();
-    let operation = lock(&host.0.operation)?;
-    if host.0.model_busy.load(std::sync::atomic::Ordering::Acquire)
-        || host.0.closing.load(std::sync::atomic::Ordering::Acquire)
-    {
-        return Err("Wait for resource operations or shutdown before previewing".into());
-    }
-    if host
-        .0
-        .source_busy
-        .swap(true, std::sync::atomic::Ordering::AcqRel)
-    {
-        return Err("A source frame is already being decoded".into());
-    }
-    host.0
-        .source_cancel
-        .store(false, std::sync::atomic::Ordering::Release);
-    drop(operation);
-    blocking(move || {
-        struct Reset<'a>(&'a std::sync::atomic::AtomicBool);
-        impl Drop for Reset<'_> {
-            fn drop(&mut self) {
-                self.0.store(false, std::sync::atomic::Ordering::Release);
-            }
-        }
-        let _reset = Reset(&host.0.source_busy);
-        let path = host.source(&token)?;
-        let (_, bytes) = native_request::supervise(
-            &host.0.paths,
-            &path,
-            Operation::Preview { at_ms: time_ms },
-            &host.0.source_cancel,
-        )
-        .map_err(|e| e.to_string())?;
+    with_source_preview(host.inner(), token, move |host, path| {
+        let bytes = decode_preview(host, path, time_ms)?;
         Ok(tauri::ipc::Response::new(bytes))
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn preview_initial_frame(host: tauri::State<'_, Host>, token: String) -> Result<u64> {
+    with_source_preview(host.inner(), token, |host, path| {
+        std::thread::scope(|scope| {
+            let (done, wait) = std::sync::mpsc::channel::<()>();
+            let cancel = &host.0.source_cancel;
+            let Ok(_timer) = std::thread::Builder::new().spawn_scoped(scope, move || {
+                if wait.recv_timeout(Duration::from_secs(3))
+                    == Err(std::sync::mpsc::RecvTimeoutError::Timeout)
+                {
+                    cancel.store(true, Ordering::Release);
+                }
+            }) else {
+                return Ok(0);
+            };
+            let result = probe_initial_frame(host, path);
+            drop(done);
+            result
+        })
+    })
+    .await
+}
+
+fn probe_initial_frame(host: &Host, path: &Path) -> Result<u64> {
+    let duration = lock(&host.0.project)?
+        .as_ref()
+        .filter(|project| Path::new(&project.config.input) == path)
+        .and_then(|project| project.media.duration_ms);
+    let duration = match duration {
+        Some(_) => duration,
+        None => match native_request::supervise(
+            &host.0.paths,
+            path,
+            Operation::Probe,
+            &host.0.source_cancel,
+        ) {
+            Ok((Response::Probe(media), _)) => media.duration_ms,
+            _ => return Ok(0),
+        },
+    };
+    Ok(nvsf_app::media::MediaRuntime::initial_preview_timestamp(
+        duration,
+        |time| {
+            let (response, bytes) = native_request::supervise(
+                &host.0.paths,
+                path,
+                Operation::Preview { at_ms: time },
+                &host.0.source_cancel,
+            )
+            .ok()?;
+            let Response::Preview { width, height, .. } = response else {
+                return None;
+            };
+            let mut reader =
+                image::ImageReader::with_format(Cursor::new(bytes), image::ImageFormat::Png);
+            let mut limits = image::Limits::default();
+            limits.max_image_width = Some(width);
+            limits.max_image_height = Some(height);
+            reader.limits(limits);
+            let frame = reader.decode().ok()?.into_rgb8();
+            (frame.dimensions() == (width, height) && !host.0.source_cancel.load(Ordering::Acquire))
+                .then_some(frame)
+        },
+    ))
+}
+
+fn decode_preview(host: &Host, path: &Path, at_ms: u64) -> Result<Vec<u8>> {
+    let (_, bytes) = native_request::supervise(
+        &host.0.paths,
+        path,
+        Operation::Preview { at_ms },
+        &host.0.source_cancel,
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(bytes)
+}
+
+async fn with_source_preview<T: Send + 'static>(
+    host: &Host,
+    token: String,
+    preview: impl FnOnce(&Host, &Path) -> Result<T> + Send + 'static,
+) -> Result<T> {
+    struct Reset(Host);
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            self.0.0.source_busy.store(false, Ordering::Release);
+        }
+    }
+    let busy = {
+        let _operation = lock(&host.0.operation)?;
+        if host.0.model_busy.load(Ordering::Acquire) || host.0.closing.load(Ordering::Acquire) {
+            return Err("Wait for resource operations or shutdown before previewing".into());
+        }
+        if host.0.source_busy.swap(true, Ordering::AcqRel) {
+            return Err("A source frame is already being decoded".into());
+        }
+        host.0.source_cancel.store(false, Ordering::Release);
+        Reset(host.clone())
+    };
+    blocking(move || {
+        let host = &busy.0;
+        let path = host.source(&token)?;
+        preview(host, &path)
     })
     .await
 }
@@ -199,6 +298,10 @@ pub fn replace_project(host: tauri::State<'_, Host>, project: Project) -> Result
     let host = host.inner();
     let _operation = lock(&host.0.operation)?;
     host.ensure_idle()?;
+    apply_project_edits(host, project)
+}
+
+pub(crate) fn apply_project_edits(host: &Host, project: Project) -> Result<()> {
     project.validate().map_err(|e| e.to_string())?;
     if serde_json::to_vec(&project)
         .map_err(|e| e.to_string())?
@@ -241,25 +344,133 @@ pub async fn save_project(
     app: tauri::AppHandle,
     host: tauri::State<'_, Host>,
 ) -> Result<Option<String>> {
-    host.ensure_idle()?;
-    let project = lock(&host.inner().0.project)?
-        .clone()
-        .ok_or_else(|| "No project is open".to_string())?;
-    blocking(move || {
+    save_project_command(app, host.inner().clone(), false).await
+}
+
+#[tauri::command]
+pub async fn save_project_as(
+    app: tauri::AppHandle,
+    host: tauri::State<'_, Host>,
+) -> Result<Option<String>> {
+    save_project_command(app, host.inner().clone(), true).await
+}
+
+async fn save_project_command(
+    app: tauri::AppHandle,
+    host: Host,
+    save_as: bool,
+) -> Result<Option<String>> {
+    blocking(move || save_active_project(&app, &host, save_as, None)).await
+}
+
+pub(crate) fn save_active_project(
+    app: &tauri::AppHandle,
+    host: &Host,
+    save_as: bool,
+    verify_close: Option<&dyn Fn() -> Result<()>>,
+) -> Result<Option<String>> {
+    let files = app.state::<ProjectFiles>();
+    let (project, job, generation, active_path) = {
+        let _operation = lock(&host.0.operation)?;
+        if verify_close.is_none() {
+            host.ensure_idle()?;
+        } else if lock(&host.0.job)?.as_ref().is_some_and(|job| {
+            job.thread
+                .as_ref()
+                .is_some_and(|worker| !worker.is_finished())
+        }) {
+            return Err(
+                "Wait for the current extraction to finish before saving and exiting".into(),
+            );
+        }
+        let project = lock(&host.0.project)?.clone().ok_or_else(|| {
+            "No active project to save yet. Extract subtitles or open a project first.".to_string()
+        })?;
+        let job = job_id(host)?;
+        let paths = lock(&files.0)?;
+        let active_path = paths
+            .active
+            .as_ref()
+            .filter(|(id, _)| id == &job)
+            .map(|(_, path)| path.clone());
+        (project, job, paths.generation, active_path)
+    };
+    let active_path = active_path.as_ref();
+    let path = if let Some(path) = active_path.filter(|_| !save_as) {
+        path.clone()
+    } else {
+        let name = active_path
+            .and_then(|path| path.file_name().and_then(|name| name.to_str()))
+            .map(project_filename)
+            .unwrap_or_else(|| {
+                project_filename(
+                    Path::new(&project.config.input)
+                        .file_stem()
+                        .and_then(|name| name.to_str())
+                        .unwrap_or("subtitles"),
+                )
+            });
         let Some(file) = app
             .dialog()
             .file()
-            .set_title("Save review project")
-            .add_filter("Numera project", &["json"])
-            .set_file_name("subtitles.nvsf.json")
+            .set_title("Save review project as")
+            .add_filter("Numera project", &["nvsf.json", "json"])
+            .set_file_name(name)
             .blocking_save_file()
         else {
             return Ok(None);
         };
-        let path = file.into_path().map_err(|e| e.to_string())?;
-        save_project_to(&project, &path, || Ok(confirm_replace(&app)))
-    })
-    .await
+        file.into_path().map_err(|e| e.to_string())?
+    };
+    state::path_text(&path)?;
+    if !path.is_absolute() {
+        return Err("Choose an absolute destination for the review project".into());
+    }
+    let prepared = AtomicOutput::for_confirmation(&path).map_err(|e| e.to_string())?;
+    save_prepared_project(
+        &project,
+        &path,
+        prepared,
+        || Ok(confirm_replace(app)),
+        |output, bytes| {
+            if let Some(verify) = verify_close {
+                verify()?;
+            }
+            let _operation = lock(&host.0.operation)?;
+            if verify_close.is_none() {
+                host.ensure_idle()?;
+            }
+            let mut paths = lock(&files.0)?;
+            let active = lock(&host.0.project)?;
+            if job_id(host)? != job
+                || paths.generation != generation
+                || active
+                    .as_ref()
+                    .is_none_or(|current| current.cues != project.cues)
+            {
+                return Err(
+                    "The workspace changed while choosing a project destination; save again".into(),
+                );
+            }
+            write_project(output, bytes)?;
+            let fingerprint = nvsf_app::providers::profiles::hash_bytes(bytes);
+            paths.recent.retain(|(recent, _)| recent != &path);
+            paths.recent.insert(0, (path.clone(), fingerprint));
+            paths.recent.truncate(200);
+            paths.generation = paths.generation.wrapping_add(1);
+            paths.active = Some((job, path.clone()));
+            host.0.unsaved.store(false, Ordering::Release);
+            Ok(())
+        },
+    )
+}
+
+fn project_filename(name: &str) -> String {
+    let name = name
+        .strip_suffix(".nvsf.json")
+        .or_else(|| name.strip_suffix(".json"))
+        .unwrap_or(name);
+    format!("{name}.nvsf.json")
 }
 
 #[tauri::command]
@@ -296,21 +507,26 @@ pub async fn export_project(
     .await
 }
 
+#[cfg(test)]
 pub(crate) fn save_project_to(
     project: &Project,
-    path: &std::path::Path,
+    path: &Path,
     confirm: impl FnOnce() -> Result<bool>,
 ) -> Result<Option<String>> {
-    let prepared =
-        nvsf_app::storage::AtomicOutput::for_confirmation(path).map_err(|e| e.to_string())?;
-    save_prepared_project(project, path, prepared, confirm)
+    let prepared = AtomicOutput::for_confirmation(path).map_err(|e| e.to_string())?;
+    save_prepared_project(project, path, prepared, confirm, write_project)
+}
+
+pub(crate) fn write_project(output: AtomicOutput, bytes: &[u8]) -> Result<()> {
+    output.write(bytes).map_err(|e| e.to_string())
 }
 
 pub(crate) fn save_prepared_project(
     project: &Project,
-    path: &std::path::Path,
-    prepared: (nvsf_app::storage::AtomicOutput, bool),
+    path: &Path,
+    prepared: (AtomicOutput, bool),
     confirm: impl FnOnce() -> Result<bool>,
+    publish: impl FnOnce(AtomicOutput, &[u8]) -> Result<()>,
 ) -> Result<Option<String>> {
     let (output, overwrite) = prepared;
     output
@@ -319,9 +535,10 @@ pub(crate) fn save_prepared_project(
     if overwrite && !confirm()? {
         return Ok(None);
     }
-    output
-        .write(&serde_json::to_vec_pretty(project).map_err(|e| e.to_string())?)
-        .map_err(|e| e.to_string())?;
+    publish(
+        output,
+        &serde_json::to_vec_pretty(project).map_err(|e| e.to_string())?,
+    )?;
     Ok(Some(display_name(path)))
 }
 
@@ -364,10 +581,20 @@ pub async fn pick_project(
         let project = nvsf_app::storage::load_project(&path).map_err(|e| e.to_string())?;
         let _operation = lock(&host.0.operation)?;
         host.ensure_idle()?;
-        *lock(&host.0.project)? = Some(project.clone());
+        bind_project(&host, &app.state::<ProjectFiles>(), path, &project)?;
         Ok(Some(project))
     })
     .await
+}
+
+fn bind_project(host: &Host, files: &ProjectFiles, path: PathBuf, project: &Project) -> Result<()> {
+    let job = job_id(host)?;
+    let mut paths = lock(&files.0)?;
+    let mut active = lock(&host.0.project)?;
+    paths.generation = paths.generation.wrapping_add(1);
+    paths.active = Some((job, path));
+    *active = Some(project.clone());
+    Ok(())
 }
 
 #[derive(Serialize)]
@@ -378,8 +605,12 @@ pub struct HistoryEntry {
 }
 
 #[tauri::command]
-pub async fn list_history(host: tauri::State<'_, Host>) -> Result<Vec<HistoryEntry>> {
+pub async fn list_history(
+    host: tauri::State<'_, Host>,
+    files: tauri::State<'_, ProjectFiles>,
+) -> Result<Vec<HistoryEntry>> {
     let host = host.inner().clone();
+    let files = files.inner().clone();
     blocking(move || {
         let root = host
             .0
@@ -387,7 +618,7 @@ pub async fn list_history(host: tauri::State<'_, Host>) -> Result<Vec<HistoryEnt
             .projects
             .canonicalize()
             .map_err(|e| e.to_string())?;
-        let mut entries: Vec<(PathBuf, Option<u64>)> = Vec::new();
+        let mut entries = Vec::new();
         for entry in std::fs::read_dir(&root)
             .map_err(|e| e.to_string())?
             .take(2000)
@@ -403,23 +634,29 @@ pub async fn list_history(host: tauri::State<'_, Host>) -> Result<Vec<HistoryEnt
             if !canonical.starts_with(&root) {
                 continue;
             }
-            let modified = entry
-                .metadata()
-                .ok()
-                .and_then(|m| m.modified().ok())
-                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                .map(|d| d.as_secs());
-            entries.push((canonical, modified));
+            entries.push((canonical, modified_at(&path), None));
+        }
+        let mut paths = lock(&files.0)?;
+        for (path, fingerprint) in &paths.recent {
+            if std::fs::symlink_metadata(path).is_ok_and(|metadata| metadata.is_file())
+                && !entries.iter().any(|(entry, _, _)| entry == path)
+            {
+                entries.push((path.clone(), modified_at(path), Some(fingerprint.clone())));
+            }
         }
         entries.sort_by(|a, b| b.1.cmp(&a.1));
         let mut grants = lock(&host.0.history)?;
         grants.clear();
+        paths.recent_grants.clear();
         Ok(entries
             .into_iter()
             .take(200)
-            .map(|(path, modified)| {
+            .map(|(path, modified, fingerprint)| {
                 let token = host.token("history");
                 grants.insert(token.clone(), path.clone());
+                if let Some(fingerprint) = fingerprint {
+                    paths.recent_grants.insert(token.clone(), fingerprint);
+                }
                 HistoryEntry {
                     token,
                     name: display_name(&path),
@@ -431,20 +668,76 @@ pub async fn list_history(host: tauri::State<'_, Host>) -> Result<Vec<HistoryEnt
     .await
 }
 
+fn modified_at(path: &Path) -> Option<u64> {
+    path.metadata()
+        .ok()?
+        .modified()
+        .ok()?
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()
+        .map(|time| time.as_secs())
+}
+
 #[tauri::command]
-pub async fn open_history(host: tauri::State<'_, Host>, token: String) -> Result<Project> {
+pub async fn open_history(
+    host: tauri::State<'_, Host>,
+    files: tauri::State<'_, ProjectFiles>,
+    token: String,
+) -> Result<Project> {
     host.ensure_idle()?;
     let host = host.inner().clone();
-    let path = lock(&host.0.history)?
-        .get(&token)
-        .cloned()
-        .ok_or_else(|| "Refresh history before opening this project".to_string())?;
+    let files = files.inner().clone();
+    let (path, fingerprint) = {
+        let paths = lock(&files.0)?;
+        let path = lock(&host.0.history)?
+            .get(&token)
+            .cloned()
+            .ok_or_else(|| "Refresh history before opening this project".to_string())?;
+        (path, paths.recent_grants.get(&token).cloned())
+    };
     blocking(move || {
-        let project = nvsf_app::storage::load_project(&path).map_err(|e| e.to_string())?;
+        let project = if let Some(expected) = fingerprint {
+            open_recent(&path, &expected)?
+        } else {
+            nvsf_app::storage::load_project(&path).map_err(|e| e.to_string())?
+        };
         let _operation = lock(&host.0.operation)?;
         host.ensure_idle()?;
-        *lock(&host.0.project)? = Some(project.clone());
+        bind_project(&host, &files, path, &project)?;
         Ok(project)
     })
     .await
+}
+
+fn open_recent(path: &Path, expected: &str) -> Result<Project> {
+    use std::io::Read;
+    let changed = || "This saved project changed on disk. Reopen it with Open project.".to_string();
+    if !std::fs::symlink_metadata(path).is_ok_and(|metadata| metadata.is_file()) {
+        return Err(changed());
+    }
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        // O_NONBLOCK prevents a substituted FIFO from waiting for a writer at open.
+        options.custom_flags(0x800);
+    }
+    let file = options.open(path).map_err(|e| e.to_string())?;
+    if !file.metadata().map_err(|e| e.to_string())?.is_file() {
+        return Err(changed());
+    }
+    const MAX_PROJECT_BYTES: u64 = 64 * 1024 * 1024;
+    let mut bytes = Vec::new();
+    file.take(MAX_PROJECT_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|e| e.to_string())?;
+    if bytes.len() as u64 > MAX_PROJECT_BYTES
+        || nvsf_app::providers::profiles::hash_bytes(&bytes) != expected
+    {
+        return Err(changed());
+    }
+    let project: Project = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
+    project.validate().map_err(|e| e.to_string())?;
+    Ok(project)
 }

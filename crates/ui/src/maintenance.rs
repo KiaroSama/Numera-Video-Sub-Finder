@@ -14,6 +14,15 @@ pub struct Status {
     pub downloaded: u64,
     pub total: u64,
     pub automatic_install: bool,
+    #[serde(default)]
+    pub restart_required: bool,
+}
+
+#[cfg(target_arch = "wasm32")]
+impl Status {
+    pub(crate) fn needs_restart(&self) -> bool {
+        self.restart_required || matches!(self.state.as_str(), "installed" | "ready_to_restart")
+    }
 }
 
 pub fn watch(ui: Ui) {
@@ -33,6 +42,7 @@ pub fn watch(ui: Ui) {
     });
 }
 
+#[cfg(target_arch = "wasm32")]
 #[component]
 pub fn Updates(ui: Ui) -> impl IntoView {
     let download_approved = RwSignal::new(false);
@@ -78,6 +88,9 @@ pub fn Updates(ui: Ui) -> impl IntoView {
         <label class="check"><input data-testid="automatic-update-checks" type="checkbox" disabled=move ||ui.busy.get() prop:checked=move ||ui.maintenance.with(|s|s.enabled) on:change={move |event|ui.request::<Status>("set_update_checks",json!({"enabled":event_target_checked(&event)}),move |s|ui.maintenance.set(s))}/><span>"Check official stable releases automatically (startup and at most daily)"</span></label>
         <p class="hint">"Metadata checks contact the official repository. Video, subtitles and models are not uploaded. Downloads and installation each require your approval. Disabling checks does not disable manual checks."</p>
         <p role="status">{move ||ui.maintenance.with(|s|format!("{}{} · {}",s.state,s.version.as_ref().map(|v|format!(" {v}")).unwrap_or_default(),s.message))}</p>
+        <Show when=move ||ui.maintenance.with(Status::needs_restart)>
+            <button class="primary" disabled=move ||!crate::update_banner::safe_to_update(ui) on:click=move |_|ui.restart_after_update()>"Restart now"</button>
+        </Show>
         <Show when=move ||ui.maintenance.with(|s|s.token.is_some())>
             <label class="check"><input type="checkbox" prop:checked=move ||download_approved.get() on:change=move |e|download_approved.set(event_target_checked(&e))/><span>"I approve downloading this offered update"</span></label>
             <div class="button-row"><button disabled=move ||ui.busy.get()||!download_approved.get() on:click=move |_|action("download_update")>"Download and verify"</button>

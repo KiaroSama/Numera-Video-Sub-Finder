@@ -28,6 +28,7 @@ pub struct Status {
     pub downloaded: u64,
     pub total: u64,
     pub automatic_install: bool,
+    pub restart_required: bool,
 }
 
 pub struct Offer {
@@ -94,7 +95,6 @@ impl Maintenance {
 
 fn format() -> &'static str {
     match bundle_type() {
-        Some(BundleType::Nsis) => "nsis",
         Some(BundleType::Msi) => "msi",
         Some(BundleType::AppImage) => "appimage",
         Some(BundleType::Deb) => "deb",
@@ -103,7 +103,7 @@ fn format() -> &'static str {
     }
 }
 fn automatic() -> bool {
-    matches!(format(), "nsis" | "msi" | "appimage")
+    matches!(format(), "msi" | "appimage")
 }
 fn now() -> u64 {
     SystemTime::now()
@@ -147,7 +147,7 @@ pub(crate) async fn check_with(
     let _reset = Reset(maintenance);
     {
         let _operation = lock(&host.0.operation)?;
-        if host.0.closing.load(Ordering::Acquire) {
+        if host.0.closing.load(Ordering::Acquire) || lock(&maintenance.status)?.restart_required {
             return update_status_inner(host);
         }
         let mut preferences = updates::preferences(&host.0.paths).map_err(|e| e.to_string())?;
@@ -439,7 +439,7 @@ pub async fn install_update(
         if host.0.maintenance.cancel.load(Ordering::Acquire) {
             return Err("Update was cancelled; approve a fresh download".into());
         }
-        let offers = lock(&host.0.maintenance.offer)?;
+        let mut offers = lock(&host.0.maintenance.offer)?;
         let offer = offers
             .as_ref()
             .filter(|o| o.token == token)
@@ -484,10 +484,13 @@ pub async fn install_update(
                 format!("Native installation failed; inspect the platform installer: {error}");
             return Err(status.message.clone());
         }
+        // AppImage installation returns in this process; the Windows updater exits for MSI.
+        *offers = None;
         let mut status = lock(&host.0.maintenance.status)?;
         status.state = "installed".into();
-        status.message =
-            "Update installed. Close and reopen the application to use the new version.".into();
+        status.token = None;
+        status.restart_required = true;
+        status.message = "Update installed. Restart the application to use the new version.".into();
         Ok(())
     })
     .await
@@ -562,8 +565,12 @@ pub(crate) fn schedule_host(host: &Host) {
     let Ok(mut slot) = maintenance.timer.lock() else {
         return;
     };
+    if slot.is_some() {
+        return;
+    }
     let scheduled = host.clone();
     *slot = Some(tauri::async_runtime::spawn(async move {
+        // Check at startup before sleeping; preferences control whether the request runs.
         loop {
             let _ = check(&scheduled, false).await;
             tokio::time::sleep(Duration::from_secs(3600)).await;

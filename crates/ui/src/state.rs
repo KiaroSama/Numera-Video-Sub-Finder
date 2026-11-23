@@ -46,6 +46,8 @@ pub struct Ui {
     pub time: RwSignal<u64>,
     pub preview_generation: RwSignal<u64>,
     pub dragging: RwSignal<bool>,
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) studio: crate::studio_state::Studio,
 }
 
 impl Ui {
@@ -83,6 +85,8 @@ impl Ui {
             time: RwSignal::new(0),
             preview_generation: RwSignal::new(0),
             dragging: RwSignal::new(false),
+            #[cfg(target_arch = "wasm32")]
+            studio: crate::studio_state::Studio::new(),
         }
     }
     pub fn active(self) -> bool {
@@ -159,12 +163,16 @@ impl Ui {
                 .is_some_and(|s| s.fingerprint == project.source_hash)
         }) {
             self.source.set(None);
+            #[cfg(target_arch = "wasm32")]
+            self.studio.reset_source();
             let old = self.preview_url.get_untracked();
             self.preview_url.set(String::new());
             if !old.is_empty() {
                 let _ = web_sys::Url::revoke_object_url(&old);
             }
         }
+        #[cfg(target_arch = "wasm32")]
+        self.studio.reset_extract();
         self.config.set(project.config.clone());
         self.selected.set(project.cues.first().map(|c| c.id));
         self.project.set(Some(project));
@@ -174,25 +182,32 @@ impl Ui {
         self.revision.update(|v| *v += 1);
         self.route.set("Review".into());
     }
+    #[cfg(target_arch = "wasm32")]
     pub fn pick_source(self) {
-        let expected_hash = if self.route.get_untracked() == "Review" {
-            self.project
-                .with_untracked(|p| p.as_ref().map(|p| p.source_hash.clone()))
-        } else {
-            None
-        };
+        self.pick_video(self.route.get_untracked() == "Review");
+    }
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn pick_video(self, link_to_review: bool) {
+        let expected_hash = link_to_review
+            .then(|| {
+                self.project
+                    .with_untracked(|p| p.as_ref().map(|p| p.source_hash.clone()))
+            })
+            .flatten();
         self.request::<Option<Source>>(
             "pick_source",
             json!({"expectedHash": expected_hash}),
             move |source| {
                 if let Some(source) = source {
-                    self.source.set(Some(source));
-                    self.time.set(0);
-                    self.seek(0);
+                    if !link_to_review {
+                        self.route.set("Extract".into());
+                    }
+                    self.admit_video(source, true);
                 }
             },
         );
     }
+    #[cfg(target_arch = "wasm32")]
     pub fn accept_drop(self, token: String) {
         if token.is_empty() {
             return;
@@ -206,9 +221,7 @@ impl Ui {
                     && let Some(source) = outcome.source
                 {
                     let name = source.name.clone();
-                    self.source.set(Some(source));
-                    self.time.set(0);
-                    self.seek(0);
+                    self.admit_video(source, true);
                     self.route.set("Extract".into());
                     let suffix = if outcome.truncated {
                         " Some dropped items exceeded the intake limit; drop smaller batches."
@@ -243,58 +256,6 @@ impl Ui {
                 self.notice.set(note);
             },
         );
-    }
-    pub fn seek(self, time: u64) {
-        self.time.set(time);
-        let Some(source) = self.source.get_untracked() else {
-            return;
-        };
-        let time = source
-            .media
-            .duration_ms
-            .map(|duration| time.min(duration.saturating_sub(1)))
-            .unwrap_or(time);
-        self.time.set(time);
-        if self.preview_busy.get_untracked() {
-            return;
-        }
-        self.preview_busy.set(true);
-        self.preview_generation.update(|n| *n += 1);
-        let generation = self.preview_generation.get_untracked();
-        spawn_local(async move {
-            match ipc::preview(&source.token, time).await {
-                Ok(url) => {
-                    if self.preview_url.is_disposed() {
-                        let _ = web_sys::Url::revoke_object_url(&url);
-                        return;
-                    }
-                    if self.preview_generation.get_untracked() == generation
-                        && self.source.with_untracked(|s| {
-                            s.as_ref()
-                                .map(|s| s.token.as_str() == source.token.as_str())
-                                .unwrap_or(false)
-                        })
-                    {
-                        let old = self.preview_url.get_untracked();
-                        self.preview_url.set(url);
-                        if !old.is_empty() {
-                            let _ = web_sys::Url::revoke_object_url(&old);
-                        }
-                    } else {
-                        let _ = web_sys::Url::revoke_object_url(&url);
-                    }
-                }
-                Err(e) => self.error.set(Some(e)),
-            }
-            self.preview_busy.set(false);
-            if self.time.get_untracked() != time
-                || self.source.with_untracked(|s| {
-                    s.as_ref().map(|s| s.token != source.token).unwrap_or(false)
-                })
-            {
-                self.seek(self.time.get_untracked());
-            }
-        });
     }
     pub fn selected_cue(self) -> Option<Cue> {
         let id = self.selected.get()?;
@@ -360,7 +321,6 @@ impl Ui {
         if !self.request_allowed("start_job") {
             return;
         }
-        self.source.set(Some(queued.source.clone()));
         self.request::<String>("start_job", json!({"sourceToken": queued.source.token, "outputToken": queued.output.token, "config": queued.config}), move |id| self.watch_job(id));
     }
     pub fn watch_job(self, id: String) {
@@ -396,7 +356,20 @@ impl Ui {
             config: self.config.get_untracked(),
         })
     }
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn can_save(self) -> bool {
+        self.review_editable() && !self.preview_busy.get() && !self.draft_dirty.get()
+    }
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn save(self, as_new: bool) {
+        self.persist_project(None, as_new);
+    }
+    #[cfg(target_arch = "wasm32")]
     pub fn persist(self, format: Option<String>, bom: bool, crlf: bool) {
+        self.persist_project(format.map(|format| (format, bom, crlf)), false);
+    }
+    #[cfg(target_arch = "wasm32")]
+    fn persist_project(self, export: Option<(String, bool, bool)>, as_new: bool) {
         let Some(project) = self.project.get_untracked() else {
             return;
         };
@@ -410,31 +383,43 @@ impl Ui {
             return;
         }
         let revision = self.revision.get_untracked();
+        let save = export.is_none();
         self.busy.set(true);
         self.error.set(None);
         spawn_local(async move {
             let result = async {
                 ipc::call::<()>("replace_project", json!({"project": project})).await?;
-                if let Some(format) = format {
+                if let Some((format, bom, crlf)) = export {
                     ipc::call::<Option<String>>(
                         "export_project",
                         json!({"format": format, "bom": bom, "crlf": crlf}),
                     )
                     .await
                 } else {
-                    ipc::call::<Option<String>>("save_project", json!({})).await
+                    let command = if as_new {
+                        "save_project_as"
+                    } else {
+                        "save_project"
+                    };
+                    ipc::call::<Option<String>>(command, json!({})).await
                 }
             }
             .await;
             match result {
                 Ok(Some(name)) => {
                     self.notice.set(format!("Saved {name}"));
-                    if self.revision.get_untracked() == revision {
+                    if save && self.revision.get_untracked() == revision {
                         self.dirty.set(false);
+                    }
+                    if save
+                        && let Ok(entries) =
+                            ipc::call::<Vec<HistoryEntry>>("list_history", json!({})).await
+                    {
+                        self.recent.set(entries);
                     }
                 }
                 Ok(None) => {}
-                Err(e) => self.error.set(Some(e)),
+                Err(error) => self.error.set(Some(error)),
             }
             self.busy.set(false);
         });

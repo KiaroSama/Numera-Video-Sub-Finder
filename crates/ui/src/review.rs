@@ -1,4 +1,4 @@
-use crate::{extract::Preview, helpers, state::Ui};
+use crate::{helpers, player::Preview, state::Ui};
 use leptos::prelude::*;
 use nvsf_core::{Error, merge_cues, split_cue};
 use serde_json::json;
@@ -40,14 +40,14 @@ pub fn Review(ui: Ui) -> impl IntoView {
                 <button class="primary" on:click={move |_|ui.request::<Option<nvsf_core::Project>>("pick_project",json!({}),move |p|if let Some(p)=p{ui.load(p);})} disabled=move ||ui.busy.get()>"Open project"</button></section>
         }>
             <div class="review-toolbar panel">
-                <label class="search"><span class="sr-only">"Search cue text"</span><input type="search" placeholder="Search subtitles…" prop:value=move ||query.get() on:input=move |e|{query.set(event_target_value(&e));scroll.set(0);}/></label>
+                <label class="search"><span class="sr-only">"Search cue text"</span><input id="cue-search" type="search" placeholder="Search subtitles…" prop:value=move ||query.get() on:input=move |e|{query.set(event_target_value(&e));scroll.set(0);}/></label>
                 <label class="filter"><span class="sr-only">"Filter cues"</span><select prop:value=move ||filter.get() on:change=move |e|{filter.set(event_target_value(&e));scroll.set(0);}>
                     <option value="all">"All cues"</option><option value="unreviewed">"Needs review"</option><option value="uncertain">"Uncertain / unscored"</option><option value="edited">"Edited"</option>
                 </select></label>
                 <span class="muted">{move ||format!("{} matches",indices.with(Vec::len))}</span>
                 <button disabled=move ||{ui.revision.get();!ui.review_editable()||!ui.history.with_value(|h|h.can_undo())} on:click=move |_|ui.travel(false)>"Undo"</button>
                 <button disabled=move ||{ui.revision.get();!ui.review_editable()||!ui.history.with_value(|h|h.can_redo())} on:click=move |_|ui.travel(true)>"Redo"</button>
-                <button on:click=move |_|ui.persist(None,false,false) disabled=move ||!ui.review_editable()||ui.preview_busy.get()>"Save project"</button>
+                <button on:click=move |_|ui.save(false) disabled=move ||!ui.can_save()>"Save project"</button>
                 <span class="edit-state">{move ||if ui.dirty.get(){"Unsaved corrections"}else{"Project loaded"}}</span>
             </div>
             <div class="review-grid">
@@ -182,8 +182,8 @@ fn CueEditor(ui: Ui) -> impl IntoView {
                 <button data-testid="cue-mark-reviewed" disabled=move ||!ui.review_editable()||ui.draft_dirty.get() on:click=move |_|if let Some(id)=ui.selected.get_untracked(){ui.edit(move |cues|{let cue=cues.iter_mut().find(|c|c.id==id).ok_or_else(||Error::Invalid("Cue not found".into()))?;cue.reviewed=true;Ok(())});}>"Accept cue"</button>
                 <button disabled=move ||!ui.review_editable()||ui.draft_dirty.get() on:click=move |_|if let Some(id)=ui.selected.get_untracked(){ui.edit(move |cues|{let cue=cues.iter_mut().find(|c|c.id==id).ok_or_else(||Error::Invalid("Cue not found".into()))?;cue.text=cue.raw_text.clone();cue.edited=false;cue.reviewed=false;Ok(())});}>"Revert to OCR"</button>
             </div>
-            <div class="button-row"><button data-testid="cue-recognize" disabled=move ||!ui.review_editable()||ui.draft_dirty.get()||ui.source.with(Option::is_none) on:click=move |_|{
-                let Some(source)=ui.source.get_untracked()else{return;};let Some(cue)=ui.selected_cue()else{return;};
+            <div class="button-row"><button data-testid="cue-recognize" disabled=move ||!ui.review_editable()||ui.draft_dirty.get()||!ui.review_source_linked() on:click=move |_|{
+                if !ui.review_source_linked(){return;}let Some(source)=ui.source.get_untracked()else{return;};let Some(cue)=ui.selected_cue()else{return;};
                 let revision=ui.revision.get_untracked();
                 let setup=ui.project.with_untracked(|p|p.as_ref().map(|p|(p.config.language.clone(),p.config.regions.get(cue.track as usize).copied())));
                 if let Some((language,Some(region)))=setup{ui.request::<nvsf_core::Recognition>("recognize_cue",json!({"token":source.token,"cueId":cue.id,"atMs":cue.start_ms+(cue.end_ms-cue.start_ms)/2,"language":language,"region":region}),move |recognition|{

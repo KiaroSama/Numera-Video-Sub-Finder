@@ -1,9 +1,14 @@
 use crate::{
+    close_modal::CloseModal,
     extract::Extract,
-    helpers, ipc,
+    helpers,
+    hotkeys::{self, ShortcutsModal},
+    ipc,
     models::Models,
     review::Review,
     state::Ui,
+    toolbar::Topbar,
+    update_banner::UpdateBanner,
     workspace::{History, Queue, Settings},
 };
 use leptos::prelude::*;
@@ -12,13 +17,18 @@ use wasm_bindgen::{JsCast, closure::Closure};
 use wasm_bindgen_futures::spawn_local;
 
 pub fn mount() {
+    #[cfg(feature = "e2e")]
+    if let Some(window) = web_sys::window() {
+        let _ = js_sys::Reflect::set(
+            &window,
+            &"__NVSF_E2E__".into(),
+            &wasm_bindgen::JsValue::TRUE,
+        );
+    }
     let saved = web_sys::window()
         .and_then(|w| w.local_storage().ok().flatten())
         .and_then(|s| s.get_item("nvsf-theme").ok().flatten());
-    let os_dark = web_sys::window()
-        .and_then(|w| w.match_media("(prefers-color-scheme: dark)").ok().flatten())
-        .map_or(true, |m| m.matches());
-    let theme = helpers::resolve_theme(saved.as_deref(), os_dark).to_string();
+    let theme = helpers::resolve_theme(saved.as_deref(), true).to_string();
     if let Some(root) = web_sys::window()
         .and_then(|w| w.document())
         .and_then(|d| d.document_element())
@@ -28,14 +38,146 @@ pub fn mount() {
     leptos::mount::mount_to_body(move || view! {<App initial_theme=theme.clone()/>});
 }
 
+fn listen_native(ui: Ui, drop_ready: RwSignal<bool>, initial_theme: String) {
+    let callbacks = [
+        (
+            "nvsf://close-requested",
+            Closure::<dyn FnMut(wasm_bindgen::JsValue)>::new(move |_| {
+                ui.studio.shortcuts.set(false);
+                ui.studio.close_open.set(true);
+            }),
+        ),
+        (
+            "nvsf://drag-state",
+            Closure::<dyn FnMut(wasm_bindgen::JsValue)>::new(move |event| {
+                let active = js_sys::Reflect::get(&event, &"payload".into())
+                    .ok()
+                    .and_then(|value| value.as_bool())
+                    .unwrap_or(false);
+                ui.dragging.set(active);
+            }),
+        ),
+        (
+            "nvsf://files-dropped",
+            Closure::<dyn FnMut(wasm_bindgen::JsValue)>::new(move |event| {
+                ui.dragging.set(false);
+                if let Some(token) = js_sys::Reflect::get(&event, &"payload".into())
+                    .ok()
+                    .and_then(|value| value.as_string())
+                {
+                    ui.accept_drop(token);
+                }
+            }),
+        ),
+    ];
+    let listeners = callbacks
+        .iter()
+        .map(|(event, callback)| {
+            (
+                *event,
+                callback
+                    .as_ref()
+                    .unchecked_ref::<js_sys::Function>()
+                    .clone(),
+            )
+        })
+        .collect::<Vec<_>>();
+    let callbacks = StoredValue::new_local(callbacks);
+    let unlisteners = StoredValue::new_local(Vec::<js_sys::Function>::new());
+    spawn_local(async move {
+        let mut ready = true;
+        for (event, callback) in listeners {
+            match ipc::listen_event(event, &callback).await {
+                Ok(Some(unlisten)) if !drop_ready.is_disposed() => {
+                    unlisteners.update_value(|items| items.push(unlisten));
+                    if event == "nvsf://close-requested"
+                        && let Some(window) = web_sys::window()
+                    {
+                        let _ = js_sys::Reflect::set(
+                            &window,
+                            &"__NVSF_CLOSE_READY__".into(),
+                            &wasm_bindgen::JsValue::TRUE,
+                        );
+                    }
+                }
+                Ok(Some(unlisten)) => {
+                    let _ = unlisten.call0(&wasm_bindgen::JsValue::NULL);
+                    return;
+                }
+                Ok(None) => {
+                    if event != "nvsf://close-requested" {
+                        ready = false;
+                    }
+                }
+                Err(error) if !drop_ready.is_disposed() => {
+                    if event != "nvsf://close-requested" {
+                        ready = false;
+                        ui.error.set(Some(format!(
+                            "Native file-drop subscription failed: {error}"
+                        )));
+                    }
+                }
+                Err(_) => return,
+            }
+        }
+        if drop_ready.is_disposed() {
+            return;
+        }
+        drop_ready.set(ready);
+        if let Err(error) = ipc::call::<()>("ui_ready", json!({"theme":initial_theme})).await {
+            ui.error.set(Some(error));
+        }
+        match ipc::call::<ipc::Doctor>("doctor", json!({})).await {
+            Ok(report) => {
+                if report
+                    .dependencies
+                    .iter()
+                    .any(|row| row.state != "verified")
+                {
+                    ui.notice.set(
+                        "A native dependency needs attention. Run resource checks in Settings."
+                            .into(),
+                    );
+                }
+                ui.diagnostics.set(Some(report));
+            }
+            Err(error) => ui.error.set(Some(error)),
+        }
+        match ipc::call::<Vec<ipc::QueueEntry>>("queue_list", json!({})).await {
+            Ok(entries) => ui.queue.set(entries),
+            Err(error) => ui.error.set(Some(error)),
+        }
+    });
+    on_cleanup(move || {
+        if let Some(window) = web_sys::window() {
+            let _ = js_sys::Reflect::delete_property(&window, &"__NVSF_CLOSE_READY__".into());
+        }
+        unlisteners.with_value(|list| {
+            for unlisten in list {
+                let _ = unlisten.call0(&wasm_bindgen::JsValue::NULL);
+            }
+        });
+        callbacks.with_value(|_| {});
+    });
+}
+
 #[component]
 fn App(initial_theme: String) -> impl IntoView {
     let ui = Ui::new(initial_theme.clone());
     let drop_ready = RwSignal::new(false);
     crate::maintenance::watch(ui);
+    crate::player::watch_playback(ui);
+    hotkeys::register(ui);
     if let Some(window) = web_sys::window() {
         let snapshot = Closure::<dyn FnMut(bool) -> wasm_bindgen::JsValue>::new(move |closing| {
             ui.closing.set(closing);
+            if !closing {
+                ui.studio.close_open.set(false);
+            }
+            if closing {
+                ui.studio.playing.set(false);
+                ui.studio.roi_drag.set(None);
+            }
             let state = json!({
                 "dirty": ui.dirty.get_untracked(),
                 "draft": ui.draft_dirty.get_untracked(),
@@ -77,28 +219,6 @@ fn App(initial_theme: String) -> impl IntoView {
         ("History", "M3 12a9 9 0 1 0 3-7 M3 3v5h5 M12 7v5l3 2"),
         ("Settings", "M4 7h16 M4 17h16 M8 4v6 M16 14v6"),
     ];
-    wasm_bindgen_futures::spawn_local(async move {
-        if let Err(e) = ipc::call::<()>("ui_ready", json!({"theme":initial_theme})).await {
-            ui.error.set(Some(e));
-        }
-        match ipc::call::<ipc::Doctor>("doctor", json!({})).await {
-            Ok(report) => {
-                if report
-                    .dependencies
-                    .iter()
-                    .any(|row| row.state != "verified")
-                {
-                    ui.notice.set("A native dependency is missing or incompatible. Open Settings (Resources and diagnostics) to review and approve application-local repair.".into());
-                }
-                ui.diagnostics.set(Some(report));
-            }
-            Err(error) => ui.error.set(Some(error)),
-        }
-        match ipc::call::<Vec<ipc::QueueEntry>>("queue_list", json!({})).await {
-            Ok(entries) => ui.queue.set(entries),
-            Err(e) => ui.error.set(Some(e)),
-        }
-    });
     Effect::new(move |_| {
         let dirty = ui.dirty.get() || ui.draft_dirty.get();
         wasm_bindgen_futures::spawn_local(async move {
@@ -146,109 +266,8 @@ fn App(initial_theme: String) -> impl IntoView {
                 });
             }
         });
-        let keyboard = Closure::<dyn FnMut(web_sys::KeyboardEvent)>::new(
-            move |event: web_sys::KeyboardEvent| {
-                if web_sys::window().is_some_and(|window| {
-                    js_sys::Reflect::has(&window, &"__NVSF_CLOSE_LOCK__".into()).unwrap_or(true)
-                }) || event.is_composing()
-                    || !(event.ctrl_key() || event.meta_key())
-                    || event.alt_key()
-                {
-                    return;
-                }
-                let editing = event
-                    .target()
-                    .and_then(|t| t.dyn_into::<web_sys::Element>().ok())
-                    .is_some_and(|e| {
-                        matches!(e.tag_name().as_str(), "INPUT" | "TEXTAREA")
-                            || e.get_attribute("contenteditable").as_deref() == Some("true")
-                    });
-                match event.key().to_lowercase().as_str() {
-                    "s" if ui.project.with_untracked(Option::is_some) => {
-                        event.prevent_default();
-                        ui.persist(None, false, false);
-                    }
-                    "z" if !editing => {
-                        event.prevent_default();
-                        ui.travel(event.shift_key());
-                    }
-                    _ => {}
-                }
-            },
-        );
-        let _ =
-            window.add_event_listener_with_callback("keydown", keyboard.as_ref().unchecked_ref());
-        let keyboard = StoredValue::new_local(keyboard);
-        on_cleanup(move || {
-            if let Some(window) = web_sys::window() {
-                keyboard.with_value(|listener| {
-                    let _ = window.remove_event_listener_with_callback(
-                        "keydown",
-                        listener.as_ref().unchecked_ref(),
-                    );
-                });
-            }
-        });
     }
-    {
-        let drag_state_cb =
-            Closure::<dyn FnMut(wasm_bindgen::JsValue)>::new(move |ev: wasm_bindgen::JsValue| {
-                let active = js_sys::Reflect::get(&ev, &wasm_bindgen::JsValue::from_str("payload"))
-                    .ok()
-                    .and_then(|v| v.as_bool())
-                    .unwrap_or(false);
-                ui.dragging.set(active);
-            });
-        let files_drop_cb =
-            Closure::<dyn FnMut(wasm_bindgen::JsValue)>::new(move |ev: wasm_bindgen::JsValue| {
-                ui.dragging.set(false);
-                if let Ok(payload) =
-                    js_sys::Reflect::get(&ev, &wasm_bindgen::JsValue::from_str("payload"))
-                    && let Some(token) = payload.as_string()
-                {
-                    ui.accept_drop(token);
-                }
-            });
-        let drag_fn: js_sys::Function = drag_state_cb
-            .as_ref()
-            .unchecked_ref::<js_sys::Function>()
-            .clone();
-        let drop_fn: js_sys::Function = files_drop_cb
-            .as_ref()
-            .unchecked_ref::<js_sys::Function>()
-            .clone();
-        let unlisteners = StoredValue::new_local(Vec::<js_sys::Function>::new());
-        let drag_cb_holder = StoredValue::new_local(drag_state_cb);
-        let drop_cb_holder = StoredValue::new_local(files_drop_cb);
-        spawn_local(async move {
-            let mut ready = true;
-            for (event, callback) in [
-                ("nvsf://drag-state", drag_fn),
-                ("nvsf://files-dropped", drop_fn),
-            ] {
-                match ipc::listen_event(event, &callback).await {
-                    Ok(Some(unlisten)) => unlisteners.update_value(|v| v.push(unlisten)),
-                    Ok(None) => ready = false,
-                    Err(error) => {
-                        ready = false;
-                        ui.error.set(Some(format!(
-                            "Native file-drop subscription failed: {error}"
-                        )));
-                    }
-                }
-            }
-            drop_ready.set(ready);
-        });
-        on_cleanup(move || {
-            unlisteners.with_value(|list| {
-                for unlisten in list {
-                    let _ = unlisten.call0(&wasm_bindgen::JsValue::NULL);
-                }
-            });
-            drag_cb_holder.with_value(|_| {});
-            drop_cb_holder.with_value(|_| {});
-        });
-    }
+    listen_native(ui, drop_ready, initial_theme);
     on_cleanup(move || {
         let url = ui.preview_url.get_untracked();
         if !url.is_empty() {
@@ -261,15 +280,14 @@ fn App(initial_theme: String) -> impl IntoView {
     let fixture_controls = ().into_any();
     view! {
         <a class="skip-link" href="#main-content">"Skip to workspace"</a>
-        <div class="app-shell" data-native-drop-ready=move ||drop_ready.get().to_string()>
+        <div class="app-shell shell" data-native-drop-ready=move ||drop_ready.get().to_string()>
             <aside class="sidebar">
                 <a class="brand" href="#extract" on:click=move |_|ui.route.set("Extract".into()) aria-label="Numera Video Sub Finder home">
-                    <img src="logo.svg" width="48" height="48" alt=""/>
-                    <span><strong>"NUMERA"</strong><small>"VIDEO SUB FINDER"</small></span>
+                    <img src="logo.svg" width="32" height="32" alt=""/>
+                    <span><strong>"Numera"</strong><small>"Video Sub Finder"</small></span>
                 </a>
-                <div class="sidebar-caption">"WORKSPACE"</div>
                 <nav aria-label="Workspace navigation">{routes.into_iter().map(|(route,path)|view!{
-                    <button class="nav-item" class:active=move ||ui.route.get()==route aria-current=move ||if ui.route.get()==route{Some("page")}else{None}
+                    <button class="nav-item" title=route class:active=move ||ui.route.get()==route aria-current=move ||if ui.route.get()==route{Some("page")}else{None}
                         on:click=move |_|ui.route.set(route.into())>
                         <svg viewBox="0 0 24 24" aria-hidden="true"><path d=path/></svg><span>{route}</span>
                     </button>
@@ -277,37 +295,24 @@ fn App(initial_theme: String) -> impl IntoView {
                 <div class="sidebar-footer"><span class="version mono">{concat!("v",env!("CARGO_PKG_VERSION"))}</span></div>
             </aside>
             <div class="workspace">
-                <header class="topbar"><div><span class="eyebrow">"NUMERA / WORKSPACE"</span><h1>{move ||ui.route.get()}</h1><p class="route-description">{move ||match ui.route.get().as_str(){
-                        "Extract"=>"From visible subtitles to editable text. Entirely on your device.",
-                        "Queue"=>"Follow extraction progress and manage recoverable jobs.",
-                        "Review"=>"Compare every correction with the original source.",
-                        "Models"=>"Manage verified recognition resources and language packs.",
-                        "History"=>"Return to saved projects and previous extraction work.",
-                        _=>"Workspace preferences, updates and native resources.",
-                    }}</p></div>
-                    <div class="topbar-actions"><Show when=move ||ui.busy.get()><span role="status" class="muted">"Native operation in progress…"</span></Show>
-                        <button title="Open a saved review project" disabled=move ||ui.busy.get()||ui.active() on:click={move |_|ui.request::<Option<nvsf_core::Project>>("pick_project",json!({}),move |p|if let Some(p)=p{ui.load(p);})}>"Open project"</button>
-                        <button id="header-theme" type="button" class="theme-toggle" aria-label=move ||if ui.theme.get()=="dark"{"Switch to light theme"}else{"Switch to dark theme"} aria-pressed=move ||if ui.theme.get()=="light"{"true"}else{"false"} title=move ||if ui.theme.get()=="dark"{"Switch workspace to light theme"}else{"Switch workspace to dark theme"} on:click=move |_|ui.toggle_theme()>
-                            <svg viewBox="0 0 24 24" aria-hidden="true"><path d=move ||if ui.theme.get()=="dark"{"M12 3v2 M12 19v2 M4.93 4.93l1.41 1.41 M17.66 17.66l1.41 1.41 M3 12h2 M19 12h2 M4.93 19.07l1.41-1.41 M17.66 6.34l1.41-1.41 M16 12a4 4 0 1 1-8 0 4 4 0 0 1 8 0z"}else{"M21 12.79A9 9 0 1 1 11.21 3a7 7 0 0 0 9.79 9.79z"}/></svg>
-                            <span>{move ||if ui.theme.get()=="dark"{"Light"}else{"Dark"}}</span>
-                        </button>
-                    </div>
-                </header>
-                <main id="main-content" tabindex="-1" node_ref=main>
+                <Topbar ui/>
+                <UpdateBanner ui/>
+                <main id="main-content" tabindex="-1" node_ref=main class:extract-workspace=move ||ui.route.get()=="Extract">
                     {fixture_controls}
                     <Show when=move ||ui.error.with(Option::is_some)><div class="message error" role="alert"><strong>"Action could not complete"</strong><p>{move ||ui.error.get().unwrap_or_default()}</p><button on:click=move |_|ui.error.set(None)>"Dismiss error"</button></div></Show>
                     <Show when=move ||!ui.notice.get().is_empty()><div class="message notice" role="status"><span>{move ||ui.notice.get()}</span><button on:click=move |_|ui.notice.set(String::new())>"Dismiss"</button></div></Show>
-                    <Show when=move ||ui.maintenance.with(|s|s.state=="available")&&ui.route.get()!="Settings"><div class="message notice" role="status"><span>"A newer stable release is available. No update payload has been downloaded."</span><button on:click=move |_|ui.route.set("Settings".into())>"Review update"</button></div></Show>
-                    <div hidden=move ||ui.route.get()!="Extract"><Extract ui/></div>
+                    <div class="extract-route" hidden=move ||ui.route.get()!="Extract"><Extract ui/></div>
                     <div hidden=move ||ui.route.get()!="Queue"><Queue ui/></div>
                     <div hidden=move ||ui.route.get()!="Review"><Review ui/></div>
                     <div hidden=move ||ui.route.get()!="Models"><Models ui/></div>
                     <div hidden=move ||ui.route.get()!="History"><History ui/></div>
                     <div hidden=move ||ui.route.get()!="Settings"><Settings ui/></div>
                 </main>
-                <footer class="statusbar"><span>{move ||if ui.active(){"Job active, checkpoints preserved"}else{"No active extraction"}}</span></footer>
+                <footer class="statusbar" role="status">{move ||if ui.busy.get(){"Native operation in progress"}else if ui.active(){"Extraction active"}else{"No active extraction"}}</footer>
             </div>
         </div>
+        <ShortcutsModal ui/>
+        <CloseModal ui/>
         <Show when=move || ui.dragging.get()>
             <div class="drop-overlay" role="status" aria-live="polite">
                 <div class="drop-card">

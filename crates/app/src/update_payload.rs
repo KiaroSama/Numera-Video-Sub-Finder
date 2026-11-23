@@ -15,7 +15,6 @@ pub fn validate(bytes: &[u8], target: &str) -> Result<()> {
     }
     match (parts[0], parts[2]) {
         ("linux", "appimage") => elf(bytes, parts[1], true),
-        ("windows", "nsis") => pe(bytes),
         ("windows", "msi") if bytes.starts_with(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1") => Ok(()),
         ("linux", "deb") if bytes.starts_with(b"!<arch>\n") => Ok(()),
         ("linux", "rpm") if bytes.starts_with(b"\xed\xab\xee\xdb") => Ok(()),
@@ -36,26 +35,6 @@ fn elf(bytes: &[u8], arch: &str, appimage: bool) -> Result<()> {
         || u16::from_le_bytes([bytes[18], bytes[19]]) != if arch == "aarch64" { 183 } else { 62 }
     {
         return Err(fail("Update ELF/AppImage architecture or header mismatch"));
-    }
-    Ok(())
-}
-
-fn pe(bytes: &[u8]) -> Result<()> {
-    if bytes.len() < 64 || &bytes[..2] != b"MZ" {
-        return Err(fail("Update executable has no PE header"));
-    }
-    let offset = u32::from_le_bytes(
-        bytes[60..64]
-            .try_into()
-            .map_err(|_| fail("Invalid PE offset"))?,
-    ) as usize;
-    let header = bytes
-        .get(offset..offset.saturating_add(6))
-        .ok_or_else(|| fail("Update PE header is out of bounds"))?;
-    // Tauri uses an x86 NSIS installer stub even for x64/ARM64 payloads. The signed
-    // release inventory binds the contained application architecture, not this stub.
-    if &header[..4] != b"PE\0\0" || u16::from_le_bytes([header[4], header[5]]) != 0x14c {
-        return Err(fail("Update NSIS stub header mismatch"));
     }
     Ok(())
 }
