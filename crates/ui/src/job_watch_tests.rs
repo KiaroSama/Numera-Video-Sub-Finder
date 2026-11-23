@@ -283,3 +283,126 @@ fn status_read_errors_retry_after_delay_and_install_the_completed_project() {
         );
     });
 }
+
+#[test]
+fn result_read_errors_and_missing_ready_projects_keep_admission_frozen_until_recovery() {
+    Owner::new().with(|| {
+        let ui = Ui::new("dark".into());
+        ui.load(project("Before result retry"));
+        let generation = ui.begin_review_watch("A".into());
+        let responses = terminal_responses("A");
+        {
+            let mut responses = responses.borrow_mut();
+            responses.wait_permits = Some(1);
+            responses.queue.push_back(Ok(Vec::new()));
+            responses.project = VecDeque::from([
+                Err("Temporary result transport failure".into()),
+                Ok(None),
+                Ok(Some(project("Recovered result"))),
+            ]);
+        }
+        let mut io = ControlledIo(responses.clone());
+        let mut watch = std::pin::pin!(ui.watch_job_with(generation, &mut io));
+        assert!(poll(watch.as_mut()).is_pending());
+        assert_eq!(
+            ui.error.get_untracked().as_deref(),
+            Some("Temporary result transport failure")
+        );
+        assert_eq!(ui.status.get_untracked().state, "completed");
+        assert!(ui.review_loading.get_untracked());
+        assert_review_frozen(ui, "Before result retry");
+        assert!(!ui.request_allowed("start_job"));
+        assert!(!ui.request_allowed("pick_project"));
+        assert_eq!(responses.borrow().waits, 2);
+        assert_eq!(
+            responses.borrow().calls,
+            ["queue", "status", "queue", "project"]
+        );
+        assert!(poll(watch.as_mut()).is_pending());
+        assert_eq!(responses.borrow().project.len(), 2);
+
+        responses.borrow_mut().wait_permits = Some(1);
+        assert!(poll(watch.as_mut()).is_pending());
+        assert_eq!(
+            ui.error.get_untracked().as_deref(),
+            Some("Completed job did not return a review project")
+        );
+        assert_review_frozen(ui, "Before result retry");
+        assert!(ui.review_loading.get_untracked());
+        assert_eq!(responses.borrow().waits, 3);
+        assert_eq!(responses.borrow().project.len(), 1);
+
+        responses.borrow_mut().wait_permits = Some(1);
+        assert!(poll(watch.as_mut()).is_ready());
+        assert!(!ui.review_loading.get_untracked());
+        assert!(ui.review_editable());
+        assert_eq!(ui.selected_cue().unwrap().text, "Recovered result");
+        assert!(ui.request_allowed("queue_start"));
+        assert_eq!(
+            responses.borrow().calls,
+            ["queue", "status", "queue", "project", "project", "project"]
+        );
+    });
+}
+
+#[test]
+fn a_superseded_result_retry_cannot_fetch_or_release_the_new_watch() {
+    Owner::new().with(|| {
+        let ui = Ui::new("dark".into());
+        ui.load(project("Original"));
+        let first = ui.begin_review_watch("A".into());
+        let responses = terminal_responses("A");
+        {
+            let mut responses = responses.borrow_mut();
+            responses.wait_permits = Some(1);
+            responses.queue.push_back(Ok(Vec::new()));
+            responses.project = VecDeque::from([
+                Err("Old temporary result failure".into()),
+                Ok(Some(project("Obsolete result"))),
+            ]);
+        }
+        let mut io = ControlledIo(responses.clone());
+        let mut watch = std::pin::pin!(ui.watch_job_with(first, &mut io));
+        assert!(poll(watch.as_mut()).is_pending());
+        let second = ui.begin_review_watch("B".into());
+        ui.error.set(None);
+        responses.borrow_mut().wait_permits = Some(1);
+        assert!(poll(watch.as_mut()).is_ready());
+        assert!(ui.current_review_watch(second));
+        assert!(ui.review_loading.get_untracked());
+        assert_eq!(ui.status.get_untracked().id, "B");
+        assert_eq!(ui.status.get_untracked().state, "running");
+        assert!(ui.error.get_untracked().is_none());
+        assert_eq!(responses.borrow().project.len(), 1);
+        assert_review_frozen(ui, "Original");
+    });
+}
+
+#[test]
+fn terminal_jobs_without_a_result_do_not_enter_the_project_retry_loop() {
+    Owner::new().with(|| {
+        for state in ["completed", "failed", "cancelled"] {
+            let ui = Ui::new("dark".into());
+            ui.load(project("Previous review"));
+            let generation = ui.begin_review_watch("A".into());
+            let responses = terminal_responses("A");
+            {
+                let mut responses = responses.borrow_mut();
+                responses.queue.push_back(Ok(Vec::new()));
+                responses.status = VecDeque::from([Ok(JobStatus {
+                    id: "A".into(),
+                    state: state.into(),
+                    project_ready: false,
+                    ..JobStatus::default()
+                })]);
+            }
+            let mut io = ControlledIo(responses.clone());
+            let mut watch = std::pin::pin!(ui.watch_job_with(generation, &mut io));
+            assert!(poll(watch.as_mut()).is_ready(), "{state}");
+            assert_eq!(responses.borrow().calls, ["queue", "status", "queue"]);
+            assert!(!ui.review_loading.get_untracked(), "{state}");
+            assert!(ui.review_editable(), "{state}");
+            assert_eq!(ui.selected_cue().unwrap().text, "Previous review");
+        }
+    });
+}

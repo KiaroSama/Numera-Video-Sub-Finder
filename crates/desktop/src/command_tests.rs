@@ -619,6 +619,52 @@ fn review_save_retains_its_admitted_directory_during_overwrite_confirmation() {
 }
 
 #[test]
+fn review_save_requires_bound_confirmation_after_ancestor_substitution() {
+    for confirmation_error in [false, true] {
+        let (directory, _app) = workspace();
+        let selected = directory.path().join("selected");
+        let admitted = directory.path().join("admitted");
+        std::fs::create_dir(&selected).unwrap();
+        let destination = selected.join("review.json");
+        std::fs::write(&destination, b"previous corrections").unwrap();
+        let prepared = nvsf_app::storage::AtomicOutput::for_confirmation(&destination).unwrap();
+        assert!(prepared.1);
+        // Move the bound directory before the overwrite decision, leaving the displayed path absent.
+        std::fs::rename(&selected, &admitted).unwrap();
+        std::fs::create_dir(&selected).unwrap();
+        assert!(!destination.exists());
+        let mut prompted = false;
+        let result = files::save_prepared_project(&project(), &destination, prepared, || {
+            prompted = true;
+            if confirmation_error {
+                Err("confirmation failed after directory move".into())
+            } else {
+                Ok(false)
+            }
+        });
+        assert!(
+            prompted,
+            "The retained existing entry requires explicit consent"
+        );
+        if confirmation_error {
+            assert_eq!(
+                result.unwrap_err(),
+                "confirmation failed after directory move"
+            );
+        } else {
+            assert!(result.unwrap().is_none());
+        }
+        assert_eq!(
+            std::fs::read(admitted.join("review.json")).unwrap(),
+            b"previous corrections"
+        );
+        assert!(!destination.exists());
+        assert_eq!(std::fs::read_dir(&selected).unwrap().count(), 0);
+        assert_eq!(std::fs::read_dir(&admitted).unwrap().count(), 1);
+    }
+}
+
+#[test]
 fn model_file_actions_preserve_installed_bytes_on_denial_cancel_and_invalid_import() {
     use crate::model_manager;
     let (directory, app) = workspace();

@@ -88,16 +88,25 @@ impl Ui {
                             Err(error) => self.error.set(Some(error)),
                         }
                         if ready {
-                            let project = io.project().await;
-                            if !self.current_review_watch(generation) {
-                                return;
-                            }
-                            match project {
-                                Ok(Some(project)) => self.load(project),
-                                Ok(None) => self.error.set(Some(
-                                    "Completed job did not return a review project".into(),
-                                )),
-                                Err(error) => self.error.set(Some(error)),
+                            loop {
+                                let project = io.project().await;
+                                if !self.current_review_watch(generation) {
+                                    return;
+                                }
+                                match project {
+                                    Ok(Some(project)) => {
+                                        self.load(project);
+                                        break;
+                                    }
+                                    Ok(None) => self.error.set(Some(
+                                        "Completed job did not return a review project".into(),
+                                    )),
+                                    Err(error) => self.error.set(Some(error)),
+                                }
+                                io.wait().await;
+                                if !self.current_review_watch(generation) {
+                                    return;
+                                }
                             }
                         }
                         break;

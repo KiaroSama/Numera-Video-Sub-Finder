@@ -225,17 +225,15 @@ pub fn replace_project(host: tauri::State<'_, Host>, project: Project) -> Result
     Ok(())
 }
 
-fn confirm_replace(app: &tauri::AppHandle, path: &std::path::Path) -> bool {
-    !path.exists()
-        || app
-            .dialog()
-            .message("This destination already exists. Replace it with your current corrections?")
-            .title("Confirm overwrite")
-            .buttons(MessageDialogButtons::OkCancelCustom(
-                "Replace".into(),
-                "Cancel".into(),
-            ))
-            .blocking_show()
+fn confirm_replace(app: &tauri::AppHandle) -> bool {
+    app.dialog()
+        .message("This destination already exists. Replace it with your current corrections?")
+        .title("Confirm overwrite")
+        .buttons(MessageDialogButtons::OkCancelCustom(
+            "Replace".into(),
+            "Cancel".into(),
+        ))
+        .blocking_show()
 }
 
 #[tauri::command]
@@ -259,7 +257,7 @@ pub async fn save_project(
             return Ok(None);
         };
         let path = file.into_path().map_err(|e| e.to_string())?;
-        save_project_to(&project, &path, || Ok(confirm_replace(&app, &path)))
+        save_project_to(&project, &path, || Ok(confirm_replace(&app)))
     })
     .await
 }
@@ -292,7 +290,7 @@ pub async fn export_project(
         };
         let path = file.into_path().map_err(|e| e.to_string())?;
         export_project_to(&project, &path, &format, bom, crlf, || {
-            Ok(confirm_replace(&app, &path))
+            Ok(confirm_replace(&app))
         })
     })
     .await
@@ -303,13 +301,22 @@ pub(crate) fn save_project_to(
     path: &std::path::Path,
     confirm: impl FnOnce() -> Result<bool>,
 ) -> Result<Option<String>> {
-    let overwrite = path.exists();
-    let output =
-        nvsf_app::storage::AtomicOutput::new(path, overwrite).map_err(|e| e.to_string())?;
+    let prepared =
+        nvsf_app::storage::AtomicOutput::for_confirmation(path).map_err(|e| e.to_string())?;
+    save_prepared_project(project, path, prepared, confirm)
+}
+
+pub(crate) fn save_prepared_project(
+    project: &Project,
+    path: &std::path::Path,
+    prepared: (nvsf_app::storage::AtomicOutput, bool),
+    confirm: impl FnOnce() -> Result<bool>,
+) -> Result<Option<String>> {
+    let (output, overwrite) = prepared;
     output
         .protect_project_source(project)
         .map_err(|e| e.to_string())?;
-    if !confirm()? {
+    if overwrite && !confirm()? {
         return Ok(None);
     }
     output
@@ -327,7 +334,7 @@ pub(crate) fn export_project_to(
     confirm: impl FnOnce() -> Result<bool>,
 ) -> Result<Option<String>> {
     let overwrite = path.exists();
-    if !confirm()? {
+    if overwrite && !confirm()? {
         return Ok(None);
     }
     nvsf_app::export_project(project, path, format, overwrite, bom, crlf)

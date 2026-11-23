@@ -93,6 +93,60 @@ fn publication_without_overwrite_preserves_a_competitor_created_after_admission(
 }
 
 #[test]
+fn overwrite_permission_does_not_replace_a_source_moved_to_an_initially_absent_output() {
+    let directory = tempfile::tempdir().unwrap();
+    let source = directory.path().join("original.mp4");
+    let destination = directory.path().join("review.srt");
+    std::fs::write(&source, b"original media").unwrap();
+    let output = AtomicOutput::new(&destination, true).unwrap();
+    output.protect_source(&source).unwrap();
+    std::fs::rename(&source, &destination).unwrap();
+    assert!(output.write(b"subtitles").is_err());
+    assert_eq!(std::fs::read(&destination).unwrap(), b"original media");
+    assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 1);
+}
+
+#[test]
+fn confirmation_state_comes_from_the_bound_entry_and_keeps_late_arrivals_safe() {
+    let directory = tempfile::tempdir().unwrap();
+    let destination = directory.path().join("review.json");
+    let (output, needs_confirmation) = AtomicOutput::for_confirmation(&destination).unwrap();
+    assert!(!needs_confirmation);
+    std::fs::write(&destination, b"external review").unwrap();
+    assert!(output.write(b"new review").is_err());
+    assert_eq!(std::fs::read(&destination).unwrap(), b"external review");
+    let (output, needs_confirmation) = AtomicOutput::for_confirmation(&destination).unwrap();
+    assert!(needs_confirmation);
+    output.write(b"confirmed review").unwrap();
+    assert_eq!(std::fs::read(&destination).unwrap(), b"confirmed review");
+}
+
+#[test]
+fn directory_syntax_never_turns_into_permission_to_replace_a_regular_file() {
+    let directory = tempfile::tempdir().unwrap();
+    let destination = directory.path().join("existing.srt");
+    std::fs::write(&destination, b"previous subtitles").unwrap();
+    let mut suffixes = vec!["/", "/.", "/./", "//"];
+    if cfg!(windows) {
+        suffixes.extend(["\\", "\\.", "\\.\\"]);
+    }
+    for suffix in suffixes {
+        let mut raw = destination.as_os_str().to_os_string();
+        raw.push(suffix);
+        assert!(
+            nvsf_app::storage::write_atomic(std::path::Path::new(&raw), b"replacement", true)
+                .is_err()
+        );
+        assert_eq!(std::fs::read(&destination).unwrap(), b"previous subtitles");
+    }
+    nvsf_app::storage::write_atomic(&destination, b"explicit replacement", true).unwrap();
+    assert_eq!(
+        std::fs::read(&destination).unwrap(),
+        b"explicit replacement"
+    );
+}
+
+#[test]
 fn reserved_names_follow_the_admitted_directory_even_before_the_file_exists() {
     let directory = tempfile::tempdir().unwrap();
     let selected = directory.path().join("selected");

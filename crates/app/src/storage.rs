@@ -7,7 +7,10 @@ use std::{
     fs::{File, OpenOptions},
     io::{Read, Write},
     path::Path,
-    sync::atomic::{AtomicU64, Ordering},
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
 };
 
 #[cfg(target_os = "linux")]
@@ -49,16 +52,28 @@ pub fn save_project(project: &Project, path: &Path) -> Result<()> {
 /// Renaming or replacing an ancestor cannot redirect any later operation to another directory.
 pub struct AtomicOutput {
     entry: BoundEntry,
-    overwrite: bool,
+    overwrite_allowed: bool,
+    replace_existing: bool,
 }
 
 struct BoundEntry {
-    directory: File,
+    directory: Arc<File>,
     name: OsString,
 }
 
 impl BoundEntry {
     fn open(path: &Path) -> Result<Self> {
+        let raw = path.as_os_str().as_encoded_bytes();
+        let separator = |byte| byte == b'/' || (cfg!(windows) && byte == b'\\');
+        let last = raw
+            .rsplit(|byte| separator(*byte))
+            .next()
+            .unwrap_or_default();
+        if raw.last().is_some_and(|byte| separator(*byte)) || last == b"." || last == b".." {
+            return Err(fail(
+                "Output path must name a file without trailing directory syntax",
+            ));
+        }
         let name = path
             .file_name()
             .ok_or_else(|| fail("Missing destination filename"))?
@@ -69,7 +84,7 @@ impl BoundEntry {
             .filter(|p| !p.as_os_str().is_empty())
             .unwrap_or(Path::new("."));
         Ok(Self {
-            directory: native::open_directory(parent)?,
+            directory: Arc::new(native::open_directory(parent)?),
             name,
         })
     }
@@ -95,6 +110,29 @@ impl BoundEntry {
         }
     }
 
+    fn source_file(&self) -> Result<Option<File>> {
+        match native::open_source_file(&self.directory, &self.name) {
+            Ok(Some(file)) if file.metadata()?.is_file() => Ok(Some(file)),
+            Ok(_) => Ok(None),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(error) => Err(error.into()),
+        }
+    }
+
+    fn source_conflicts(&self, source: &Self) -> Result<bool> {
+        if !native::same_directory(&self.directory, &source.directory)? {
+            return Ok(false);
+        }
+        let Some(destination) = self.existing()? else {
+            return Ok(false);
+        };
+        let Some(source_file) = source.source_file()? else {
+            return Ok(false);
+        };
+        Ok(native::names_equal(&self.name, &source.name)?
+            || native::same_entry_name(&destination, &source_file)?)
+    }
+
     fn conflicts(&self, other: &Self) -> Result<bool> {
         if !native::same_directory(&self.directory, &other.directory)? {
             return Ok(false);
@@ -118,20 +156,39 @@ impl AtomicOutput {
     }
 
     fn admit(entry: BoundEntry, overwrite: bool) -> Result<Self> {
-        if entry.existing()?.is_some() && !overwrite {
+        let exists = entry.existing()?.is_some();
+        if exists && !overwrite {
             return Err(fail("Output exists; explicitly enable overwrite"));
         }
-        Ok(Self { entry, overwrite })
+        Ok(Self {
+            entry,
+            overwrite_allowed: overwrite,
+            replace_existing: exists && overwrite,
+        })
+    }
+
+    /// Returns one bound existence decision for overwrite confirmation and publication.
+    pub fn for_confirmation(path: &Path) -> Result<(Self, bool)> {
+        let entry = BoundEntry::open(path)?;
+        let exists = entry.existing()?.is_some();
+        Ok((
+            Self {
+                entry,
+                overwrite_allowed: exists,
+                replace_existing: exists,
+            },
+            exists,
+        ))
     }
 
     pub(crate) fn sibling(&self, name: &OsStr) -> Result<Self> {
         native::validate_name(name)?;
         Self::admit(
             BoundEntry {
-                directory: self.entry.directory.try_clone()?,
+                directory: Arc::clone(&self.entry.directory),
                 name: name.to_os_string(),
             },
-            self.overwrite,
+            self.overwrite_allowed,
         )
     }
 
@@ -148,7 +205,7 @@ impl AtomicOutput {
             }
             Err(error) => return Err(error),
         };
-        if self.entry.conflicts(&source)? {
+        if self.entry.source_conflicts(&source)? {
             return Err(fail(
                 "Destination resolves to source media; no output changed",
             ));
@@ -163,7 +220,7 @@ impl AtomicOutput {
             Err(error) => return Err(error),
         };
         if let Some(source) = &source
-            && self.entry.conflicts(source)?
+            && self.entry.source_conflicts(source)?
         {
             return Err(fail(
                 "Destination resolves to source media; no output changed",
@@ -178,7 +235,7 @@ impl AtomicOutput {
             return Ok(());
         }
         if let Some(source) = source
-            && let Some(file) = source.existing()?
+            && let Some(file) = source.source_file()?
             && hash_reader(file)? == project.source_hash
         {
             return Ok(());
@@ -197,7 +254,7 @@ impl AtomicOutput {
             &temporary.file,
             &temporary.name,
             &self.entry.name,
-            self.overwrite,
+            self.replace_existing,
         )?;
         temporary.published = true;
         native::sync_directory(&self.entry.directory)?;
@@ -299,5 +356,40 @@ mod tests {
         assert_eq!(std::fs::read(&p).unwrap(), b"original");
         write_atomic(&p, "سلام".as_bytes(), true).unwrap();
         assert_eq!(std::fs::read_to_string(&p).unwrap(), "سلام");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn thousands_of_siblings_share_one_directory_descriptor_and_outlive_the_primary() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().canonicalize().unwrap();
+        let count_handles = || {
+            std::fs::read_dir("/proc/self/fd")
+                .unwrap()
+                .filter_map(|entry| entry.ok())
+                .filter_map(|entry| std::fs::read_link(entry.path()).ok())
+                .filter(|path| path == &root)
+                .count()
+        };
+        let initial_handles = count_handles();
+        let primary = AtomicOutput::new(&root.join("primary.srt"), true).unwrap();
+        let mut siblings: Vec<_> = (0..2048)
+            .map(|track| {
+                primary
+                    .sibling(OsStr::new(&format!("track-{track}.srt")))
+                    .unwrap()
+            })
+            .collect();
+        assert_eq!(count_handles(), initial_handles + 1);
+        drop(primary);
+        let last = siblings.pop().unwrap();
+        drop(siblings);
+        assert_eq!(count_handles(), initial_handles + 1);
+        last.write(b"last track").unwrap();
+        assert_eq!(
+            std::fs::read(root.join("track-2047.srt")).unwrap(),
+            b"last track"
+        );
+        assert_eq!(count_handles(), initial_handles);
     }
 }

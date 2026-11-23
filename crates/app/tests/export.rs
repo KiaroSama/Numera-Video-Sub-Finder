@@ -282,3 +282,54 @@ fn a_reused_absolute_source_path_does_not_disable_recorded_identity_protection()
     export_project(&project, &safe, "srt", false, false, false).unwrap();
     assert!(std::fs::read_to_string(safe).unwrap().contains("Subtitle"));
 }
+
+#[test]
+fn a_source_path_replaced_by_a_directory_allows_offline_review_but_protects_moved_media() {
+    let directory = tempfile::tempdir().unwrap();
+    let old_source = directory.path().join("original.mp4");
+    let relocated = directory.path().join("relocated.mp4");
+    let fresh = directory.path().join("fresh.srt");
+    let existing = directory.path().join("existing.srt");
+    std::fs::create_dir(&old_source).unwrap();
+    std::fs::write(&relocated, b"hello world").unwrap();
+    std::fs::write(&existing, b"previous subtitles").unwrap();
+    let mut project = project(vec![cue(1, 0, 0, 1_000, "Offline correction")]);
+    project.config.input = old_source.to_string_lossy().into_owned();
+    project.source_hash = "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9".into();
+    export_project(&project, &fresh, "srt", false, false, false).unwrap();
+    export_project(&project, &existing, "srt", true, false, false).unwrap();
+    for output in [&fresh, &existing] {
+        assert!(
+            std::fs::read_to_string(output)
+                .unwrap()
+                .contains("Offline correction")
+        );
+    }
+    assert!(export_project(&project, &old_source, "srt", true, false, false).is_err());
+    assert!(export_project(&project, &relocated, "srt", true, false, false).is_err());
+    assert!(nvsf_app::storage::save_project(&project, &relocated).is_err());
+    assert_eq!(std::fs::read(&relocated).unwrap(), b"hello world");
+    assert!(old_source.is_dir());
+}
+
+#[test]
+fn an_absent_primary_keeps_explicit_overwrite_permission_for_existing_tracks() {
+    let directory = tempfile::tempdir().unwrap();
+    let primary = directory.path().join("subtitles.srt");
+    let first = directory.path().join("subtitles.track-0.srt");
+    let second = directory.path().join("subtitles.track-1.srt");
+    std::fs::write(&first, b"previous first track").unwrap();
+    std::fs::write(&second, b"previous second track").unwrap();
+    let project = project(vec![
+        cue(1, 0, 0, 1_000, "English"),
+        cue(2, 1, 0, 1_000, "日本語"),
+    ]);
+    export_project(&project, &primary, "srt", true, false, false).unwrap();
+    assert!(
+        std::fs::read_to_string(primary)
+            .unwrap()
+            .contains("English")
+    );
+    assert!(std::fs::read_to_string(first).unwrap().contains("English"));
+    assert!(std::fs::read_to_string(second).unwrap().contains("日本語"));
+}
