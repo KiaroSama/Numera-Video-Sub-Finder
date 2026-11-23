@@ -116,3 +116,27 @@ fn language_import_rejects_directory_and_missing_sources_before_lock_admission()
     }
     assert!(!paths.models.join("tessdata").exists());
 }
+
+#[test]
+fn language_import_accepts_the_installed_pack_as_its_verified_source_and_releases_its_lock() {
+    let (_directory, paths, language, source) = fixture();
+    let cancel = AtomicBool::new(false);
+    let expected = std::fs::read(&source).unwrap();
+    let root = paths.models.join("tessdata");
+    std::fs::create_dir(&root).unwrap();
+    let destination = root.join("rus.traineddata");
+    let lock_path = root.join("rus.download.lock");
+    std::fs::rename(&source, &destination).unwrap();
+    // The fixture substitutes only the catalog identity; the same-path import uses real files.
+    let (prepared, exists) =
+        prepare_import_with_spec(&paths, language, &destination, &cancel).unwrap();
+    assert!(exists);
+    assert!(crate::storage::JobLock::acquire(&lock_path).is_err());
+    prepared.publish(&cancel).unwrap();
+    assert_eq!(std::fs::read(&destination).unwrap(), expected);
+    assert!(!source.exists());
+    assert_eq!(std::fs::read_dir(&root).unwrap().count(), 2);
+    let released = crate::storage::JobLock::acquire(&lock_path).unwrap();
+    drop(released);
+    assert!(std::fs::read(&lock_path).unwrap().is_empty());
+}

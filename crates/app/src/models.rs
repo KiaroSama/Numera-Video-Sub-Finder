@@ -308,6 +308,8 @@ impl PreparedModelImport {
                 "Model changed during import; existing model preserved",
             ));
         }
+        // Same-path imports must release the old file before native replacement.
+        drop(self.source);
         self.output.write(&bytes)
     }
 }

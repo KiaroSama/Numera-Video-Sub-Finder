@@ -16,6 +16,10 @@ pub(super) struct Driver {
     session: String,
 }
 
+#[cfg(test)]
+#[path = "gui_driver_tests.rs"]
+mod driver_tests;
+
 impl Driver {
     pub(super) fn request(
         &self,
@@ -35,9 +39,7 @@ impl Driver {
             .error_for_status()
             .map_err(|error| crate::gui_failure::request_error(error, route))?;
         let result: Value = response.json()?;
-        if result["value"]["error"].is_string() {
-            return Err(format!("WebDriver error: {}", result["value"]).into());
-        }
+        // HTTP status distinguishes WebDriver failures; successful script data may contain error fields.
         Ok(result["value"].clone())
     }
     pub(super) fn script(&self, script: &str) -> Result<Value> {

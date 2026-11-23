@@ -165,8 +165,10 @@ impl PreparedLanguageImport {
             return Err(fail("Language import size or checksum mismatch"));
         }
         source.rewind()?;
-        let result = output.write_with(|temporary| {
+        let result = output.write_with(move |temporary| {
             std::io::copy(&mut (&mut source).take(language.bytes + 1), &mut *temporary)?;
+            // Retain the selected source through copying, then release it before native replacement.
+            drop(source);
             temporary.sync_all()?;
             if cancel.load(Ordering::Acquire) {
                 return Err(crate::AppError::Cancelled);

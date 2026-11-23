@@ -83,6 +83,13 @@ unsafe extern "system" {
         ea_buffer: *const c_void,
         ea_length: u32,
     ) -> i32;
+    fn NtSetInformationFile(
+        file: Handle,
+        status: *mut IoStatus,
+        info: *const c_void,
+        len: u32,
+        class: i32,
+    ) -> i32;
     fn RtlNtStatusToDosError(status: i32) -> u32;
 }
 
@@ -247,10 +254,15 @@ pub(super) fn publish(
     let name: Vec<_> = new.encode_wide().collect();
     let bytes = std::mem::size_of::<RenameInfo>() + (name.len() + 1) * 2;
     let mut storage = vec![0usize; bytes.div_ceil(std::mem::size_of::<usize>())];
+    let mut io_status = IoStatus {
+        status_or_pointer: 0,
+        information: 0,
+    };
     // SAFETY: the usize buffer is aligned for the Win64 structure and large enough
     // for its flexible UTF-16 name plus NUL. The source handle owns the temporary;
-    // RootDirectory is the original parent, so no ancestor pathname is resolved.
-    let result = unsafe {
+    // the native FileRenameInformation class preserves RootDirectory plus basename,
+    // so no ancestor pathname is resolved. The synchronous handle keeps buffers live.
+    let status = unsafe {
         let info = storage.as_mut_ptr().cast::<RenameInfo>();
         (*info).replace_or_flags = u32::from(overwrite);
         (*info).root_directory = directory.as_raw_handle();
@@ -260,10 +272,19 @@ pub(super) fn publish(
             std::ptr::addr_of_mut!((*info).file_name).cast::<u16>(),
             name.len(),
         );
-        SetFileInformationByHandle(file.as_raw_handle(), 3, info.cast(), bytes as u32)
+        NtSetInformationFile(
+            file.as_raw_handle(),
+            &mut io_status,
+            info.cast(),
+            bytes as u32,
+            10, // Native FileRenameInformation; Win32 FileRenameInfo uses a different class.
+        )
     };
-    if result == 0 {
-        return Err(io::Error::last_os_error());
+    if status < 0 {
+        // SAFETY: convert this returned NTSTATUS, not an unrelated Win32 last error.
+        return Err(io::Error::from_raw_os_error(
+            unsafe { RtlNtStatusToDosError(status) } as i32,
+        ));
     }
     Ok(())
 }
@@ -397,6 +418,10 @@ pub(super) fn same_entry_name(left: &File, right: &File) -> io::Result<bool> {
     }
     names_equal(&actual_name(left)?, &actual_name(right)?)
 }
+
+#[cfg(test)]
+#[path = "storage_windows_publication_tests.rs"]
+mod publication_tests;
 
 #[cfg(test)]
 mod tests {

@@ -94,3 +94,19 @@ fn model_import_rejects_directory_and_missing_sources_before_destination_admissi
     }
     assert_eq!(std::fs::read_dir(paths.models).unwrap().count(), 0);
 }
+
+#[test]
+fn model_import_accepts_the_installed_file_as_its_verified_source() {
+    let (_directory, paths, spec, source) = fixture();
+    let expected = std::fs::read(&source).unwrap();
+    let destination = paths.models.join(format!("{}.onnx", spec.id));
+    std::fs::rename(&source, &destination).unwrap();
+    // The fixture substitutes only the catalog identity; the same-path import uses real files.
+    let (prepared, exists) = prepare_import_with_spec(&paths, spec, &destination).unwrap();
+    assert!(exists);
+    prepared.publish().unwrap();
+    assert_eq!(std::fs::read(&destination).unwrap(), expected);
+    assert!(!source.exists());
+    assert_eq!(std::fs::read_dir(&paths.models).unwrap().count(), 1);
+    assert!(!destination.with_extension("download.lock").exists());
+}
