@@ -197,14 +197,15 @@ pub(crate) fn run(paths: &Paths, command: ProjectCommand, control: &Control) -> 
             overwrite,
         } => {
             let loaded = storage::load_project(&project)?;
-            storage::protect_project_source(&loaded, &output)?;
+            let destination = storage::AtomicOutput::new(&output, overwrite)?;
+            destination.protect_project_source(&loaded)?;
             let cue = project_ops::find_cue(&loaded, id)?;
             let crop = cue
                 .crop
                 .as_deref()
                 .ok_or_else(|| nvsf_app::fail("Cue has no saved crop evidence"))?;
             let bytes = crop_evidence::read(paths, crop)?;
-            storage::write_atomic(&output, &bytes, overwrite)?;
+            destination.write(&bytes)?;
             println!(
                 "{}",
                 serde_json::to_string_pretty(&json!({

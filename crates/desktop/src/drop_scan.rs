@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashSet, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     fs, io,
     path::{Path, PathBuf},
 };
@@ -77,12 +77,18 @@ fn resolve_with_budget(inputs: &[PathBuf], budget: usize) -> DropResolution {
     let mut remaining = budget - roots.len();
     let mut pending: VecDeque<_> = roots.into_iter().map(|path| (path, 0usize)).collect();
     let mut seen_files = HashSet::new();
-    let mut seen_directories = HashSet::new();
+    let mut seen_directories = HashMap::new();
 
     while let Some((path, depth)) = pending.pop_front() {
-        let Ok(meta) = fs::symlink_metadata(&path) else {
-            result.skipped_unsupported += 1;
-            continue;
+        let meta = match fs::symlink_metadata(&path) {
+            Ok(meta) => meta,
+            Err(error) => {
+                result.errors.push(format!(
+                    "Cannot inspect {}: {error}. Drop accessible video files directly.",
+                    path.display()
+                ));
+                continue;
+            }
         };
         if meta.file_type().is_symlink() {
             result.skipped_unsupported += 1;
@@ -125,10 +131,14 @@ fn resolve_with_budget(inputs: &[PathBuf], budget: usize) -> DropResolution {
             }
             continue;
         }
-        if let Ok(canonical) = path.canonicalize()
-            && !seen_directories.insert(canonical)
-        {
-            continue;
+        if let Ok(canonical) = path.canonicalize() {
+            if seen_directories
+                .get(&canonical)
+                .is_some_and(|previous_depth| *previous_depth <= depth)
+            {
+                continue;
+            }
+            seen_directories.insert(canonical, depth);
         }
         let children = fs::read_dir(&path)
             .map_err(ScanError::Io)

@@ -184,10 +184,87 @@ pub fn smoke(cli: &Path, fixture_dir: &Path, data_root: &Path) -> Result<(), Box
         return Err("Invalid input incorrectly succeeded".into());
     }
     if label == "en.actual" {
+        bulk_encoding(&cli, &input, fixture_dir, data_root)?;
         crate::extraction_witness::verify(&input, data_root, fixture_dir)?;
     }
     println!(
         "Actual native CLI/FFmpeg/ONNX English synthetic smoke passed; real en/fa/ja quality still unqualified"
+    );
+    Ok(())
+}
+
+fn bulk_encoding(cli: &Path, input: &Path, root: &Path, data: &Path) -> Result<(), Box<dyn Error>> {
+    let output_dir = root.join("bulk-encoding");
+    std::fs::create_dir(&output_dir)?;
+    let log = nvsf_app::logging::Log::new(&nvsf_app::Paths::new(Some(data))?, "nvsf-ci");
+    log.event(
+        "INFO",
+        "BULK-ENCODING",
+        "Checking BOM/CRLF through the actual isolated worker",
+    );
+    let mut command = Command::new(cli);
+    clean_runtime_environment(&mut command);
+    command
+        .arg("--data-root")
+        .arg(data)
+        .args(["bulk", "--input"])
+        .arg(input)
+        .arg("--output-dir")
+        .arg(&output_dir)
+        .args([
+            "--device",
+            "cpu",
+            "--quality",
+            "fast",
+            "--end-ms",
+            "500",
+            "--bom",
+            "--crlf",
+        ]);
+    let capture = root.join("bulk-encoding.cli.log");
+    let mut child = crate::process::OwnedProcess::spawn(&mut command, &capture)?;
+    child.wait_code(
+        &capture,
+        Duration::from_secs(60),
+        Duration::from_secs(30),
+        2,
+    )?;
+    let output = output_dir.join("en.srt");
+    let bytes = std::fs::read(&output)?;
+    if !bytes.starts_with(b"\xef\xbb\xbf")
+        || !bytes.windows(2).any(|pair| pair == b"\r\n")
+        || bytes
+            .iter()
+            .enumerate()
+            .any(|(index, byte)| *byte == b'\n' && (index == 0 || bytes[index - 1] != b'\r'))
+    {
+        return Err("Actual bulk worker did not preserve the requested BOM/CRLF encoding".into());
+    }
+    let cues = parse_srt(std::str::from_utf8(&bytes[3..])?)?;
+    let project = nvsf_app::storage::load_project(&output.with_extension("nvsf.json"))?;
+    if cues.is_empty() || !project.completed || project.config.overwrite {
+        return Err(
+            "Encoded bulk output must retain completed native recognition and no-overwrite policy"
+                .into(),
+        );
+    }
+    std::fs::write(
+        root.join("bulk-encoding.json"),
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "schema": 1, "source_sha": std::env::var("GITHUB_SHA")?, "passed": true,
+            "actual_isolated_worker": true, "bom": true, "crlf": true,
+            "overwrite": false, "cues": cues.len(), "bytes": bytes.len()
+        }))?,
+    )?;
+    log.event(
+        "INFO",
+        "BULK-ENCODING",
+        "Actual bulk isolated-worker BOM/CRLF acceptance passed",
+    );
+    println!(
+        "Actual bulk isolated-worker BOM/CRLF acceptance passed: cues={} bytes={} overwrite=false",
+        cues.len(),
+        bytes.len()
     );
     Ok(())
 }

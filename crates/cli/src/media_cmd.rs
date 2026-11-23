@@ -61,8 +61,9 @@ pub(crate) fn run_preview(paths: &Paths, command: PreviewCommand, control: &Cont
             pixel_box,
             overwrite,
         } => {
-            storage::protect_source(&input, &output)?;
             if crop.is_none() && !grid && draw_box.is_empty() && pixel_box.is_empty() {
+                let destination = storage::AtomicOutput::new(&output, overwrite)?;
+                destination.protect_source(&input)?;
                 let (response, bytes) = native_request::supervise(
                     paths,
                     &input,
@@ -73,7 +74,7 @@ pub(crate) fn run_preview(paths: &Paths, command: PreviewCommand, control: &Cont
                     Response::Preview { width, height, .. } => (width, height),
                     _ => return Err(nvsf_app::fail("Unexpected preview worker response")),
                 };
-                storage::write_atomic(&output, &bytes, overwrite)?;
+                destination.write(&bytes)?;
                 println!(
                     "{}",
                     serde_json::to_string_pretty(&serde_json::json!({
@@ -185,7 +186,8 @@ fn render_rgb_to_png(
     output: &Path,
     opts: &RenderOptions<'_>,
 ) -> Result<serde_json::Value> {
-    storage::protect_source(input, output)?;
+    let destination = storage::AtomicOutput::new(output, opts.overwrite)?;
+    destination.protect_source(input)?;
     if let Some(rect) = opts.crop {
         rect.validate()
             .map_err(|e| AppError::InvalidConfig(e.to_string()))?;
@@ -225,7 +227,7 @@ fn render_rgb_to_png(
     };
 
     let png = encode_rgb_png(out_w, out_h, &out_rgb)?;
-    storage::write_atomic(output, &png, opts.overwrite)?;
+    destination.write(&png)?;
     Ok(serde_json::json!({
         "input": input,
         "at_ms": at_ms,

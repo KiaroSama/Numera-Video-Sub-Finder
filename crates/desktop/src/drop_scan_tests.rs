@@ -88,3 +88,79 @@ fn scan_budget_is_shared_across_nested_and_duplicate_roots() {
     assert_eq!(forward.videos.len(), 1);
     assert!(forward.videos[0].ends_with("a.mp4"));
 }
+
+#[test]
+fn metadata_failures_report_the_path_and_os_error_and_keep_other_roots() {
+    let dir = tempdir().expect("tempdir");
+    let missing = dir.path().join("a-missing.mp4");
+    let good = dir.path().join("z-present.mp4");
+    fs::write(&good, b"video").expect("video");
+    let os_error = fs::symlink_metadata(&missing)
+        .expect_err("missing input")
+        .to_string();
+    let result = resolve_dropped_paths(&[missing.clone(), good.clone()]);
+    assert_eq!(
+        result.videos,
+        [good.canonicalize().expect("canonical source")]
+    );
+    assert_eq!(result.skipped_unsupported, 0);
+    assert_eq!(result.errors.len(), 1);
+    assert!(result.errors[0].contains(&missing.display().to_string()));
+    assert!(result.errors[0].contains(&os_error));
+    assert!(result.errors[0].contains("Cannot inspect"));
+}
+
+#[test]
+fn explicit_nested_roots_restore_their_depth_allowance_without_resetting_the_scan_budget() {
+    let dir = tempdir().expect("tempdir");
+    let root = dir.path().join("r");
+    let nested = root.join("a");
+    let mut deepest = nested.clone();
+    for depth in 0..MAX_DROP_DEPTH {
+        deepest = deepest.join(format!("d{depth}"));
+    }
+    fs::create_dir_all(&deepest).expect("nested tree");
+    let shallow_video = nested.join("seen.mp4");
+    let deep_video = deepest.join("deep.mp4");
+    fs::write(&shallow_video, b"shallow").expect("shallow video");
+    fs::write(&deep_video, b"deep").expect("deep video");
+
+    let nested_only = resolve_dropped_paths(&[nested.clone()]);
+    assert_eq!(nested_only.videos.len(), 2);
+    assert!(!nested_only.truncated);
+    let overlapping = resolve_dropped_paths(&[root.clone(), nested.clone()]);
+    assert_eq!(overlapping.videos, nested_only.videos);
+    assert_eq!(
+        overlapping
+            .videos
+            .iter()
+            .filter(|path| path.ends_with("seen.mp4"))
+            .count(),
+        1
+    );
+    assert!(overlapping.truncated);
+    assert!(
+        overlapping
+            .errors
+            .iter()
+            .any(|error| error.contains("folder depth limit"))
+    );
+    assert_eq!(
+        overlapping,
+        resolve_dropped_paths(&[nested.clone(), root.clone()])
+    );
+
+    let budget = 2 * MAX_DROP_DEPTH + 5;
+    let limited = resolve_with_budget(&[root, nested], budget);
+    assert!(limited.truncated);
+    assert_eq!(
+        limited.videos,
+        [shallow_video.canonicalize().expect("canonical source")]
+    );
+    assert!(
+        limited
+            .errors
+            .iter()
+            .any(|error| error.contains(&format!("{budget}-entry scan budget")))
+    );
+}

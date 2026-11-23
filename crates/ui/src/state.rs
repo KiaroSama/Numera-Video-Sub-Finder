@@ -215,8 +215,11 @@ impl Ui {
                     } else {
                         ""
                     };
-                    self.notice
-                        .set(format!("Loaded dropped video: {name}{suffix}"));
+                    let mut note = format!("Loaded dropped video: {name}{suffix}");
+                    if let Some(error) = outcome.errors.first() {
+                        note.push_str(&format!(" {} drop issue(s): {error}", outcome.errors.len()));
+                    }
+                    self.notice.set(note);
                     return;
                 }
                 self.queue.set(outcome.queued);

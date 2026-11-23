@@ -1,4 +1,4 @@
-use crate::extraction::Control;
+use crate::extraction::{Control, SrtOptions};
 use crate::{AppError, Paths, Result, fail, storage::write_atomic};
 use nvsf_core::{ExtractConfig, Progress, Project};
 use serde::{Deserialize, Serialize};
@@ -35,7 +35,17 @@ pub fn supervise(
     control: &Control,
     callback: impl FnMut(Progress),
 ) -> Result<Project> {
-    supervise_inner(config, control, callback, None, None)
+    supervise_inner(config, control, callback, None, None, SrtOptions::default())
+}
+
+/// Applies encoding during the worker's first SRT publication, under its output lock.
+pub fn supervise_with_srt(
+    config: ExtractConfig,
+    control: &Control,
+    callback: impl FnMut(Progress),
+    options: SrtOptions,
+) -> Result<Project> {
+    supervise_inner(config, control, callback, None, None, options)
 }
 
 /// Runs the ordinary isolated worker against the caller's selected saved checkpoint.
@@ -49,7 +59,14 @@ pub fn supervise_resume(
     if !checkpoint.is_file() {
         return Err(fail("Selected checkpoint must be a regular file"));
     }
-    supervise_inner(config, control, callback, None, Some(&checkpoint))
+    supervise_inner(
+        config,
+        control,
+        callback,
+        None,
+        Some(&checkpoint),
+        SrtOptions::default(),
+    )
 }
 
 /// Same isolated worker supervision; the worker writes provider profiles and evidence
@@ -60,7 +77,14 @@ pub fn supervise_profiled(
     callback: impl FnMut(Progress),
     profile_directory: &Path,
 ) -> Result<Project> {
-    supervise_inner(config, control, callback, Some(profile_directory), None)
+    supervise_inner(
+        config,
+        control,
+        callback,
+        Some(profile_directory),
+        None,
+        SrtOptions::default(),
+    )
 }
 
 fn supervise_inner(
@@ -69,6 +93,7 @@ fn supervise_inner(
     mut callback: impl FnMut(Progress),
     profile_directory: Option<&Path>,
     selected_checkpoint: Option<&Path>,
+    options: SrtOptions,
 ) -> Result<Project> {
     config.validate()?;
     let paths = Paths::new(config.data_root.as_deref().map(Path::new))?;
@@ -92,6 +117,12 @@ fn supervise_inner(
     }
     if let Some(checkpoint) = selected_checkpoint {
         command.arg("--resume-project").arg(checkpoint);
+    }
+    if options.bom {
+        command.arg("--srt-bom");
+    }
+    if options.crlf {
+        command.arg("--srt-crlf");
     }
     command
         .env("TEMP", scratch.path())

@@ -1,4 +1,4 @@
-use super::activate;
+use super::{activate, activate_with_barrier, sync_directory};
 use crate::{
     runtimes::{Entry, Pack},
     storage::write_atomic,
@@ -206,5 +206,106 @@ fn a_failure_after_pointer_persistence_restores_selection_before_runtime_rollbac
         } else {
             assert!(!destination.exists());
         }
+    }
+}
+
+#[test]
+fn promoted_runtime_parent_is_synced_before_selection_publication() {
+    let root = tempfile::tempdir().unwrap();
+    let runtimes = root.path().join("runtimes");
+    std::fs::create_dir(&runtimes).unwrap();
+    let stage = tempfile::tempdir_in(&runtimes).unwrap();
+    let (pack, manifest, signature) = staged_pack(stage.path());
+    let destination = runtimes.join("selected-runtime");
+    std::fs::create_dir(&destination).unwrap();
+    std::fs::write(destination.join("retained.bin"), b"previous runtime bytes").unwrap();
+    let pointer = root.path().join("runtime-selection.json");
+    std::fs::write(&pointer, b"previous selection").unwrap();
+    let order = std::cell::RefCell::new(Vec::new());
+    activate_with_barrier(
+        &pack,
+        &manifest,
+        &signature,
+        stage.path(),
+        &destination,
+        &pointer,
+        (
+            |parent| {
+                assert_eq!(parent, runtimes);
+                assert_ne!(parent, pointer.parent().unwrap());
+                pack.verify(&destination).unwrap();
+                assert!(!stage.path().exists());
+                assert_eq!(std::fs::read(&pointer).unwrap(), b"previous selection");
+                sync_directory(parent)?;
+                order.borrow_mut().push("runtime parent synced");
+                Ok(())
+            },
+            || {
+                assert_eq!(*order.borrow(), ["runtime parent synced"]);
+                write_atomic(&pointer, b"repaired selection", true)?;
+                order.borrow_mut().push("selection published");
+                Ok(())
+            },
+        ),
+    )
+    .unwrap();
+    assert_eq!(
+        *order.borrow(),
+        ["runtime parent synced", "selection published"]
+    );
+    pack.verify(&destination).unwrap();
+    assert_eq!(std::fs::read(pointer).unwrap(), b"repaired selection");
+    assert_eq!(std::fs::read_dir(runtimes).unwrap().count(), 1);
+}
+
+#[test]
+fn a_runtime_parent_sync_failure_rolls_back_before_publishing_selection() {
+    for had_destination in [false, true] {
+        let root = tempfile::tempdir().unwrap();
+        let runtimes = root.path().join("runtimes");
+        std::fs::create_dir(&runtimes).unwrap();
+        let stage = tempfile::tempdir_in(&runtimes).unwrap();
+        let (pack, manifest, signature) = staged_pack(stage.path());
+        let destination = runtimes.join("selected-runtime");
+        if had_destination {
+            std::fs::create_dir(&destination).unwrap();
+            std::fs::write(destination.join("retained.bin"), b"previous runtime bytes").unwrap();
+        }
+        let pointer = root.path().join("runtime-selection.json");
+        std::fs::write(&pointer, b"previous selection").unwrap();
+        let error = activate_with_barrier(
+            &pack,
+            &manifest,
+            &signature,
+            stage.path(),
+            &destination,
+            &pointer,
+            (
+                |parent| {
+                    assert_eq!(parent, runtimes);
+                    pack.verify(&destination).unwrap();
+                    sync_directory(parent)?;
+                    Err(crate::fail("Injected runtime parent durability failure"))
+                },
+                || panic!("A failed runtime directory sync must not publish selection"),
+            ),
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("runtime parent durability"));
+        assert_eq!(std::fs::read(&pointer).unwrap(), b"previous selection");
+        pack.verify(stage.path()).unwrap();
+        if had_destination {
+            assert_eq!(
+                std::fs::read(destination.join("retained.bin")).unwrap(),
+                b"previous runtime bytes"
+            );
+            assert_eq!(std::fs::read_dir(destination).unwrap().count(), 1);
+        } else {
+            assert!(!destination.exists());
+        }
+        assert_eq!(
+            std::fs::read_dir(&runtimes).unwrap().count(),
+            usize::from(had_destination) + 1
+        );
     }
 }

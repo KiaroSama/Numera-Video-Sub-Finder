@@ -303,17 +303,18 @@ pub(crate) fn save_project_to(
     path: &std::path::Path,
     confirm: impl FnOnce() -> Result<bool>,
 ) -> Result<Option<String>> {
-    nvsf_app::storage::protect_project_source(project, path).map_err(|e| e.to_string())?;
     let overwrite = path.exists();
+    let output =
+        nvsf_app::storage::AtomicOutput::new(path, overwrite).map_err(|e| e.to_string())?;
+    output
+        .protect_project_source(project)
+        .map_err(|e| e.to_string())?;
     if !confirm()? {
         return Ok(None);
     }
-    nvsf_app::storage::write_atomic(
-        path,
-        &serde_json::to_vec_pretty(project).map_err(|e| e.to_string())?,
-        overwrite,
-    )
-    .map_err(|e| e.to_string())?;
+    output
+        .write(&serde_json::to_vec_pretty(project).map_err(|e| e.to_string())?)
+        .map_err(|e| e.to_string())?;
     Ok(Some(display_name(path)))
 }
 

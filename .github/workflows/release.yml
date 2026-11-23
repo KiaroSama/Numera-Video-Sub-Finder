@@ -103,6 +103,9 @@ jobs:
   publish:
     needs: qualification
     if: ${{ inputs.publish_release }}
+    concurrency:
+      group: publish-release-${{ inputs.release_tag }}
+      cancel-in-progress: false
     environment: numera-signing
     runs-on: ubuntu-24.04
     timeout-minutes: 15

@@ -1,7 +1,4 @@
-use crate::{
-    Result, fail,
-    storage::{protect_project_source, write_atomic},
-};
+use crate::{Result, fail, storage::AtomicOutput};
 use nvsf_core::{Project, export_ass, export_srt, export_vtt};
 use std::path::Path;
 
@@ -12,6 +9,18 @@ pub fn export_project(
     overwrite: bool,
     bom: bool,
     crlf: bool,
+) -> Result<()> {
+    export_project_checked(project, path, format, overwrite, bom, crlf, |_| Ok(()))
+}
+
+pub(crate) fn export_project_checked(
+    project: &Project,
+    path: &Path,
+    format: &str,
+    overwrite: bool,
+    bom: bool,
+    crlf: bool,
+    mut admit: impl FnMut(&AtomicOutput) -> Result<()>,
 ) -> Result<()> {
     project.validate()?;
     let text = match format {
@@ -50,27 +59,31 @@ pub fn export_project(
             outputs[0].1 = outputs[1].1.clone();
         }
     }
-    // Preflight the complete set before any export can replace an existing file.
-    for (destination, _) in &outputs {
-        if destination.is_symlink() || destination.is_dir() || (!overwrite && destination.exists())
-        {
-            return Err(fail(
-                "Export set contains an existing or unsafe destination; no output changed",
-            ));
-        }
-        protect_project_source(project, destination)?;
-        let parent = destination
-            .parent()
-            .filter(|p| !p.as_os_str().is_empty())
-            .unwrap_or(Path::new("."));
-        if !parent.is_dir() {
-            return Err(fail("Export destination directory unavailable"));
-        }
+    // Every generated track shares the primary's pinned parent. Admit the complete
+    // set before publication, retaining each writer through both checks and rename.
+    let mut prepared: Vec<(AtomicOutput, String)> = Vec::with_capacity(outputs.len());
+    for (destination, text) in outputs {
+        let output = match prepared.first() {
+            Some((primary, _)) => primary.sibling(
+                destination
+                    .file_name()
+                    .ok_or_else(|| fail("Missing export filename"))?,
+            )?,
+            None => AtomicOutput::new(&destination, overwrite)?,
+        };
+        output.protect_project_source(project)?;
+        admit(&output)?;
+        prepared.push((output, text));
     }
     // Each file is atomic; filesystems cannot atomically rename several separate track files.
     // Write separated tracks first and publish the selected primary track last.
-    for (destination, text) in outputs.iter().skip(1).chain(outputs.iter().take(1)) {
-        write_atomic(destination, text.as_bytes(), overwrite)?;
+    prepared.rotate_left(1);
+    for (output, text) in prepared {
+        output.write(text.as_bytes())?;
     }
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "export_publication_tests.rs"]
+mod publication_tests;

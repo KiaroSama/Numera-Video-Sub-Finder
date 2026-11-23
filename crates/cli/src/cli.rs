@@ -110,6 +110,10 @@ pub(crate) enum Commands {
         provider_profile: Option<PathBuf>,
         #[arg(long, hide = true, conflicts_with = "provider_profile")]
         resume_project: Option<PathBuf>,
+        #[arg(long, hide = true, conflicts_with_all = ["provider_profile", "resume_project"])]
+        srt_bom: bool,
+        #[arg(long, hide = true, conflicts_with_all = ["provider_profile", "resume_project"])]
+        srt_crlf: bool,
     },
 }
 

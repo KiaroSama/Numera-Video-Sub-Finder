@@ -4,6 +4,8 @@ use std::path::{Path, PathBuf};
 pub(super) struct Checkpoint {
     pub(super) path: PathBuf,
     required: bool,
+    output_lock_path: PathBuf,
+    selected_lock_path: PathBuf,
     _output_lock: JobLock,
     _selected_lock: Option<JobLock>,
 }
@@ -65,6 +67,8 @@ impl Checkpoint {
         Ok(Self {
             path,
             required: selected.is_some(),
+            output_lock_path: output_lock,
+            selected_lock_path: selected_lock,
             _output_lock: output_guard,
             _selected_lock: selected_guard,
         })
@@ -77,8 +81,40 @@ impl Checkpoint {
             Ok(None)
         }
     }
+
+    pub(super) fn export(
+        &self,
+        project: &nvsf_core::Project,
+        output: &Path,
+        overwrite: bool,
+        bom: bool,
+        crlf: bool,
+    ) -> Result<()> {
+        crate::export::export_project_checked(
+            project,
+            output,
+            "srt",
+            overwrite,
+            bom,
+            crlf,
+            |destination| {
+                for reserved in [&self.path, &self.output_lock_path, &self.selected_lock_path] {
+                    if destination.conflicts_with(reserved)? {
+                        return Err(fail(
+                            "Checkpoint and its locks must differ from every export destination",
+                        ));
+                    }
+                }
+                Ok(())
+            },
+        )
+    }
 }
 
 #[cfg(test)]
 #[path = "extraction_checkpoint_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "extraction_checkpoint_export_tests.rs"]
+mod export_tests;

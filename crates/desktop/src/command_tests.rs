@@ -586,6 +586,39 @@ fn review_save_cannot_replace_the_source_video() {
 }
 
 #[test]
+fn review_save_retains_its_admitted_directory_during_overwrite_confirmation() {
+    let (directory, _app) = workspace();
+    let selected = directory.path().join("selected");
+    let media = directory.path().join("media");
+    let admitted = directory.path().join("admitted");
+    std::fs::create_dir(&selected).unwrap();
+    std::fs::create_dir(&media).unwrap();
+    let source = media.join("original.mp4");
+    let destination = selected.join("original.mp4");
+    std::fs::write(&source, b"original source media").unwrap();
+    std::fs::write(&destination, b"previous review").unwrap();
+    let mut corrected = project();
+    corrected.config.input = source.to_string_lossy().into_owned();
+    corrected.source_hash = nvsf_app::storage::hash_file(&source).unwrap();
+    files::save_project_to(&corrected, &destination, || {
+        std::fs::rename(&selected, &admitted).unwrap();
+        std::fs::rename(&media, &selected).unwrap();
+        Ok(true)
+    })
+    .unwrap();
+    assert_eq!(
+        std::fs::read(&destination).unwrap(),
+        b"original source media"
+    );
+    assert_eq!(
+        nvsf_app::storage::load_project(&admitted.join("original.mp4"))
+            .unwrap()
+            .cues,
+        corrected.cues
+    );
+}
+
+#[test]
 fn model_file_actions_preserve_installed_bytes_on_denial_cancel_and_invalid_import() {
     use crate::model_manager;
     let (directory, app) = workspace();

@@ -195,6 +195,7 @@ fn replacing_a_separate_hard_link_does_not_replace_the_source_file() {
     std::fs::hard_link(&source, &selected).unwrap();
     let mut project = project(vec![cue(1, 0, 0, 1_000, "Subtitle")]);
     project.config.input = source.to_string_lossy().into_owned();
+    project.source_hash = nvsf_app::storage::hash_file(&source).unwrap();
     export_project(&project, &selected, "srt", true, false, false).unwrap();
     assert_eq!(std::fs::read(&source).unwrap(), b"original media bytes");
     assert!(
@@ -250,6 +251,33 @@ fn a_relocated_legacy_project_preserves_its_source_by_content_identity() {
     assert!(export_project(&project, &source, "srt", true, false, false).is_err());
     assert!(nvsf_app::storage::save_project(&project, &source).is_err());
     assert_eq!(std::fs::read(&source).unwrap(), b"hello world");
+    let safe = directory.path().join("review.srt");
+    export_project(&project, &safe, "srt", false, false, false).unwrap();
+    assert!(std::fs::read_to_string(safe).unwrap().contains("Subtitle"));
+}
+
+#[test]
+fn a_reused_absolute_source_path_does_not_disable_recorded_identity_protection() {
+    let directory = tempfile::tempdir().unwrap();
+    let old_source = directory.path().join("old-original.mp4");
+    let relocated_source = directory.path().join("relocated-original.mp4");
+    std::fs::write(&old_source, b"an unrelated replacement").unwrap();
+    std::fs::write(&relocated_source, b"hello world").unwrap();
+    let mut project = project(vec![cue(1, 0, 0, 1_000, "Subtitle")]);
+    project.config.input = old_source.to_string_lossy().into_owned();
+    project.source_hash = "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9".into();
+    for format in ["srt", "vtt", "ass", "json"] {
+        let error = export_project(&project, &relocated_source, format, true, false, false)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("source media"), "{error}");
+    }
+    assert!(nvsf_app::storage::save_project(&project, &relocated_source).is_err());
+    assert_eq!(std::fs::read(&relocated_source).unwrap(), b"hello world");
+    assert_eq!(
+        std::fs::read(&old_source).unwrap(),
+        b"an unrelated replacement"
+    );
     let safe = directory.path().join("review.srt");
     export_project(&project, &safe, "srt", false, false, false).unwrap();
     assert!(std::fs::read_to_string(safe).unwrap().contains("Subtitle"));

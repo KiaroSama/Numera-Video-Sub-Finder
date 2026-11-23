@@ -193,6 +193,48 @@ mod tests {
     }
 
     #[test]
+    fn extracted_critical_helpers_cannot_pass_on_overall_coverage_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let input = dir.path().join("profiles.lcov");
+        let output = dir.path().join("coverage.json");
+        let root = std::env::current_dir().unwrap().canonicalize().unwrap();
+        let scope = crate::coverage_scope::Scope::parse(
+            br#"{"schema":1,"approval":"D012","exclusions":[]}"#,
+            &root,
+        )
+        .unwrap();
+        for helper in [
+            "storage_linux.rs",
+            "storage_windows.rs",
+            "extraction_checkpoint.rs",
+            "extraction_identity.rs",
+        ] {
+            let noncritical_hits = (1..=9)
+                .map(|line| format!("DA:{line},1\n"))
+                .collect::<String>();
+            std::fs::write(
+                &input,
+                format!(
+                    "SF:{}\nDA:1,1\nend_of_record\nSF:{}\n{noncritical_hits}end_of_record\nSF:{}\nDA:1,0\nend_of_record\n",
+                    root.join("crates/core/src/time.rs").display(),
+                    root.join("crates/app/src/paths.rs").display(),
+                    root.join("crates/app/src").join(helper).display(),
+                ),
+            )
+            .unwrap();
+            let error = coverage_scoped(&input, &output, &scope).unwrap_err();
+            assert!(error.to_string().contains("Coverage below retained floors"));
+            let report: serde_json::Value =
+                serde_json::from_slice(&std::fs::read(&output).unwrap()).unwrap();
+            assert!(report["coverage"].as_f64().unwrap() > 0.80, "{helper}");
+            assert_eq!(report["critical_coverage"], 0.5, "{helper}");
+            assert_eq!(report["measured"]["critical_lines"], 2, "{helper}");
+            assert_eq!(report["excluded_lines"], 0, "{helper}");
+            assert_eq!(report["passed"], false, "{helper}");
+        }
+    }
+
+    #[test]
     fn malformed_and_empty_quality_data_fails_closed() {
         let dir = tempfile::tempdir().unwrap();
         let input = dir.path().join("input");

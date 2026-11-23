@@ -264,15 +264,15 @@ fn bulk_srt_honors_each_requested_encoding() {
         let crate::Commands::Bulk(args) = crate::Cli::try_parse_from(argv).unwrap().command else {
             panic!("bulk command expected");
         };
-        let status = run_bulk_with(*args, None, &Control::default(), &|cfg, _| {
+        let status = run_bulk_with(*args, None, &Control::default(), &|cfg, _, options| {
             let project = fake_project(&cfg, true);
             nvsf_app::export_project(
                 &project,
                 Path::new(&cfg.output),
                 "srt",
                 cfg.overwrite,
-                false,
-                false,
+                options.bom,
+                options.crlf,
             )?;
             Ok(project)
         })
@@ -307,15 +307,15 @@ fn bulk_srt_encoding_flags_do_not_authorize_replacing_existing_output() {
     else {
         panic!("bulk command expected");
     };
-    let status = run_bulk_with(*args, None, &Control::default(), &|cfg, _| {
+    let status = run_bulk_with(*args, None, &Control::default(), &|cfg, _, options| {
         let project = fake_project(&cfg, true);
         nvsf_app::export_project(
             &project,
             Path::new(&cfg.output),
             "srt",
             cfg.overwrite,
-            false,
-            false,
+            options.bom,
+            options.crlf,
         )?;
         Ok(project)
     })
@@ -324,6 +324,58 @@ fn bulk_srt_encoding_flags_do_not_authorize_replacing_existing_output() {
     assert_eq!(
         std::fs::read(output).expect("preserved output"),
         b"Existing corrected subtitles"
+    );
+    std::fs::remove_dir_all(dir).expect("remove fixtures");
+}
+
+#[test]
+fn bulk_srt_never_replaces_an_edit_after_the_workers_first_publication() {
+    use clap::Parser;
+    let dir = temp_dir();
+    let input = dir.join("concurrent-edit.mp4");
+    let output = input.with_extension("srt");
+    std::fs::write(&input, b"controlled extraction input").expect("input fixture");
+    let crate::Commands::Bulk(args) = crate::Cli::try_parse_from([
+        "nvsf",
+        "bulk",
+        "--input",
+        input.to_str().unwrap(),
+        "--bom",
+        "--crlf",
+    ])
+    .unwrap()
+    .command
+    else {
+        panic!("bulk command expected");
+    };
+    let status = run_bulk_with(*args, None, &Control::default(), &|cfg, _, options| {
+        assert!(
+            !cfg.overwrite,
+            "encoding must preserve the user's overwrite policy"
+        );
+        let project = fake_project(&cfg, true);
+        let destination = Path::new(&cfg.output);
+        nvsf_app::export_project(
+            &project,
+            destination,
+            "srt",
+            cfg.overwrite,
+            options.bom,
+            options.crlf,
+        )?;
+        assert_eq!(
+            std::fs::read(destination)?,
+            b"\xef\xbb\xbf1\r\n00:00:00,000 --> 00:00:00,500\r\nTest\r\n\r\n"
+        );
+        // A user edit after the worker releases output ownership must survive bulk completion.
+        std::fs::write(destination, b"Concurrent corrected subtitle text")?;
+        Ok(project)
+    })
+    .expect("bulk result");
+    assert_eq!(status, 0);
+    assert_eq!(
+        std::fs::read(output).expect("user edit"),
+        b"Concurrent corrected subtitle text"
     );
     std::fs::remove_dir_all(dir).expect("remove fixtures");
 }

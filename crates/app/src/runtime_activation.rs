@@ -13,6 +13,38 @@ pub(super) fn activate(
     selection: &Path,
     publish: impl FnOnce() -> Result<()>,
 ) -> Result<()> {
+    activate_with_barrier(
+        pack,
+        manifest,
+        signature,
+        stage,
+        destination,
+        selection,
+        (sync_directory, publish),
+    )
+}
+
+fn sync_directory(path: &Path) -> Result<()> {
+    #[cfg(unix)]
+    std::fs::File::open(path)?.sync_all()?;
+    #[cfg(not(unix))]
+    let _ = path;
+    Ok(())
+}
+
+fn activate_with_barrier(
+    pack: &Pack,
+    manifest: &[u8],
+    signature: &[u8],
+    stage: &Path,
+    destination: &Path,
+    selection: &Path,
+    callbacks: (
+        impl FnOnce(&Path) -> Result<()>,
+        impl FnOnce() -> Result<()>,
+    ),
+) -> Result<()> {
+    let (sync_parent, publish) = callbacks;
     if destination.is_symlink() {
         return Err(fail("Runtime activation destination must not be a symlink"));
     }
@@ -54,7 +86,13 @@ pub(super) fn activate(
         }
         return Err(error.into());
     }
-    if let Err(error) = publish() {
+    // The pointer lives outside this directory, so its own sync cannot persist these renames.
+    let promoted = if reusable {
+        Ok(())
+    } else {
+        sync_parent(parent)
+    };
+    if let Err(error) = promoted.and_then(|()| publish()) {
         let selection_restored = if had_selection {
             std::fs::rename(&selection_backup, selection)
         } else {

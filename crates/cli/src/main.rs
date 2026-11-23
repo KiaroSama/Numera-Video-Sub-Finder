@@ -90,6 +90,8 @@ fn run(cli: Cli) -> Result<i32> {
         control,
         provider_profile,
         resume_project,
+        srt_bom,
+        srt_crlf,
     } = &cli.command
     {
         return worker_cmd::run_worker(
@@ -97,6 +99,10 @@ fn run(cli: Cli) -> Result<i32> {
             control,
             provider_profile.as_deref(),
             resume_project.as_deref(),
+            nvsf_app::extraction::SrtOptions {
+                bom: *srt_bom,
+                crlf: *srt_crlf,
+            },
         )
         .map(|()| 0);
     }

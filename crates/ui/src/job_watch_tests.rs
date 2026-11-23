@@ -15,6 +15,8 @@ struct Responses {
     status: VecDeque<Result<JobStatus, String>>,
     project: VecDeque<Result<Option<Project>, String>>,
     calls: Vec<&'static str>,
+    wait_permits: Option<usize>,
+    waits: usize,
 }
 
 struct ControlledIo(Rc<RefCell<Responses>>);
@@ -47,7 +49,18 @@ impl JobWatchIo for ControlledIo {
         .await
     }
 
-    async fn wait(&mut self) {}
+    async fn wait(&mut self) {
+        self.0.borrow_mut().waits += 1;
+        poll_fn(|_| match self.0.borrow_mut().wait_permits.as_mut() {
+            Some(0) => Poll::Pending,
+            Some(permits) => {
+                *permits -= 1;
+                Poll::Ready(())
+            }
+            None => Poll::Ready(()),
+        })
+        .await
+    }
 }
 
 fn poll(future: Pin<&mut impl Future<Output = ()>>) -> Poll<()> {
@@ -212,5 +225,61 @@ fn superseded_watchers_cannot_publish_status_results_errors_or_release_the_new_w
             assert!(ui.error.get_untracked().is_none());
             assert_review_frozen(ui, "Original");
         }
+    });
+}
+
+#[test]
+fn status_read_errors_retry_after_delay_and_install_the_completed_project() {
+    Owner::new().with(|| {
+        let ui = Ui::new("dark".into());
+        ui.load(project("Before retry"));
+        let generation = ui.begin_review_watch("A".into());
+        let responses = terminal_responses("A");
+        {
+            let mut responses = responses.borrow_mut();
+            responses.wait_permits = Some(1);
+            responses
+                .status
+                .push_front(Err("Temporary status transport failure".into()));
+            responses.queue.push_back(Ok(Vec::new()));
+            responses
+                .project
+                .push_back(Ok(Some(project("Recovered A"))));
+        }
+        let mut io = ControlledIo(responses.clone());
+        let mut watch = std::pin::pin!(ui.watch_job_with(generation, &mut io));
+        assert!(poll(watch.as_mut()).is_pending());
+        assert_eq!(
+            ui.error.get_untracked().as_deref(),
+            Some("Temporary status transport failure")
+        );
+        assert_eq!(ui.status.get_untracked().state, "running");
+        assert!(ui.review_loading.get_untracked());
+        assert_review_frozen(ui, "Before retry");
+        assert_eq!(responses.borrow().waits, 2);
+        assert_eq!(responses.borrow().calls, ["queue", "status"]);
+        assert_eq!(responses.borrow().status.len(), 1);
+
+        assert!(poll(watch.as_mut()).is_pending());
+        assert_eq!(responses.borrow().waits, 2);
+        assert_eq!(responses.borrow().calls, ["queue", "status"]);
+        responses.borrow_mut().wait_permits = Some(1);
+        assert!(poll(watch.as_mut()).is_ready());
+        assert_eq!(ui.status.get_untracked().state, "completed");
+        assert!(!ui.review_loading.get_untracked());
+        assert_eq!(
+            ui.selected_cue().expect("recovered cue").text,
+            "Recovered A"
+        );
+        assert!(ui.review_editable());
+        ui.edit(|cues| {
+            cues[0].text = "Recovered correction".into();
+            Ok(())
+        });
+        assert!(ui.dirty.get_untracked());
+        assert_eq!(
+            ui.selected_cue().expect("edited cue").text,
+            "Recovered correction"
+        );
     });
 }

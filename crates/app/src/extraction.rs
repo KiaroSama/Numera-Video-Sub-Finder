@@ -32,6 +32,12 @@ pub struct Control {
     pub pause: Arc<AtomicBool>,
 }
 
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SrtOptions {
+    pub bom: bool,
+    pub crlf: bool,
+}
+
 pub fn extract(
     config: ExtractConfig,
     control: &Control,
@@ -137,7 +143,16 @@ pub fn run(
     control: &Control,
     callback: impl FnMut(Progress),
 ) -> Result<Project> {
-    run_inner(config, control, callback, None, None).map(|(project, _)| project)
+    run_with_srt(config, control, callback, SrtOptions::default())
+}
+
+pub fn run_with_srt(
+    config: ExtractConfig,
+    control: &Control,
+    callback: impl FnMut(Progress),
+    options: SrtOptions,
+) -> Result<Project> {
+    run_inner(config, control, callback, None, None, options).map(|(project, _)| project)
 }
 
 /// Continues the explicitly selected checkpoint, retaining its location and output ownership.
@@ -147,7 +162,15 @@ pub fn run_resuming(
     callback: impl FnMut(Progress),
     checkpoint: &Path,
 ) -> Result<Project> {
-    run_inner(config, control, callback, None, Some(checkpoint)).map(|(project, _)| project)
+    run_inner(
+        config,
+        control,
+        callback,
+        None,
+        Some(checkpoint),
+        SrtOptions::default(),
+    )
+    .map(|(project, _)| project)
 }
 
 /// Profiles the ordinary extraction sessions without changing the OCR or export policy.
@@ -157,7 +180,14 @@ pub fn run_profiled(
     callback: impl FnMut(Progress),
     profile_directory: &Path,
 ) -> Result<(Project, ProfileFiles)> {
-    let (project, profiles) = run_inner(config, control, callback, Some(profile_directory), None)?;
+    let (project, profiles) = run_inner(
+        config,
+        control,
+        callback,
+        Some(profile_directory),
+        None,
+        SrtOptions::default(),
+    )?;
     Ok((
         project,
         profiles.ok_or_else(|| fail("Extraction produced no provider profiles"))?,
@@ -170,6 +200,7 @@ fn run_inner(
     mut callback: impl FnMut(Progress),
     profile_directory: Option<&Path>,
     selected_checkpoint: Option<&Path>,
+    options: SrtOptions,
 ) -> Result<(Project, Option<ProfileFiles>)> {
     config.validate()?;
     let paths = Paths::new(config.data_root.as_deref().map(Path::new))?;
@@ -217,7 +248,7 @@ fn run_inner(
                     "A completed checkpoint cannot establish fresh provider placement; choose a new output",
                 ));
             }
-            crate::export_project(&saved, output, "srt", config.overwrite, false, false)?;
+            checkpoint_owner.export(&saved, output, config.overwrite, options.bom, options.crlf)?;
             save_project(&saved, &checkpoint)?;
             return Ok((saved, None));
         }
@@ -511,7 +542,13 @@ fn run_inner(
     let profiles = profiles.transpose()?;
     project.cues.sort_by_key(|c| (c.start_ms, c.track));
     project.active_appearances.clear();
-    crate::export_project(&project, output, "srt", config.overwrite, false, false)?;
+    checkpoint_owner.export(
+        &project,
+        output,
+        config.overwrite,
+        options.bom,
+        options.crlf,
+    )?;
     project.completed = true;
     save_project(&project, &checkpoint)?;
     log.event(

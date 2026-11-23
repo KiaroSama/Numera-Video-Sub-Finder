@@ -30,9 +30,18 @@ pub fn counts(files: &LineMap) -> Counts {
         result.lines += lines.len();
         result.covered += covered;
         if path.starts_with("crates/core/src/")
-            || ["/storage.rs", "/extraction.rs", "/resume.rs", "/queue.rs"]
-                .iter()
-                .any(|suffix| path.ends_with(suffix))
+            || [
+                "/storage.rs",
+                "/storage_linux.rs",
+                "/storage_windows.rs",
+                "/extraction.rs",
+                "/extraction_checkpoint.rs",
+                "/extraction_identity.rs",
+                "/resume.rs",
+                "/queue.rs",
+            ]
+            .iter()
+            .any(|suffix| path.ends_with(suffix))
         {
             result.critical_lines += lines.len();
             result.critical_covered += covered;

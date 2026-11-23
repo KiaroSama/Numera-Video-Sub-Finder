@@ -326,10 +326,13 @@ pub(crate) fn summarize_exit_code(items: &[BulkItemResult]) -> i32 {
 }
 
 pub(crate) fn run_bulk(args: BulkArgs, data_root: Option<&Path>, control: &Control) -> Result<i32> {
-    run_bulk_with(args, data_root, control, &|cfg, ctrl| {
-        nvsf_app::extract(cfg, ctrl, |p| {
-            eprintln!("Bulk {} {}ms cues={}", p.stage, p.position_ms, p.cues)
-        })
+    run_bulk_with(args, data_root, control, &|cfg, ctrl, options| {
+        nvsf_app::worker::supervise_with_srt(
+            cfg,
+            ctrl,
+            |p| eprintln!("Bulk {} {}ms cues={}", p.stage, p.position_ms, p.cues),
+            options,
+        )
     })
 }
 
@@ -340,7 +343,7 @@ fn run_bulk_with<F>(
     extract: &F,
 ) -> Result<i32>
 where
-    F: Fn(ExtractConfig, &Control) -> Result<Project> + Sync,
+    F: Fn(ExtractConfig, &Control, nvsf_app::extraction::SrtOptions) -> Result<Project> + Sync,
 {
     validate_concurrency(args.concurrency)?;
     if !["srt", "vtt", "ass", "json"].contains(&args.format.as_str()) {
@@ -401,13 +404,18 @@ where
         &|cfg, ctrl| {
             let final_format = format.as_str();
             let target_path = PathBuf::from(&cfg.output).with_extension(final_format);
-            let project = extract(cfg, ctrl)?;
-            if final_format != "srt" || bom || crlf {
+            let options = if final_format == "srt" {
+                nvsf_app::extraction::SrtOptions { bom, crlf }
+            } else {
+                nvsf_app::extraction::SrtOptions::default()
+            };
+            let project = extract(cfg, ctrl, options)?;
+            if final_format != "srt" {
                 nvsf_app::export_project(
                     &project,
                     &target_path,
                     final_format,
-                    overwrite || final_format == "srt",
+                    overwrite,
                     bom,
                     crlf,
                 )?;

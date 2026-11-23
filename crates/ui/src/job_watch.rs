@@ -105,7 +105,6 @@ impl Ui {
                 }
                 Err(error) => {
                     self.error.set(Some(error));
-                    break;
                 }
             }
         }
