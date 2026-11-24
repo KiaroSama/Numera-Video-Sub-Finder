@@ -2,6 +2,7 @@
 //! with the brushed-silver cosine palette from godverify.com.
 
 use crate::helpers::{ease_sweep, sweep_clip_inset};
+use gloo_timers::callback::Timeout;
 use std::{cell::RefCell, rc::Rc};
 use wasm_bindgen::{JsCast, JsValue, closure::Closure};
 use web_sys::{
@@ -10,6 +11,7 @@ use web_sys::{
 };
 
 const DURATION_MS: f64 = 680.0;
+const DEADLINE_MS: u32 = 1_000;
 const PAL_A: [f32; 3] = [0.74, 0.75, 0.78];
 const PAL_B: [f32; 3] = [0.24, 0.24, 0.24];
 const PAL_C: [f32; 3] = [1.0, 1.0, 1.0];
@@ -114,6 +116,7 @@ struct SweepState {
     generation: u64,
     raf_id: Option<i32>,
     transition: Option<JsValue>,
+    deadline: Option<Timeout>,
 }
 
 thread_local! {
@@ -320,16 +323,18 @@ fn cleanup_dom(root: &Element) {
 }
 
 fn cancel_active(window: &Window, root: &Element) -> u64 {
-    let (raf, prev_vt, engine, next_gen) = STATE.with(|cell| {
+    let (raf, prev_vt, prev_deadline, engine, next_gen) = STATE.with(|cell| {
         let mut st = cell.borrow_mut();
         st.generation = st.generation.wrapping_add(1);
         (
             st.raf_id.take(),
             st.transition.take(),
+            st.deadline.take(),
             st.engine.clone(),
             st.generation,
         )
     });
+    drop(prev_deadline);
     if let Some(id) = raf {
         let _ = window.cancel_animation_frame(id);
     }
@@ -341,6 +346,36 @@ fn cancel_active(window: &Window, root: &Element) -> u64 {
     }
     cleanup_dom(root);
     next_gen
+}
+
+fn finish_generation(window: &Window, root: &Element, my_gen: u64, target: &str) {
+    let finished = STATE.with(|cell| {
+        let mut st = cell.borrow_mut();
+        if st.generation == my_gen {
+            Some((
+                st.raf_id.take(),
+                st.transition.take(),
+                st.deadline.take(),
+                st.engine.clone(),
+            ))
+        } else {
+            None
+        }
+    });
+    if let Some((raf, vt, deadline, engine)) = finished {
+        drop(deadline);
+        if let Some(id) = raf {
+            let _ = window.cancel_animation_frame(id);
+        }
+        let _ = root.set_attribute("data-theme", target);
+        if let Some(vt) = vt {
+            skip_transition(&vt);
+        }
+        if let Some(eng) = engine {
+            eng.hide();
+        }
+        cleanup_dom(root);
+    }
 }
 
 pub fn sweep_theme(from: &str, to: &str) {
@@ -417,6 +452,7 @@ pub fn sweep_theme(from: &str, to: &str) {
     let win_loop = window.clone();
     let root_loop = root.clone();
     let engine_loop = Rc::clone(&engine);
+    let target_loop = to.to_owned();
 
     *step.borrow_mut() = Some(Closure::new(move |_raf_ts: f64| {
         let active = STATE.with(|cell| cell.borrow().generation == my_gen);
@@ -445,20 +481,7 @@ pub fn sweep_theme(from: &str, to: &str) {
             });
             return;
         }
-        let finished_vt = STATE.with(|cell| {
-            let mut st = cell.borrow_mut();
-            if st.generation == my_gen {
-                st.raf_id = None;
-                st.transition.take()
-            } else {
-                None
-            }
-        });
-        if let Some(vt) = finished_vt {
-            skip_transition(&vt);
-        }
-        engine_loop.hide();
-        cleanup_dom(&root_loop);
+        finish_generation(&win_loop, &root_loop, my_gen, &target_loop);
         let _ = step_loop.borrow_mut().take();
     }));
 
@@ -471,15 +494,25 @@ pub fn sweep_theme(from: &str, to: &str) {
         })
     };
     match maybe_id {
-        Some(id) => STATE.with(|cell| {
-            let mut st = cell.borrow_mut();
-            if st.generation == my_gen {
-                st.raf_id = Some(id);
-            }
-        }),
+        Some(id) => {
+            let win_timeout = window.clone();
+            let root_timeout = root.clone();
+            let target_timeout = to.to_owned();
+            let step_timeout = Rc::clone(&step);
+            let deadline = Timeout::new(DEADLINE_MS, move || {
+                finish_generation(&win_timeout, &root_timeout, my_gen, &target_timeout);
+                let _ = step_timeout.borrow_mut().take();
+            });
+            STATE.with(|cell| {
+                let mut st = cell.borrow_mut();
+                if st.generation == my_gen {
+                    st.raf_id = Some(id);
+                    st.deadline = Some(deadline);
+                }
+            });
+        }
         None => {
-            engine.hide();
-            cleanup_dom(&root);
+            finish_generation(&window, &root, my_gen, to);
             let _ = step.borrow_mut().take();
         }
     }

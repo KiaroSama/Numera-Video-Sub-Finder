@@ -16,7 +16,36 @@ use std::{
     collections::{BTreeSet, VecDeque},
     env, fs,
     path::{Path, PathBuf},
+    process::Command,
+    time::Duration,
 };
+
+const WIX_URL: &str =
+    "https://github.com/wixtoolset/wix3/releases/download/wix3141rtm/wix314-binaries.zip";
+const WIX_SHA256: &str = "6ac824e1642d6f7277d0ed7ea09411a508f6116ba6fae0aa5f2c7daa2ff43d31";
+
+pub(super) fn dispatch_wix_light() -> Result<Option<i32>> {
+    let exe = env::current_exe()?;
+    if !exe
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.eq_ignore_ascii_case("light.exe"))
+    {
+        return Ok(None);
+    }
+    let real = exe.with_file_name("light-real.exe");
+    if !real.is_file() {
+        return Ok(None);
+    }
+    // Windows Server 2025 / hosted 2026 runners disable WiX 3 darice.cub ICE/VBScript execution
+    // (LGHT0217 / LGHT0216 0x643). Suppress ICE linting here; inspect_msi validates all tables,
+    // icons, payload SHA-256 hashes, and Authenticode signatures with dark.exe afterwards.
+    let status = Command::new(&real)
+        .arg("-sval")
+        .args(env::args_os().skip(1))
+        .status()?;
+    Ok(Some(status.code().unwrap_or(1)))
+}
 
 pub(super) struct Identity(bool);
 
@@ -274,6 +303,61 @@ impl Bundle {
             .push(json!({"role":"cli-sidecar","evidence":ci_authenticode::sign(&self.cli)?}));
         ci_authenticode::signature_negatives(&self.cli)?;
         self.icons.push("signature-negatives".to_owned());
+        self.stage_wix_tools()?;
+        Ok(())
+    }
+
+    fn stage_wix_tools(&mut self) -> Result<()> {
+        let wix = self.stage.path().join("cargo/.tauri/WixTools314");
+        fs::create_dir_all(&wix)?;
+        let archive = self.stage.path().join("wix314-binaries.zip");
+        let bytes = reqwest::blocking::Client::builder()
+            .timeout(Duration::from_secs(120))
+            .build()?
+            .get(WIX_URL)
+            .send()?
+            .error_for_status()?
+            .bytes()?;
+        fs::write(&archive, &bytes)?;
+        let actual = sha(&archive)?;
+        if actual != WIX_SHA256 {
+            return Err(format!("WiX 3.14 archive SHA-256 mismatch: {actual}").into());
+        }
+        self.run.set("NVSF_WIX_ZIP", &archive);
+        self.run.set("NVSF_WIX_DIR", &wix);
+        let script = "$ErrorActionPreference='Stop'; Expand-Archive -LiteralPath $env:NVSF_WIX_ZIP -DestinationPath $env:NVSF_WIX_DIR -Force";
+        let encoded = STANDARD.encode(
+            script
+                .encode_utf16()
+                .flat_map(u16::to_le_bytes)
+                .collect::<Vec<_>>(),
+        );
+        self.command(
+            "wix-extract",
+            "pwsh.exe",
+            [
+                "-NoLogo",
+                "-NoProfile",
+                "-NonInteractive",
+                "-EncodedCommand",
+                &encoded,
+            ],
+            (120, 60),
+            false,
+            None,
+        )?;
+        let light = wix.join("light.exe");
+        let real_light = wix.join("light-real.exe");
+        if !light.is_file() || !wix.join("dark.exe").is_file() || !wix.join("candle.exe").is_file()
+        {
+            return Err("Extracted WiX 3.14 toolchain is missing required executables.".into());
+        }
+        fs::rename(&light, &real_light)?;
+        helpers::copy(
+            &wix.join("light.exe.config"),
+            &wix.join("light-real.exe.config"),
+        )?;
+        helpers::copy(&env::current_exe()?, &light)?;
         Ok(())
     }
 

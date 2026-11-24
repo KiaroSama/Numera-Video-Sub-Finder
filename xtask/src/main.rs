@@ -326,6 +326,9 @@ fn main() {
     }
 }
 fn run() -> Result<(), Box<dyn Error>> {
+    if let Some(code) = ci_bundle::dispatch_wix_light()? {
+        std::process::exit(code);
+    }
     if let Some(code) = ci_guard::dispatch()? {
         std::process::exit(code);
     }

@@ -46,6 +46,17 @@ struct Bundle {
     signatures: Vec<Value>,
 }
 
+pub(super) fn dispatch_wix_light() -> Result<Option<i32>> {
+    #[cfg(windows)]
+    {
+        windows::dispatch_wix_light()
+    }
+    #[cfg(not(windows))]
+    {
+        Ok(None)
+    }
+}
+
 pub(super) fn execute(id: &str, packages: &Path) -> Result<()> {
     let (root, target, source) = admission(
         id,
