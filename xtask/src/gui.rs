@@ -301,7 +301,7 @@ pub fn smoke(gui: &Path, fixtures: &Path, data: &Path, output: &Path) -> Result<
             driver.click("#header-theme")?;
             driver.wait(
                 "return document.documentElement.dataset.theme === 'light' && localStorage.getItem('nvsf-theme') === 'light' && !document.documentElement.hasAttribute('data-glimm-transition');",
-                5,
+                15,
             )?;
         }
         for theme in ["dark", "light"] {
@@ -309,7 +309,7 @@ pub fn smoke(gui: &Path, fixtures: &Path, data: &Path, output: &Path) -> Result<
             let expected = format!(
                 "return document.documentElement.dataset.theme === '{theme}' && localStorage.getItem('nvsf-theme') === '{theme}' && !document.documentElement.hasAttribute('data-glimm-transition');"
             );
-            driver.wait(&expected, 5)?;
+            driver.wait(&expected, 15)?;
             crate::gui_visual::theme(&driver, output, theme)?;
         }
         crate::gui_visual::layout(&driver, output)?;

@@ -231,12 +231,19 @@ impl GlEngine {
     fn resize(&self, window: &Window) {
         let dpr = window.device_pixel_ratio().clamp(1.0, 2.0);
         let rect = self.canvas.get_bounding_client_rect();
-        let w = ((rect.width() * dpr).round() as u32).max(1);
-        let h = ((rect.height() * dpr).round() as u32).max(1);
+        // Limit software rasterization without shrinking the on-screen canvas.
+        let scale = dpr.min(640.0 / rect.width().max(rect.height()));
+        let w = ((rect.width() * scale).round() as u32).max(1);
+        let h = ((rect.height() * scale).round() as u32).max(1);
         if self.canvas.width() != w || self.canvas.height() != h {
             self.canvas.set_width(w);
             self.canvas.set_height(h);
-            self.gl.viewport(0, 0, w as i32, h as i32);
+            self.gl.viewport(
+                0,
+                0,
+                self.canvas.width() as i32,
+                self.canvas.height() as i32,
+            );
         }
     }
 
