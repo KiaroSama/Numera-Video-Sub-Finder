@@ -8,7 +8,10 @@ use std::{
 pub fn verify(driver: &Driver, output: &Path) -> Result<()> {
     let original = driver.script(
         r#"
-        const select = document.querySelector('#language');
+        const select = document.querySelector('#language'), input = document.querySelector('#language-search');
+        if(!select||!input||window.__nvsfLanguageFocusAudit)
+            throw new Error('Language focus witness could not acquire its original input');
+        window.__nvsfLanguageFocusAudit={input,phase:'initial',mouse:[]};
         return {language: select.value, options: select.options.length};
         "#,
     )?;
@@ -66,9 +69,25 @@ pub fn verify(driver: &Driver, output: &Path) -> Result<()> {
             return Err(format!("Unmatched language search changed selection: {no_match}").into());
         }
         receipts.push(checkpoint(driver, "no-match", "fa")?);
-        driver.click("button[aria-label='Clear language search']")?;
+        driver.script("window.__nvsfLanguageFocusAudit.phase='clear-after-blur';document.querySelector('#device').focus();return true;")?;
+        let before_clear = state(driver)?;
+        if before_clear["activeId"] != "device"
+            || before_clear["focused"] != false
+            || before_clear["query"] != "zzzz-no-language"
+            || before_clear["expanded"] != "false"
+        {
+            return Err(format!(
+                "Clear-button setup did not retain the blurred query: {before_clear}"
+            )
+            .into());
+        }
+        let clear_mouse = mouse_sequence(
+            driver,
+            "button[aria-label='Clear language search']",
+            "clear-button",
+        )?;
         driver.wait(
-            "return document.querySelector('#language-search')?.value === '';",
+            "const input=document.querySelector('#language-search');return input?.value === '' && input.getAttribute('aria-expanded')==='false' && document.activeElement===input;",
             5,
         )?;
         let cleared = state(driver)?;
@@ -102,7 +121,7 @@ pub fn verify(driver: &Driver, output: &Path) -> Result<()> {
         query(driver, "chinese vertical")?;
         key(driver, "ArrowDown", false)?;
         key(driver, "Enter", false)?;
-        driver.wait("return document.querySelector('#language')?.value === 'chi_tra_vert' && document.querySelector('#language-search')?.value === '';", 5)?;
+        driver.wait("const input=document.querySelector('#language-search');return document.querySelector('#language')?.value === 'chi_tra_vert' && input?.value === '' && input.getAttribute('aria-expanded')==='false' && document.activeElement===input;", 5)?;
         let committed = state(driver)?;
         assert_selection(&committed, "chi_tra_vert", &original)?;
         receipts.push(checkpoint(
@@ -112,8 +131,8 @@ pub fn verify(driver: &Driver, output: &Path) -> Result<()> {
         )?);
 
         query(driver, "فارسی")?;
-        driver.click("#language-option-fa")?;
-        driver.wait("return document.querySelector('#language')?.value === 'fa' && document.querySelector('#language-search')?.value === '';", 5)?;
+        let option_mouse = mouse_sequence(driver, "#language-option-fa", "language-option")?;
+        driver.wait("const input=document.querySelector('#language-search');return document.querySelector('#language')?.value === 'fa' && input?.value === '' && input.getAttribute('aria-expanded')==='false' && document.activeElement===input;", 5)?;
         let pointer_choice = state(driver)?;
         assert_selection(&pointer_choice, "fa", &original)?;
         if pointer_choice["focused"] != true {
@@ -128,27 +147,78 @@ pub fn verify(driver: &Driver, output: &Path) -> Result<()> {
         if tab["expanded"] != "false" || tab["query"] != "japanese" {
             return Err(format!("Tab did not close search without committing: {tab}").into());
         }
+        query(driver, "japanese")?;
+        driver.script("window.__nvsfLanguageFocusAudit.phase='ordinary-blur';document.querySelector('#device').focus();return true;")?;
+        let blurred = state(driver)?;
+        assert_selection(&blurred, "fa", &original)?;
+        if blurred["focused"] != false
+            || blurred["activeId"] != "device"
+            || blurred["expanded"] != "false"
+            || blurred["query"] != "japanese"
+        {
+            return Err(format!(
+                "Ordinary blur stole focus or lost the uncommitted query: {blurred}"
+            )
+            .into());
+        }
         driver.select(
             "#language",
             original["language"]
                 .as_str()
                 .ok_or("Missing original language")?,
         )?;
+        driver.script("window.__nvsfLanguageFocusAudit.phase='navigation-away';return true;")?;
         driver.click("nav[aria-label='Workspace navigation'] .nav-item:nth-of-type(2)")?;
         driver.click("[data-testid=queue-refresh]")?;
-        driver.wait("return document.querySelector('[data-testid=queue-refresh]')?.disabled === false && document.querySelectorAll('.queue-row').length === 0;", 5)?;
+        driver.wait("return document.querySelector('h1')?.textContent==='Queue' && document.querySelector('[data-testid=queue-refresh]')?.disabled === false && document.querySelectorAll('.queue-row').length === 0;", 5)?;
+        let navigation_away = state(driver)?;
+        if navigation_away["focused"] != false
+            || navigation_away["stableInput"] != true
+            || navigation_away["inputVisible"] != false
+        {
+            return Err(format!(
+                "Navigation focused or replaced the hidden language input: {navigation_away}"
+            )
+            .into());
+        }
+        driver.script("window.__nvsfLanguageFocusAudit.phase='navigation-return';return true;")?;
         driver.click("nav[aria-label='Workspace navigation'] .nav-item:nth-of-type(1)")?;
-        driver.wait("return document.querySelector('.source-frame')?.naturalWidth > 0 && document.querySelector('#extract-start')?.disabled === false;", 10)?;
+        driver.wait("return document.querySelector('h1')?.textContent==='Extract' && document.querySelector('.source-frame')?.naturalWidth > 0 && document.querySelector('#extract-start')?.disabled === false;", 10)?;
+        let navigation_return = state(driver)?;
+        if navigation_return["focused"] != false
+            || navigation_return["stableInput"] != true
+            || navigation_return["inputVisible"] != true
+            || navigation_return["expanded"] != "false"
+        {
+            return Err(format!(
+                "Returning to Extract stole focus or reopened the popup: {navigation_return}"
+            )
+            .into());
+        }
         Ok(json!({
             "query": query_state, "no_match": no_match, "cleared": cleared,
+            "before_clear": before_clear, "clear_mouse": clear_mouse, "option_mouse": option_mouse,
             "listbox_scroll": scrolled, "scroll_bounds": after_scroll,
             "composition_event": composition, "navigation": moved, "cancelled": cancelled,
             "committed": committed, "pointer_choice": pointer_choice, "tab": tab,
+            "ordinary_blur": blurred, "navigation_away": navigation_away, "navigation_return": navigation_return,
             "native_queue_receipts": receipts,
-            "physical_ime_and_native_tab_traversal_verified": false
+            "mouse_method": "programmatic cancelable mousedown, conditional default focus, mouseup and click",
+            "physical_pointer_verified": false, "physical_ime_and_native_tab_traversal_verified": false
         }))
     })();
-    let receipt = result?;
+    let diagnostic = result
+        .as_ref()
+        .err()
+        .map(|_| state(driver).unwrap_or_else(|error| json!({"snapshot_error":error.to_string()})));
+    let cleanup = driver.script("delete window.__nvsfLanguageFocusAudit;return true;");
+    let receipt = result.map_err(|error| {
+        format!(
+            "Language witness failed: {error}; diagnostic={}",
+            diagnostic.unwrap_or(Value::Null)
+        )
+    })?;
+    cleanup?;
     std::fs::write(
         output.join("language-selection.json"),
         serde_json::to_vec_pretty(&receipt)?,
@@ -156,13 +226,60 @@ pub fn verify(driver: &Driver, output: &Path) -> Result<()> {
     Ok(())
 }
 
+fn mouse_sequence(driver: &Driver, selector: &str, phase: &str) -> Result<Value> {
+    // The pinned driver's click endpoint focuses the target after its click handler.
+    // Keep the browser's default-focus decision before click, honoring cancellation.
+    let receipt = driver.script(&format!(
+        r#"
+        const audit=window.__nvsfLanguageFocusAudit;
+        audit.phase={phase};
+        const target=document.querySelector({selector}),input=document.querySelector('#language-search');
+        const active=()=>({{id:document.activeElement?.id||null,tag:document.activeElement?.tagName||null}});
+        const receipt={{phase:audit.phase,selector:{selector},before:active(),
+            targetConnectedBefore:target?.isConnected===true,disabled:target?.matches(':disabled')===true,
+            hiddenAncestor:!!target?.closest('[hidden]'),mousedownCancelled:null,defaultFocusApplied:null}};
+        audit.mouse.push(receipt);
+        if(!receipt.targetConnectedBefore||receipt.disabled||receipt.hiddenAncestor)
+            throw new Error('Programmatic mouse target is missing, disconnected, disabled or hidden');
+        target.scrollIntoView({{block:'nearest',inline:'nearest'}});
+        const rect=target.getBoundingClientRect(),style=getComputedStyle(target);
+        receipt.visible=!!target.getClientRects().length&&rect.width>0&&rect.height>0&&style.visibility==='visible'&&style.display!=='none';
+        if(!receipt.visible)
+            throw new Error('Programmatic mouse target has no visible hit area');
+        const options={{bubbles:true,cancelable:true,view:window,button:0,clientX:rect.left+rect.width/2,clientY:rect.top+rect.height/2}};
+        const down=new MouseEvent('mousedown',{{...options,buttons:1}});
+        const defaultFocus=target.dispatchEvent(down);
+        receipt.mousedownCancelled=down.defaultPrevented;receipt.defaultFocusApplied=defaultFocus;
+        if(defaultFocus)target.focus();
+        receipt.afterDown=active();
+        target.dispatchEvent(new MouseEvent('mouseup',{{...options,buttons:0}}));
+        target.click();
+        Object.assign(receipt,{{afterClick:active(),
+            inputConnected:input?.isConnected===true,stableInput:input===audit.input,
+            focusedAfterClick:document.activeElement===input,targetConnectedAfterClick:target.isConnected}});
+        return receipt;
+        "#,
+        selector = serde_json::to_string(selector)?,
+        phase = serde_json::to_string(phase)?,
+    ))?;
+    if receipt["mousedownCancelled"] != true
+        || receipt["defaultFocusApplied"] != false
+        || receipt["inputConnected"] != true
+        || receipt["stableInput"] != true
+        || receipt["focusedAfterClick"] != true
+    {
+        return Err(format!("Language mouse sequence violated focus ownership: {receipt}").into());
+    }
+    Ok(receipt)
+}
+
 fn query(driver: &Driver, value: &str) -> Result<()> {
-    driver.script(&format!("const input=document.querySelector('#language-search');input.focus();input.value={};input.dispatchEvent(new Event('input',{{bubbles:true}}));return true;", serde_json::to_string(value)?))?;
+    driver.script(&format!("window.__nvsfLanguageFocusAudit.phase='query';const input=document.querySelector('#language-search');input.focus();input.value={};input.dispatchEvent(new Event('input',{{bubbles:true}}));return true;", serde_json::to_string(value)?))?;
     driver.wait(&format!("return document.querySelector('#language-search')?.value === {} && document.querySelector('#language-search')?.getAttribute('aria-expanded') === 'true';", serde_json::to_string(value)?), 5)
 }
 
 fn key(driver: &Driver, value: &str, composing: bool) -> Result<()> {
-    driver.script(&format!("document.querySelector('#language-search').dispatchEvent(new KeyboardEvent('keydown',{{key:{},isComposing:{composing},bubbles:true,cancelable:true}}));return true;", serde_json::to_string(value)?))?;
+    driver.script(&format!("window.__nvsfLanguageFocusAudit.phase='keyboard '+{};document.querySelector('#language-search').dispatchEvent(new KeyboardEvent('keydown',{{key:{},isComposing:{composing},bubbles:true,cancelable:true}}));return true;", serde_json::to_string(value)?,serde_json::to_string(value)?))?;
     Ok(())
 }
 
@@ -170,12 +287,18 @@ fn state(driver: &Driver) -> Result<Value> {
     driver.script(
         r#"
         const input = document.querySelector('#language-search'), select = document.querySelector('#language');
-        const active = input.getAttribute('aria-activedescendant');
-        const controlled = document.getElementById(input.getAttribute('aria-controls'));
+        const audit = window.__nvsfLanguageFocusAudit, focused = document.activeElement;
+        const active = input?.getAttribute('aria-activedescendant');
+        const controlled = input && document.getElementById(input.getAttribute('aria-controls'));
         return {
-            query: input.value, selected: select.value, options: select.options.length,
-            role: input.getAttribute('role'), autocomplete: input.getAttribute('aria-autocomplete'),
-            expanded: input.getAttribute('aria-expanded'), active,
+            phase: audit?.phase, activeId: focused?.id || null, activeTag: focused?.tagName || null,
+            documentFocused: document.hasFocus(), inputConnected: input?.isConnected === true,
+            inputVisible: !!input?.getClientRects().length, route: document.querySelector('h1')?.textContent,
+            originalInputConnected: audit?.input?.isConnected === true, stableInput: input === audit?.input,
+            mouse: audit?.mouse ?? [],
+            query: input?.value, selected: select?.value, options: select?.options.length,
+            role: input?.getAttribute('role'), autocomplete: input?.getAttribute('aria-autocomplete'),
+            expanded: input?.getAttribute('aria-expanded'), active,
             controlledRole: controlled?.getAttribute('role') ?? null,
             activeSelected: active ? document.getElementById(active)?.getAttribute('aria-selected') : null,
             focused: document.activeElement === input,
@@ -187,7 +310,11 @@ fn state(driver: &Driver) -> Result<Value> {
 }
 
 fn assert_selection(state: &Value, expected: &str, original: &Value) -> Result<()> {
-    if state["selected"] != expected || state["options"] != original["options"] {
+    if state["selected"] != expected
+        || state["options"] != original["options"]
+        || state["stableInput"] != true
+        || state["inputConnected"] != true
+    {
         return Err(
             format!("Committed language or full catalogue changed unexpectedly: {state}").into(),
         );
