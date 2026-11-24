@@ -171,7 +171,7 @@ pub(crate) fn RoiCanvas(
                 <div class="roi" class:excluded=excluded class:editable=editor
                     class:selected=move ||editor&&ui.studio.roi.get()==Some(id)
                     style=move ||helpers::region_style(if editor {displayed(ui,id,rect)} else {rect})
-                    on:mousedown:undelegated=move |e|if editor {begin_edit(ui,bounds,&e,id,(0,0))}>
+                    on:mousedown=move |e|if editor {begin_edit(ui,bounds,&e,id,(0,0))}>
                     {if editor {
                         let name = if excluded {format!("Select exclusion {}",index+1)} else {format!("Select region {}",index+1)};
                         view! {<button type="button" class="roi-pick" aria-label=name aria-pressed=move ||ui.studio.roi.get()==Some(id)
@@ -179,7 +179,7 @@ pub(crate) fn RoiCanvas(
                     } else {view! {<span class="roi-label">{label}</span>}.into_any()}}
                     {editor.then(||HANDLES.into_iter().map(|(name,edges)|view! {
                         <div class="roi-handle" data-handle=name aria-hidden="true"
-                            on:mousedown:undelegated=move |e|begin_edit(ui,bounds,&e,id,edges)></div>
+                            on:mousedown=move |e|begin_edit(ui,bounds,&e,id,edges)></div>
                     }).collect_view())}
                 </div>
             }
@@ -188,7 +188,7 @@ pub(crate) fn RoiCanvas(
     view! {
         <div class="frame" class:editable=editor node_ref=bounds
             style=move ||ui.source.with(|s|s.as_ref().map(|s|format!("--frame-ratio:{};--zoom-width:{}%", f64::from(s.media.width.max(1))/f64::from(s.media.height.max(1)),ui.studio.zoom.get())).unwrap_or_default())
-            on:mousedown:undelegated=move |e| {
+            on:mousedown=move |e| {
                 if editor && e.button()==0 && !ui.closing.get_untracked() && let Some(point)=frame_point(bounds,&e) {
                     ui.studio.roi.set(None);
                     ui.studio.roi_drag.set(Some(Drag {gesture:Gesture::Draw(exclusion.get_untracked()), start:point,current:point}));
@@ -203,7 +203,7 @@ pub(crate) fn RoiCanvas(
                     Some(GUIDES.into_iter().map(|(name,edges)|view! {
                         <div class="roi-guide" class:vertical={edges.0 != 0} data-guide=name aria-hidden="true"
                             style=move ||guide_style(displayed(ui,id,rect),edges)
-                            on:mousedown:undelegated=move |e|begin_edit(ui,bounds,&e,id,edges)></div>
+                            on:mousedown=move |e|begin_edit(ui,bounds,&e,id,edges)></div>
                     }).collect_view())
                 }}
                 {move || {
@@ -238,10 +238,10 @@ pub(crate) fn Regions(ui: Ui) -> impl IntoView {
                         on:click=move |_|ui.studio.roi.set(Some(id))>{format!("{kind} {number}")}</button>
                     <input aria-label=field prop:value=format!("{:.4},{:.4},{:.4},{:.4}",rect.x,rect.y,rect.width,rect.height)
                         on:focus=move |_|ui.studio.roi.set(Some(id))
-                        on:change=move |e|match event_target_value(&e).parse::<Rect>() {
+                        on:change={move |e|match event_target_value(&e).parse::<Rect>() {
                             Ok(rect)=>ui.update_region(id,rect),
                             Err(error)=>ui.error.set(Some(error.to_string())),
-                        }/>
+                        }}/>
                     <button type="button" aria-label=remove disabled=remove_disabled on:click=move |_|{ui.remove_region(id);}>"Remove"</button>
                 </div>
             }
@@ -258,10 +258,10 @@ pub(crate) fn Regions(ui: Ui) -> impl IntoView {
                 <label for="new-region" class="sr-only">"New normalized region coordinates"</label>
                 <input id="new-region" prop:value=move ||value.get() on:input=move |e|value.set(event_target_value(&e))/>
                 <label class="check"><input type="checkbox" on:change=move |e|exclude.set(event_target_checked(&e))/><span>"Exclude"</span></label>
-                <button type="button" on:click=move |_|match value.get_untracked().parse::<Rect>() {
+                <button type="button" on:click={move |_|match value.get_untracked().parse::<Rect>() {
                     Ok(rect)=>ui.add_region(exclude.get_untracked(),rect),
                     Err(error)=>ui.error.set(Some(error.to_string())),
-                }>"Add region"</button>
+                }}>"Add region"</button>
             </div>
         </details>
     }

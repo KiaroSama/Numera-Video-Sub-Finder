@@ -40,7 +40,7 @@ pub fn Extract(ui: Ui) -> impl IntoView {
                 aria-orientation="vertical" aria-controls="extract-inspector" aria-valuemin="260" aria-valuemax="620"
                 aria-valuenow=move ||width.get().to_string()
                 on:mousedown=move |event|if event.button()==0 {event.prevent_default();drag.set(Some((event.client_x(),width.get_untracked().min(max_width()))));}
-                on:keydown:undelegated=move |event| {
+                on:keydown=move |event| {
                     let next=match event.key().as_str() {
                         "ArrowLeft"=>width.get_untracked()+24,"ArrowRight"=>width.get_untracked()-24,
                         "Home"=>260,"End"=>max_width(),_=>return,
@@ -61,7 +61,7 @@ pub fn Extract(ui: Ui) -> impl IntoView {
                             aria-label="Search subtitle language"
                             prop:value=move || lang_query.get()
                             on:input=move |e| lang_query.set(event_target_value(&e))
-                            on:keydown:undelegated=move |e: web_sys::KeyboardEvent| {
+                            on:keydown=move |e: web_sys::KeyboardEvent| {
                                 if e.is_composing() || e.key_code() == 229 {return;}
                                 if e.key() == "Escape" && !lang_query.get_untracked().is_empty() {
                                     e.prevent_default();

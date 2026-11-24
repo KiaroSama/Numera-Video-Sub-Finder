@@ -1,7 +1,6 @@
 use crate::{helpers, ipc, roi_editor::RoiCanvas, state::Ui};
 use gloo_timers::callback::Interval;
 use leptos::prelude::*;
-use serde_json::json;
 use wasm_bindgen_futures::spawn_local;
 
 const ZOOM: [u32; 5] = [100, 150, 200, 300, 400];
