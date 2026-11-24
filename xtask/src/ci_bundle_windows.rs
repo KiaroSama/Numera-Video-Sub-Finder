@@ -256,7 +256,7 @@ impl Bundle {
                 None,
             )?;
             for name in ci_crt::parse_release_crt_imports(&output)? {
-                if !known.insert(name.clone()) {
+                if !known.insert(name.to_ascii_lowercase()) {
                     continue;
                 }
                 if known.len() > 32 {
@@ -274,7 +274,13 @@ impl Bundle {
                 } else {
                     helpers::copy(&dll, &dest)?;
                 }
-                self.resource(&dest, &name)?;
+                if !self
+                    .resources
+                    .values()
+                    .any(|existing| existing.eq_ignore_ascii_case(&name))
+                {
+                    self.resource(&dest, &name)?;
+                }
                 queue.push_back(dest);
             }
         }
