@@ -41,21 +41,30 @@ pub fn verify(driver: &Driver, output: &Path) -> Result<()> {
     }
 
     // 2. ROI live drag preview (.roi-draft), 8 resize handles, 4 separating guides, and Extract Undo/Redo.
-    let roi = driver.script(
+    let drag_start = driver.script(
         "const f=document.querySelector('.frame');if(!f)return {err:'missing frame'};\
          const r=f.getBoundingClientRect();\
          const x1=r.left+r.width*0.18,y1=r.top+r.height*0.18,x2=r.left+r.width*0.48,y2=r.top+r.height*0.36;\
          const before=document.querySelectorAll('.roi:not(.excluded)').length;\
          f.dispatchEvent(new MouseEvent('mousedown',{bubbles:true,button:0,clientX:x1,clientY:y1}));\
          window.dispatchEvent(new MouseEvent('mousemove',{bubbles:true,button:0,clientX:x2,clientY:y2}));\
+         return {before,x2,y2};",
+    )?;
+    if drag_start.get("err").is_some() {
+        return Err(format!("ROI drag setup failed: {drag_start}").into());
+    }
+    driver.wait("return !!document.querySelector('.roi-draft');", 5)?;
+    let roi = driver.script(
+        "const f=document.querySelector('.frame'),r=f.getBoundingClientRect();\
+         const x2=r.left+r.width*0.48,y2=r.top+r.height*0.36;\
          const draftShown=!!document.querySelector('.roi-draft');\
          window.dispatchEvent(new MouseEvent('mouseup',{bubbles:true,button:0,clientX:x2,clientY:y2}));\
-         return {before,draftShown};",
+         return {draftShown};",
     )?;
     if roi["draftShown"] != true {
         return Err(format!("ROI rubber-band live drag preview did not appear: {roi}").into());
     }
-    let before_count = roi["before"].as_u64().unwrap_or(1);
+    let before_count = drag_start["before"].as_u64().unwrap_or(1);
     let wait_added = format!(
         "return document.querySelectorAll('.roi:not(.excluded)').length === {};",
         before_count + 1
