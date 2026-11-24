@@ -4,6 +4,14 @@ All application compilation and execution checks run in GitHub Actions on the ex
 
 Exact-SHA checkpoints below retain their original target counts. Those historical counts do not expand the current four-target matrix.
 
+## Loom dependency identity in evidence
+
+The Loom runner now records the dependency resolved by `cargo pkgid --frozen --manifest-path ci/loom/Cargo.toml loom` after the successful locked model execution. The query uses its own 30-second wall/10-second idle guard, retains the bounded package-ID stdout, and requires both child cleanup receipts. The report derives `loom_version` from that Cargo identity and includes the unchanged lockfile's SHA256. Missing, ambiguous, malformed or changed identities and report-write failures reject success; no stale version literal is substituted. The model's original 180/60 guard, assertions, execution count and source hash remain unchanged.
+
+The fuzz runner applies the same rule to `libfuzzer_sys` using its pinned nightly and existing build lockfile. It retains and hashes the guarded package-ID stdout under `fuzz/logs`, leaves the version null until observed, and preserves all real instrumentation, seed, campaign and cleanup gates. This prevents future drift of a currently correct 0.4.13 report field; it does not allege a mismatch in the prior fuzz result.
+
+[Run 121](https://github.com/KiaroSama/Numera-Video-Sub-Finder/actions/runs/45504525877) on `7f08acdafd751e4582efd4b26e27a4cd150f4f11` executed 191 models with the locked Loom 0.7.3, but its old report incorrectly labeled the dependency 0.7.2. That is a report-metadata defect, not a failed model assertion. The replacement runner requires its own exact-source hosted verification. The original Loom 0.7.2 descriptions in the historical checkpoints below refer to their original implementation, not the current dependency. See the primary [Cargo package-ID command](https://doc.rust-lang.org/cargo/commands/cargo-pkgid.html) and [identity grammar](https://doc.rust-lang.org/cargo/reference/pkgid-spec.html).
+
 ## Latest verified baseline: v0.5.0 MSI, icons and qualification limits
 
 [Final verification 116](https://github.com/KiaroSama/Numera-Video-Sub-Finder/actions/runs/45359453941) passed all four native targets and the portable, dependency and source-analysis lanes on exact `b997df7c958d707554108b8aee4b870c8ae58267`. Its native aggregate checked all 54 exact-source report predicates. The Windows x64/ARM64 pipeline built and inspected the MSI/ZIP payloads, verified embedded icon bytes, and signed and verified the portable GUI/CLI, marker-patched MSI GUI and final MSI using the owner's development identity. This replaces the earlier NOT_RUN signing status for that source; later source changes still require their own manual exact-SHA verification.

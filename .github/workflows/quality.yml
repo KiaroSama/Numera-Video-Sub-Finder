@@ -101,6 +101,7 @@ jobs:
           path: |
             .ci-work/loom/loom-report.json
             .ci-work/loom/model.stdout
+            .ci-work/loom/loom-package-id.stdout
             .ci-work/loom/loom_*.log
             .ci-work/logs/
           if-no-files-found: error
