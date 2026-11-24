@@ -330,7 +330,7 @@ pub(crate) fn Preview(ui: Ui, #[prop(optional)] editor: bool) -> impl IntoView {
     };
     let disabled = move || !ui.preview_controls_available();
     view! {
-        <div class="preview-shell" aria-busy=move ||ui.preview_busy.get()||ui.studio.initial.get()
+        <div class="preview-shell" aria-busy=move ||if ui.preview_busy.get()||ui.studio.initial.get(){"true"}else{"false"}
             data-displayed-time-ms=move || ui.studio.transport.with(|transport| transport.displayed()).map(|time| time.to_string())
             data-frame-duration-ms=move || ui.studio.frame_duration.get().map(|duration| duration.to_string())>
             <Show when=move || (editor||ui.review_source_linked())&&!ui.preview_url.get().is_empty() fallback=move ||view! {

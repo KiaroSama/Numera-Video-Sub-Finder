@@ -73,6 +73,25 @@ pub fn theme(driver: &Driver, output: &Path, name: &str) -> Result<()> {
     Ok(())
 }
 
+pub fn cue_selection(driver: &Driver, output: &Path) -> Result<()> {
+    let mut states = Vec::new();
+    for selected in [0, 1, 0] {
+        driver.click(&format!(".cue-row:nth-of-type({})", selected + 1))?;
+        driver.wait(
+            &format!(
+                "const rows=Array.from(document.querySelectorAll('.cue-row'));return rows.length>=2&&rows.every((row,index)=>row.getAttribute('aria-pressed')===(index==={selected}?'true':'false')&&row.classList.contains('selected')===(index==={selected}));"
+            ),
+            5,
+        )?;
+        states.push(driver.script("return Array.from(document.querySelectorAll('.cue-row'),row=>({cue:row.querySelector('.cue-number')?.textContent,pressed:row.getAttribute('aria-pressed')}));")?);
+    }
+    std::fs::write(
+        output.join("cue-aria-state.json"),
+        serde_json::to_vec_pretty(&states)?,
+    )?;
+    Ok(())
+}
+
 pub fn preview_navigation(driver: &Driver, output: &Path) -> Result<()> {
     driver.select("select[aria-label='Preview zoom']", "400")?;
     driver.wait("const v=document.querySelector('.preview-viewport'),f=document.querySelector('.frame');return v&&f&&f.getBoundingClientRect().width>v.clientWidth*3.95;", 5)?;

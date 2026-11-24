@@ -18,6 +18,42 @@ fn source_pts_and_duration_preserve_vfr_nonzero_and_negative_origins() {
 }
 
 #[test]
+fn fractional_frame_durations_reach_the_source_interval_endpoints() {
+    for (rate, intervals) in [
+        (24, [(0, 41), (41, 42), (83, 42)]),
+        (60, [(0, 16), (16, 17), (33, 17)]),
+    ] {
+        for origin in [-i64::from(rate) * 5, -1, 0, 1, i64::from(rate) * 5] {
+            for declared_origin in [Some(origin), None] {
+                let mut clock = PresentationClock::new(declared_origin, Rational(1, rate)).unwrap();
+                for (offset, expected) in [0, 1, 2].into_iter().zip(intervals) {
+                    assert_eq!(
+                        clock.observe(origin + offset, 1).unwrap(),
+                        Some(expected),
+                        "rate={rate}, origin={origin}, declared={declared_origin:?}, offset={offset}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn source_frame_end_overflow_is_rejected_before_duration_publication() {
+    let mut clock = PresentationClock::new(Some(i64::MAX - 1), Rational(1, 1_000_000)).unwrap();
+    assert_eq!(clock.observe(i64::MAX - 1, 1).unwrap(), Some((0, 1)));
+    assert!(clock.observe(i64::MAX, 1).is_err());
+
+    let mut relative = PresentationClock::new(Some(-1), Rational(1, 1_000_000)).unwrap();
+    assert!(relative.observe(i64::MAX, 0).is_err());
+    let mut wide_ticks = PresentationClock::new(Some(-1), Rational(1, 2_000_000)).unwrap();
+    assert_eq!(
+        wide_ticks.observe(i64::MAX, 0).unwrap(),
+        Some((4_611_686_018_427_387, 40))
+    );
+}
+
+#[test]
 fn seek_preroll_is_discarded_without_rebasing_the_source_timeline() {
     let mut clock = PresentationClock::new(Some(5_000), Rational(1, 1_000)).unwrap();
     assert_eq!(clock.observe(4_900, 40).unwrap(), None);

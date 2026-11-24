@@ -365,7 +365,7 @@ pub fn smoke(gui: &Path, fixtures: &Path, data: &Path, output: &Path) -> Result<
         driver.select("#quality", "accurate")?;
         driver.click("#extract-start")?;
         driver.wait("return document.querySelectorAll('.cue-row').length >= 2 && document.querySelector('h1')?.textContent === 'Review';", 120)?;
-        driver.click(".cue-row")?;
+        crate::gui_visual::cue_selection(&driver, output)?;
         driver.wait("return !!document.querySelector('#cue-text') && document.querySelector('[data-testid=load-cue-evidence]')?.disabled===false;", 10)?;
         driver.script("document.querySelector('.crop-evidence').open=true;return true;")?;
         driver.click("[data-testid=load-cue-evidence]")?;
@@ -431,7 +431,7 @@ pub fn smoke(gui: &Path, fixtures: &Path, data: &Path, output: &Path) -> Result<
             )?,
         )?;
         review_operation_guards(&driver, output)?;
-        driver.wait("return document.querySelector('[data-testid=e2e-save-edits]')?.disabled===false && document.querySelector('.preview-shell')?.getAttribute('aria-busy')!=='true';", 15)?;
+        driver.wait("return document.querySelector('[data-testid=e2e-save-edits]')?.disabled===false && document.querySelector('.preview-shell')?.getAttribute('aria-busy')==='false';", 15)?;
         driver.click("[data-testid=e2e-save-edits]")?;
         driver.wait("return Array.from(document.querySelectorAll('[role=status]')).some(e=>e.textContent.includes('Saved ui-en.srt'));", 15)?;
         let exported = std::fs::read_to_string(fixtures.join("ui-en.srt"))?;
@@ -529,7 +529,7 @@ pub fn smoke(gui: &Path, fixtures: &Path, data: &Path, output: &Path) -> Result<
     std::fs::write(
         output.join("gui-report.json"),
         serde_json::to_vec_pretty(
-            &json!({"schema":1,"source_sha":std::env::var("GITHUB_SHA")?,"target":std::env::var("NVSF_TARGET_ID")?,"passed":true,"tests":27,"failed":0,"skipped":0,"profile":"instrumented","proof":["native startup","fixed source admission and source frame","two persisted themes with measured contrast and circular logo","six workspace destinations","narrow and wide layout","programmatic control focus","zoom/pan/reset with normalized source ROI coordinates","default studio shell zero overflow and resizable inspector","interactive ROI live drag preview, 8 resize handles and 4 separating guides","extract undo/redo, source-PTS frame stepping and monotonic playback transport","header save/save-as and shortcuts dialog","content-verified original and selected-frame crop comparison","model catalog IDs and controls","full language catalog and nonpriority extraction choices","automatic update disable persisted through Settings","native diagnostics and unapproved repair guard","actual worker extraction","native close acknowledgement preserves draft/applied revision and blocks shortcuts","Unicode edit and exported bytes","undo without an open project preserves clean review state","native drop event bridge accepts one host grant and refuses replay","pending native recognition blocks draft/apply/undo mutations","later cue edits invalidate an earlier OCR proposal","language search preserves the committed native queue configuration","failed theme transitions retire their canvas and GPU resources","queued source replacement displays the admitted video pixels","delayed native source-A response cannot publish over source B"],"not_proved":["native Tab traversal","physical IME composition","external OS drag gesture","active-extraction review input interaction","production listener absence","real-language quality","positive signed repair/update lifecycle","platform installers"]}),
+            &json!({"schema":1,"source_sha":std::env::var("GITHUB_SHA")?,"target":std::env::var("NVSF_TARGET_ID")?,"passed":true,"tests":28,"failed":0,"skipped":0,"profile":"instrumented","proof":["native startup","fixed source admission and source frame","two persisted themes with measured contrast and circular logo","six workspace destinations","narrow and wide layout","programmatic control focus","zoom/pan/reset with normalized source ROI coordinates","default studio shell zero overflow and resizable inspector","interactive ROI live drag preview, 8 resize handles and 4 separating guides","extract undo/redo, source-PTS frame stepping and monotonic playback transport","header save/save-as and shortcuts dialog","content-verified original and selected-frame crop comparison","model catalog IDs and controls","full language catalog and nonpriority extraction choices","automatic update disable persisted through Settings","native diagnostics and unapproved repair guard","actual worker extraction","native close acknowledgement preserves draft/applied revision and blocks shortcuts","Unicode edit and exported bytes","undo without an open project preserves clean review state","native drop event bridge accepts one host grant and refuses replay","pending native recognition blocks draft/apply/undo mutations","later cue edits invalidate an earlier OCR proposal","language search preserves the committed native queue configuration","failed theme transitions retire their canvas and GPU resources","queued source replacement displays the admitted video pixels","delayed native source-A response cannot publish over source B","explicit busy and selected ARIA states follow native preview, ROI and cue changes"],"not_proved":["native Tab traversal","physical IME composition","external OS drag gesture","active-extraction review input interaction","production listener absence","real-language quality","positive signed repair/update lifecycle","platform installers"]}),
         )?,
     )?;
     Ok(())
@@ -557,7 +557,7 @@ fn drop_ingress(driver: &Driver, output: &Path) -> Result<()> {
     let token = emitted["token"]
         .as_str()
         .ok_or_else(|| format!("Native drop fixture failed: {emitted}"))?;
-    driver.wait("return document.querySelector('.source-frame')?.naturalWidth>0 && Array.from(document.querySelectorAll('[role=status]')).some(e=>e.textContent.includes('Loaded dropped video: en.mp4')) && document.querySelector('.preview-shell')?.getAttribute('aria-busy')!=='true';", 30)?;
+    driver.wait("return document.querySelector('.source-frame')?.naturalWidth>0 && Array.from(document.querySelectorAll('[role=status]')).some(e=>e.textContent.includes('Loaded dropped video: en.mp4')) && document.querySelector('.preview-shell')?.getAttribute('aria-busy')==='false';", 30)?;
     let replay = driver.request(
         reqwest::Method::POST,
         "/execute/async",
@@ -582,7 +582,7 @@ fn drop_ingress(driver: &Driver, output: &Path) -> Result<()> {
 }
 
 fn review_operation_guards(driver: &Driver, output: &Path) -> Result<()> {
-    driver.wait("return document.querySelector('[data-testid=cue-recognize]')?.disabled===false && document.querySelector('.preview-shell')?.getAttribute('aria-busy')!=='true';", 10)?;
+    driver.wait("return document.querySelector('[data-testid=cue-recognize]')?.disabled===false && document.querySelector('.preview-shell')?.getAttribute('aria-busy')==='false';", 10)?;
     let guarded = driver.script("const read=window.__NVSF_REVIEW_STATE__,field=document.querySelector('#cue-text');const before=read(false),text=field.value;document.querySelector('[data-testid=cue-recognize]').click();const pending=read(false);field.value='Rejected pending-operation draft';field.dispatchEvent(new Event('input',{bubbles:true}));window.dispatchEvent(new KeyboardEvent('keydown',{key:'z',ctrlKey:true,bubbles:true,cancelable:true}));document.querySelector('#cue-apply').click();field.value=text;return {before,pending,after:read(false),text};")?;
     if guarded["pending"]["busy"] != true
         || guarded["after"]["busy"] != true

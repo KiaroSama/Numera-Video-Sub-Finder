@@ -85,6 +85,14 @@ pub fn verify(driver: &Driver, output: &Path) -> Result<()> {
         )
         .into());
     }
+    let drawn_pressed = roi_pressed(driver, before_count + 1, before_count)?;
+    driver.click("button[aria-label='Select region 1']")?;
+    let canvas_pressed = roi_pressed(driver, before_count + 1, 0)?;
+    driver.click(&format!(
+        ".region-list .region-row:nth-child({}) .region-select",
+        before_count + 1
+    ))?;
+    let inspector_pressed = roi_pressed(driver, before_count + 1, before_count)?;
 
     // Undo removes the drawn ROI; Redo restores it; second Undo returns to baseline cleanly.
     driver.click("#header-undo")?;
@@ -125,6 +133,7 @@ pub fn verify(driver: &Driver, output: &Path) -> Result<()> {
             "geometry": geom,
             "roi_drag_preview": roi,
             "handles_and_guides": handles_and_guides,
+            "roi_pressed_states": [drawn_pressed, canvas_pressed, inspector_pressed],
             "undo_redo_verified": true,
             "transport_verified": true,
             "transport": transport,
@@ -134,10 +143,20 @@ pub fn verify(driver: &Driver, output: &Path) -> Result<()> {
     Ok(())
 }
 
+fn roi_pressed(driver: &Driver, count: u64, selected: u64) -> Result<serde_json::Value> {
+    driver.wait(
+        &format!(
+            "const groups=['.roi:not(.excluded) .roi-pick','.region-list .region-select'].map(selector=>Array.from(document.querySelectorAll(selector)));return groups.every(buttons=>buttons.length==={count}&&buttons.every((button,index)=>button.getAttribute('aria-pressed')===(index==={selected}?'true':'false')&&button.parentElement.classList.contains('selected')===(index==={selected})));"
+        ),
+        5,
+    )?;
+    driver.script("return {canvas:Array.from(document.querySelectorAll('.roi:not(.excluded) .roi-pick'),button=>button.getAttribute('aria-pressed')),inspector:Array.from(document.querySelectorAll('.region-list .region-select'),button=>button.getAttribute('aria-pressed'))};")
+}
+
 fn frame(driver: &Driver, expected: u64) -> Result<()> {
     driver.wait(
         &format!(
-            "const p=document.querySelector('.preview-shell');return p?.getAttribute('aria-busy')!=='true' && p?.dataset.displayedTimeMs==='{expected}' && p?.dataset.frameDurationMs==='100' && document.querySelector('.source-frame')?.naturalWidth>0;"
+            "const p=document.querySelector('.preview-shell'),image=document.querySelector('.source-frame');return p?.getAttribute('aria-busy')==='false' && p?.dataset.displayedTimeMs==='{expected}' && p?.dataset.frameDurationMs==='100' && image?.complete && image.naturalWidth>0 && document.querySelector('#preview-timeline')?.value==='{expected}' && document.querySelector('#preview-play')?.getAttribute('aria-pressed')==='false';"
         ),
         30,
     )
@@ -176,10 +195,7 @@ fn transport(driver: &Driver) -> Result<serde_json::Value> {
 
     seek(driver, 5500)?;
     driver.click("#preview-play")?;
-    driver.wait(
-        "return document.querySelector('#preview-play')?.getAttribute('aria-pressed')==='false' && document.querySelector('.preview-shell')?.dataset.displayedTimeMs==='5900' && document.querySelector('.preview-shell')?.getAttribute('aria-busy')!=='true';",
-        30,
-    )?;
+    frame(driver, 5900)?;
     let playback = driver.request(
         reqwest::Method::POST,
         "/execute/async",
@@ -196,7 +212,7 @@ fn transport(driver: &Driver) -> Result<serde_json::Value> {
     }
     driver.click("#preview-play")?;
     driver.wait(
-        "return document.querySelector('#preview-play')?.getAttribute('aria-pressed')==='false' && document.querySelector('.preview-shell')?.getAttribute('aria-busy')!=='true';",
+        "const p=document.querySelector('.preview-shell'),image=document.querySelector('.source-frame'),timeline=document.querySelector('#preview-timeline');return document.querySelector('#preview-play')?.getAttribute('aria-pressed')==='false' && p?.getAttribute('aria-busy')==='false' && image?.complete && image.naturalWidth>0 && p?.dataset.displayedTimeMs!==undefined && timeline?.value===p.dataset.displayedTimeMs;",
         30,
     )?;
     let paused = stationary(driver)?;
@@ -207,7 +223,9 @@ fn transport(driver: &Driver) -> Result<serde_json::Value> {
     )?;
     seek(driver, 2500)?;
     let manual_seek = stationary(driver)?;
-    if manual_seek["after"].as_u64() != Some(2500) {
+    if manual_seek["after"]["time"].as_u64() != Some(2500)
+        || manual_seek["after"]["displayed"].as_u64() != Some(2500)
+    {
         return Err(format!("Manual seek did not replace playback: {manual_seek}").into());
     }
     driver.click("#preview-stop")?;
@@ -228,11 +246,37 @@ fn stationary(driver: &Driver) -> Result<serde_json::Value> {
     let result = driver.request(
         reqwest::Method::POST,
         "/execute/async",
-        json!({"script":"const done=arguments[arguments.length-1],before=Number(document.querySelector('#preview-timeline').value);setTimeout(()=>done({before,after:Number(document.querySelector('#preview-timeline').value),playing:document.querySelector('#preview-play').getAttribute('aria-pressed')==='true',displayed:Number(document.querySelector('.preview-shell').dataset.displayedTimeMs)}),350);","args":[]}),
+        json!({"script":r#"
+            const done=arguments[arguments.length-1];
+            const sample=()=>{
+                const preview=document.querySelector('.preview-shell'),image=document.querySelector('.source-frame');
+                return {time:Number(document.querySelector('#preview-timeline')?.value),
+                    displayed:Number(preview?.dataset.displayedTimeMs),
+                    pressed:document.querySelector('#preview-play')?.getAttribute('aria-pressed'),
+                    busy:preview?.getAttribute('aria-busy'),
+                    complete:image?.complete===true&&image.naturalWidth>0,
+                    source:image?.currentSrc};
+            };
+            const before=sample();
+            if(before.pressed!=='false'||before.busy!=='false'||!before.complete||before.time!==before.displayed){
+                done({before,unsettled:true});return;
+            }
+            setTimeout(()=>done({before,after:sample()}),350);
+        "#,"args":[]}),
     )?;
-    if result["before"] != result["after"]
-        || result["playing"] != false
-        || result["after"] != result["displayed"]
+    let before = &result["before"];
+    let after = &result["after"];
+    if before["time"].as_u64().is_none()
+        || before["displayed"].as_u64().is_none()
+        || before["time"] != after["time"]
+        || before["displayed"] != after["displayed"]
+        || before["source"] != after["source"]
+        || [before, after].iter().any(|sample| {
+            sample["pressed"] != "false"
+                || sample["busy"] != "false"
+                || sample["complete"] != true
+                || sample["time"] != sample["displayed"]
+        })
     {
         return Err(format!("Paused or manually sought frame kept advancing: {result}").into());
     }

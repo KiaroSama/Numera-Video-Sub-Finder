@@ -464,7 +464,7 @@ impl Admission<'_> {
         }) {
             return Err("Actual caller executable does not export its Rust ASan runtime.".into());
         }
-        self.tests("native-abi-geometry", callee, None, None)?;
+        self.tests("native-abi-geometry", callee, None, Some(19))?;
         self.tests(
             "callbacks",
             caller,
