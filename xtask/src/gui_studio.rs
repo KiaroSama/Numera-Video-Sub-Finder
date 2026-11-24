@@ -247,7 +247,9 @@ fn transport(driver: &Driver) -> Result<serde_json::Value> {
             && frame["width"] == 640
             && frame["height"] == 360
     }) {
-        return Err(format!("No advancing decoded image loaded during playback: {playback}").into());
+        return Err(
+            format!("No advancing decoded image loaded during playback: {playback}").into(),
+        );
     }
     driver.click("#preview-play")?;
     driver.wait(
@@ -294,9 +296,10 @@ fn transport(driver: &Driver) -> Result<serde_json::Value> {
             .as_u64()
             .is_none_or(|position| position >= 5900)
     {
-        return Err(
-            format!("First Play did not restart the manual endpoint: {manual_end_restart}").into(),
-        );
+        return Err(format!(
+            "First Play did not restart the manual endpoint: {manual_end_restart}"
+        )
+        .into());
     }
     driver.click("#preview-stop")?;
     frame(driver, 0)?;

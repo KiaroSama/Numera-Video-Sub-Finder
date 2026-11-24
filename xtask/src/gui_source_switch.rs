@@ -66,9 +66,10 @@ fn wait_queue_entry(
             return Err(format!("Source-switch queue failed during {phase}: {error}").into());
         }
         if Instant::now() >= deadline {
-            return Err(
-                format!("Source-switch queue deadline during {phase}; entries={entries:?}").into(),
-            );
+            return Err(format!(
+                "Source-switch queue deadline during {phase}; entries={entries:?}"
+            )
+            .into());
         }
         std::thread::park_timeout(Duration::from_millis(50));
     }
