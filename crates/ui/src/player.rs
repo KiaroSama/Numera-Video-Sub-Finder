@@ -54,6 +54,7 @@ impl Ui {
                     now,
                     self.time.get_untracked(),
                     self.config.with_untracked(|c| c.start_ms),
+                    self.duration().unwrap_or(0).saturating_sub(1),
                 )
             });
             if let Some(position) = position {
@@ -77,7 +78,11 @@ impl Ui {
     pub(crate) fn step(self, delta: i64) {
         if self.preview_controls_available() {
             self.studio.playing.set(false);
-            self.seek(self.time.get_untracked().saturating_add_signed(delta));
+            let position = self
+                .studio
+                .transport
+                .with_untracked(|transport| transport.position());
+            self.seek(position.saturating_add_signed(delta));
         }
     }
 

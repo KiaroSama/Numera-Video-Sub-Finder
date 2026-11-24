@@ -67,6 +67,10 @@ impl Transport {
         self.displayed
     }
 
+    pub(crate) fn position(&self) -> u64 {
+        self.position
+    }
+
     pub(crate) fn has_pending(&self) -> bool {
         self.pending_seek.is_some() || self.pending_step.is_some()
     }
@@ -99,18 +103,23 @@ impl Transport {
         }
     }
 
-    pub(crate) fn play(&mut self, now: u64, position: u64, restart_at: u64) -> u64 {
-        let position = if self.ended {
+    pub(crate) fn play(&mut self, now: u64, position: u64, restart_at: u64, end: u64) -> u64 {
+        let awaiting_step = self.pending_step.is_some()
+            || self.active.as_ref().is_some_and(|request| {
+                request.step != 0 && request.epoch == self.epoch && request.intent == self.intent
+            });
+        // Keep the requested endpoint even when the covering frame has an earlier PTS.
+        // A pending frame action owns the next position and must not be replaced by restart.
+        let at_end = self.ended || self.position >= end || position >= end;
+        let position = if !awaiting_step && at_end {
+            let restart_at = if restart_at <= end { restart_at } else { 0 };
             self.seek(restart_at);
             restart_at
         } else {
             position
         };
         self.ended = false;
-        let awaiting_step = self.pending_step.is_some()
-            || self.active.as_ref().is_some_and(|request| {
-                request.step != 0 && request.epoch == self.epoch && request.intent == self.intent
-            });
+        self.position = position;
         self.clock = Some(Clock {
             origin: now,
             position,
@@ -195,6 +204,9 @@ impl Transport {
         let publish = current && time_ms.is_some();
         if publish {
             self.displayed = time_ms;
+            if request.step != 0 {
+                self.position = time_ms.unwrap_or(self.position);
+            }
             if request.step != 0
                 && self.pending_step.is_none()
                 && let Some(clock) = self.clock.as_mut()

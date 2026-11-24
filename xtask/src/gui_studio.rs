@@ -199,7 +199,31 @@ fn transport(driver: &Driver) -> Result<serde_json::Value> {
     let playback = driver.request(
         reqwest::Method::POST,
         "/execute/async",
-        json!({"script":"const done=arguments[arguments.length-1],started=performance.now();document.querySelector('#preview-play').click();setTimeout(()=>done({elapsed:performance.now()-started,position:Number(document.querySelector('#preview-timeline').value),displayed:Number(document.querySelector('.preview-shell').dataset.displayedTimeMs),playing:document.querySelector('#preview-play').getAttribute('aria-pressed')==='true'}),1500);","args":[]}),
+        json!({"script":r#"
+            const done=arguments[arguments.length-1],started=performance.now(),loadedFrames=[];
+            const oldUrl=document.querySelector('.source-frame')?.currentSrc;
+            const onLoad=event=>{
+                const image=event.target;
+                if(!image?.matches?.('.source-frame')||!image.complete||!image.naturalWidth)return;
+                const pts=Number(document.querySelector('.preview-shell')?.dataset.displayedTimeMs);
+                const playing=document.querySelector('#preview-play')?.getAttribute('aria-pressed')==='true';
+                if(!playing||!Number.isFinite(pts)||image.currentSrc!==image.src||image.currentSrc===oldUrl)return;
+                if(loadedFrames.some(frame=>frame.url===image.currentSrc))return;
+                loadedFrames.push({url:image.currentSrc,pts,playing,width:image.naturalWidth,height:image.naturalHeight});
+            };
+            document.addEventListener('load',onLoad,true);
+            document.querySelector('#preview-play').click();
+            setTimeout(()=>{
+                document.removeEventListener('load',onLoad,true);
+                done({
+                    elapsed:performance.now()-started,
+                    position:Number(document.querySelector('#preview-timeline').value),
+                    displayed:Number(document.querySelector('.preview-shell').dataset.displayedTimeMs),
+                    playing:document.querySelector('#preview-play').getAttribute('aria-pressed')==='true',
+                    old_url:oldUrl,loaded_frames:loadedFrames
+                });
+            },1500);
+        "#,"args":[]}),
     )?;
     let elapsed = playback["elapsed"]
         .as_f64()
@@ -209,6 +233,21 @@ fn transport(driver: &Driver) -> Result<serde_json::Value> {
         .ok_or("Missing playback position")?;
     if elapsed < 1450.0 || (position - elapsed).abs() > 400.0 || playback["playing"] != true {
         return Err(format!("Playback did not restart and follow elapsed time: {playback}").into());
+    }
+    let loaded_frames = playback["loaded_frames"]
+        .as_array()
+        .ok_or("Missing decoded playback image loads")?;
+    if !loaded_frames.iter().any(|frame| {
+        frame["playing"] == true
+            && frame["url"].as_str().is_some_and(|url| !url.is_empty())
+            && frame["url"] != playback["old_url"]
+            && frame["pts"]
+                .as_u64()
+                .is_some_and(|pts| pts > 0 && pts < 5900)
+            && frame["width"] == 640
+            && frame["height"] == 360
+    }) {
+        return Err(format!("No advancing decoded image loaded during playback: {playback}").into());
     }
     driver.click("#preview-play")?;
     driver.wait(
@@ -228,6 +267,37 @@ fn transport(driver: &Driver) -> Result<serde_json::Value> {
     {
         return Err(format!("Manual seek did not replace playback: {manual_seek}").into());
     }
+    driver.script(
+        "const timeline=document.querySelector('#preview-timeline');timeline.value='5999';timeline.dispatchEvent(new Event('input',{bubbles:true}));return true;",
+    )?;
+    frame(driver, 5900)?;
+    let manual_end_restart = driver.request(
+        reqwest::Method::POST,
+        "/execute/async",
+        json!({"script":r#"
+            const done=arguments[arguments.length-1];
+            const sample=()=>({
+                position:Number(document.querySelector('#preview-timeline')?.value),
+                displayed:Number(document.querySelector('.preview-shell')?.dataset.displayedTimeMs),
+                playing:document.querySelector('#preview-play')?.getAttribute('aria-pressed')==='true'
+            });
+            const before=sample();
+            document.querySelector('#preview-play').click();
+            setTimeout(()=>done({requested_seek_ms:5999,play_presses:1,before,after:sample()}),0);
+        "#,"args":[]}),
+    )?;
+    if manual_end_restart["before"]["position"] != 5900
+        || manual_end_restart["before"]["displayed"] != 5900
+        || manual_end_restart["before"]["playing"] != false
+        || manual_end_restart["after"]["playing"] != true
+        || manual_end_restart["after"]["position"]
+            .as_u64()
+            .is_none_or(|position| position >= 5900)
+    {
+        return Err(
+            format!("First Play did not restart the manual endpoint: {manual_end_restart}").into(),
+        );
+    }
     driver.click("#preview-stop")?;
     frame(driver, 0)?;
     Ok(json!({
@@ -238,6 +308,7 @@ fn transport(driver: &Driver) -> Result<serde_json::Value> {
         "natural_end_restart_and_clock": playback,
         "paused": paused,
         "manual_seek": manual_seek,
+        "manual_end_restart": manual_end_restart,
         "stop_returned_to_start": true
     }))
 }
