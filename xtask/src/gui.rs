@@ -66,7 +66,46 @@ impl Driver {
                 return Err(format!("Actual GUI error: {error}").into());
             }
             if Instant::now() >= deadline {
-                return Err(format!("GUI predicate deadline: {predicate}").into());
+                let snapshot = self.script(
+                    r#"
+                    const root = document.documentElement;
+                    const button = document.querySelector('#header-theme');
+                    const canvas = document.querySelector('#nvsf-glimm-canvas');
+                    const rect = button?.getBoundingClientRect();
+                    const left = Math.max(0, rect?.left ?? 0);
+                    const right = Math.min(innerWidth, rect?.right ?? 0);
+                    const top = Math.max(0, rect?.top ?? 0);
+                    const bottom = Math.min(innerHeight, rect?.bottom ?? 0);
+                    const hit = left < right && top < bottom
+                        ? document.elementFromPoint((left + right) / 2, (top + bottom) / 2)
+                        : null;
+                    let saved = null, storageError = null;
+                    try { saved = localStorage.getItem('nvsf-theme'); }
+                    catch (error) { storageError = error.name; }
+                    return {
+                        theme: root.getAttribute('data-theme'), saved, storageError,
+                        glimmTransition: root.hasAttribute('data-glimm-transition'),
+                        glimmClip: root.style.getPropertyValue('--glimm-old-clip'),
+                        canvasOpacity: canvas?.style.opacity ?? null,
+                        readyState: document.readyState, visibility: document.visibilityState,
+                        focused: document.hasFocus(), activeId: document.activeElement?.id ?? null,
+                        viewport: [innerWidth, innerHeight], scroll: [scrollX, scrollY],
+                        themeButton: button ? {
+                            pressed: button.getAttribute('aria-pressed'), disabled: button.disabled,
+                            bounds: [rect.x, rect.y, rect.width, rect.height],
+                            hitTag: hit?.localName ?? null, hitId: hit?.id ?? null,
+                            hitButton: button.contains(hit)
+                        } : null,
+                        noticePresent: !!document.querySelector('.notice'),
+                        updateBannerPresent: !!document.querySelector('.update-banner')
+                    };
+                    "#,
+                );
+                let snapshot = match snapshot {
+                    Ok(value) => value.to_string(),
+                    Err(error) => format!("unavailable ({error})"),
+                };
+                return Err(format!("GUI predicate deadline: {predicate}; DOM: {snapshot}").into());
             }
             std::thread::park_timeout(Duration::from_millis(50));
         }

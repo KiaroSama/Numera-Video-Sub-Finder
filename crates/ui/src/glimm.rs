@@ -5,6 +5,7 @@ use crate::helpers::{ease_sweep, sweep_clip_inset};
 use gloo_timers::callback::Timeout;
 use std::{cell::RefCell, rc::Rc};
 use wasm_bindgen::{JsCast, JsValue, closure::Closure};
+use wasm_bindgen_futures::{JsFuture, spawn_local};
 use web_sys::{
     Document, Element, HtmlCanvasElement, HtmlElement, WebGlContextAttributes, WebGlProgram,
     WebGlRenderingContext as Gl, WebGlShader, WebGlUniformLocation, Window,
@@ -114,7 +115,7 @@ struct GlEngine {
 struct SweepState {
     engine: Option<Rc<GlEngine>>,
     generation: u64,
-    raf_id: Option<i32>,
+    frame: Option<(i32, Closure<dyn FnMut(f64)>)>,
     transition: Option<JsValue>,
     deadline: Option<Timeout>,
 }
@@ -297,14 +298,12 @@ fn reduced_motion(window: &Window) -> bool {
         .is_some_and(|m| m.matches())
 }
 
-fn silence_promise(target: &JsValue, prop: &str) {
-    if let Ok(val) = js_sys::Reflect::get(target, &JsValue::from_str(prop))
-        && let Ok(catch_prop) = js_sys::Reflect::get(&val, &JsValue::from_str("catch"))
-        && let Ok(catch_fn) = catch_prop.dyn_into::<js_sys::Function>()
-    {
-        let noop = Closure::once_into_js(|_: JsValue| {});
-        let _ = catch_fn.call1(&val, &noop);
-    }
+fn transition_promise(transition: &JsValue, property: &str) -> Option<JsFuture> {
+    let promise = js_sys::Reflect::get(transition, &property.into())
+        .ok()?
+        .dyn_into::<js_sys::Promise>()
+        .ok()?;
+    Some(JsFuture::from(promise))
 }
 
 fn skip_transition(transition: &JsValue) {
@@ -323,58 +322,41 @@ fn cleanup_dom(root: &Element) {
 }
 
 fn cancel_active(window: &Window, root: &Element) -> u64 {
-    let (raf, prev_vt, prev_deadline, engine, next_gen) = STATE.with(|cell| {
+    let (frame, transition, deadline, engine, next_gen) = STATE.with(|cell| {
         let mut st = cell.borrow_mut();
         st.generation = st.generation.wrapping_add(1);
         (
-            st.raf_id.take(),
+            st.frame.take(),
             st.transition.take(),
             st.deadline.take(),
             st.engine.clone(),
             st.generation,
         )
     });
-    drop(prev_deadline);
-    if let Some(id) = raf {
+    cleanup_dom(root);
+    drop(deadline);
+    if let Some((id, callback)) = frame {
         let _ = window.cancel_animation_frame(id);
+        // A frame can finish the sweep from inside this callback.
+        spawn_local(async move { drop(callback) });
     }
-    if let Some(vt) = prev_vt {
+    if let Some(vt) = transition {
         skip_transition(&vt);
     }
     if let Some(eng) = engine {
         eng.hide();
     }
-    cleanup_dom(root);
     next_gen
 }
 
+fn is_generation(my_gen: u64) -> bool {
+    STATE.with(|cell| cell.borrow().generation == my_gen)
+}
+
 fn finish_generation(window: &Window, root: &Element, my_gen: u64, target: &str) {
-    let finished = STATE.with(|cell| {
-        let mut st = cell.borrow_mut();
-        if st.generation == my_gen {
-            Some((
-                st.raf_id.take(),
-                st.transition.take(),
-                st.deadline.take(),
-                st.engine.clone(),
-            ))
-        } else {
-            None
-        }
-    });
-    if let Some((raf, vt, deadline, engine)) = finished {
-        drop(deadline);
-        if let Some(id) = raf {
-            let _ = window.cancel_animation_frame(id);
-        }
+    if is_generation(my_gen) {
         let _ = root.set_attribute("data-theme", target);
-        if let Some(vt) = vt {
-            skip_transition(&vt);
-        }
-        if let Some(eng) = engine {
-            eng.hide();
-        }
-        cleanup_dom(root);
+        cancel_active(window, root);
     }
 }
 
@@ -421,19 +403,35 @@ pub fn sweep_theme(from: &str, to: &str) {
         let root_cb = root.clone();
         let target = to.to_owned();
         let cb = Closure::once_into_js(move || {
-            let _ = root_cb.set_attribute("data-theme", &target);
+            // skipTransition can still run a pending update callback.
+            if is_generation(my_gen) {
+                let _ = root_cb.set_attribute("data-theme", &target);
+            }
         });
         match vt_fn.call1(&document, &cb) {
             Ok(vt) => {
-                silence_promise(&vt, "updateCallbackDone");
-                silence_promise(&vt, "ready");
-                silence_promise(&vt, "finished");
-                STATE.with(|cell| {
-                    let mut st = cell.borrow_mut();
-                    if st.generation == my_gen {
-                        st.transition = Some(vt);
+                for property in ["updateCallbackDone", "finished"] {
+                    if let Some(promise) = transition_promise(&vt, property) {
+                        spawn_local(async move {
+                            let _ = promise.await;
+                        });
+                    }
+                }
+                let Some(ready) = transition_promise(&vt, "ready") else {
+                    let _ = root.set_attribute("data-theme", to);
+                    cleanup_dom(&root);
+                    skip_transition(&vt);
+                    return;
+                };
+                let win_ready = window.clone();
+                let root_ready = root.clone();
+                let target_ready = to.to_owned();
+                spawn_local(async move {
+                    if ready.await.is_err() {
+                        finish_generation(&win_ready, &root_ready, my_gen, &target_ready);
                     }
                 });
+                STATE.with(|cell| cell.borrow_mut().transition = Some(vt));
                 has_vt = true;
             }
             Err(_) => {
@@ -447,73 +445,56 @@ pub fn sweep_theme(from: &str, to: &str) {
 
     let _ = engine.canvas.style().set_property("opacity", "1");
     let start_ms = now_ms(&window);
-    let step: Rc<RefCell<Option<Closure<dyn FnMut(f64)>>>> = Rc::new(RefCell::new(None));
-    let step_loop = Rc::clone(&step);
     let win_loop = window.clone();
     let root_loop = root.clone();
-    let engine_loop = Rc::clone(&engine);
     let target_loop = to.to_owned();
-
-    *step.borrow_mut() = Some(Closure::new(move |_raf_ts: f64| {
-        let active = STATE.with(|cell| cell.borrow().generation == my_gen);
-        if !active {
-            let _ = step_loop.borrow_mut().take();
+    let step = Closure::new(move |_raf_ts: f64| {
+        if !is_generation(my_gen) {
             return;
         }
         let now = now_ms(&win_loop);
         let raw = ((now - start_ms) / DURATION_MS).clamp(0.0, 1.0);
-        let eased = ease_sweep(raw);
-        if has_vt && let Some(html) = root_loop.dyn_ref::<HtmlElement>() {
-            let _ = html
-                .style()
-                .set_property("--glimm-old-clip", &sweep_clip_inset(eased, rtl));
-        }
-        engine_loop.draw(now, eased as f32, rtl, brightness);
-        if raw < 1.0
-            && let Some(cb_ref) = step_loop.borrow().as_ref()
-            && let Ok(id) = win_loop.request_animation_frame(cb_ref.as_ref().unchecked_ref())
-        {
-            STATE.with(|cell| {
+        if raw < 1.0 {
+            let eased = ease_sweep(raw);
+            if has_vt && let Some(html) = root_loop.dyn_ref::<HtmlElement>() {
+                let _ = html
+                    .style()
+                    .set_property("--glimm-old-clip", &sweep_clip_inset(eased, rtl));
+            }
+            engine.draw(now, eased as f32, rtl, brightness);
+            let scheduled = STATE.with(|cell| {
                 let mut st = cell.borrow_mut();
-                if st.generation == my_gen {
-                    st.raf_id = Some(id);
+                let Some((id, callback)) = &mut st.frame else {
+                    return false;
+                };
+                match win_loop.request_animation_frame(callback.as_ref().unchecked_ref()) {
+                    Ok(next_id) => {
+                        *id = next_id;
+                        true
+                    }
+                    Err(_) => false,
                 }
             });
-            return;
+            if scheduled {
+                return;
+            }
         }
         finish_generation(&win_loop, &root_loop, my_gen, &target_loop);
-        let _ = step_loop.borrow_mut().take();
-    }));
+    });
 
-    let maybe_id = {
-        let guard = step.borrow();
-        guard.as_ref().and_then(|cb_ref| {
-            window
-                .request_animation_frame(cb_ref.as_ref().unchecked_ref())
-                .ok()
-        })
-    };
-    match maybe_id {
-        Some(id) => {
-            let win_timeout = window.clone();
-            let root_timeout = root.clone();
-            let target_timeout = to.to_owned();
-            let step_timeout = Rc::clone(&step);
-            let deadline = Timeout::new(DEADLINE_MS, move || {
-                finish_generation(&win_timeout, &root_timeout, my_gen, &target_timeout);
-                let _ = step_timeout.borrow_mut().take();
-            });
-            STATE.with(|cell| {
-                let mut st = cell.borrow_mut();
-                if st.generation == my_gen {
-                    st.raf_id = Some(id);
-                    st.deadline = Some(deadline);
-                }
-            });
-        }
-        None => {
-            finish_generation(&window, &root, my_gen, to);
-            let _ = step.borrow_mut().take();
-        }
+    if let Ok(id) = window.request_animation_frame(step.as_ref().unchecked_ref()) {
+        let win_timeout = window.clone();
+        let root_timeout = root.clone();
+        let target_timeout = to.to_owned();
+        let deadline = Timeout::new(DEADLINE_MS, move || {
+            finish_generation(&win_timeout, &root_timeout, my_gen, &target_timeout);
+        });
+        STATE.with(|cell| {
+            let mut st = cell.borrow_mut();
+            st.frame = Some((id, step));
+            st.deadline = Some(deadline);
+        });
+    } else {
+        finish_generation(&window, &root, my_gen, to);
     }
 }
