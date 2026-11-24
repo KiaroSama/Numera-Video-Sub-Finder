@@ -8,6 +8,7 @@ enum Action {
     Redo,
     Play,
     Step(i64),
+    Frame(i8),
     SetStart,
     SetEnd,
     DeleteRegion,
@@ -30,8 +31,8 @@ fn shortcut(key: &str, control: bool, shift: bool, editing: bool) -> Option<Acti
         ("z" | "Z", true, false) => Some(Undo),
         ("z" | "Z", true, true) | ("y" | "Y", true, false) => Some(Redo),
         (" ", false, false) => Some(Play),
-        ("ArrowLeft", false, false) => Some(Step(-40)),
-        ("ArrowRight", false, false) => Some(Step(40)),
+        ("ArrowLeft", false, false) => Some(Frame(-1)),
+        ("ArrowRight", false, false) => Some(Frame(1)),
         ("ArrowLeft", false, true) => Some(Step(-1000)),
         ("ArrowRight", false, true) => Some(Step(1000)),
         ("i" | "I", false, false) => Some(SetStart),
@@ -110,7 +111,9 @@ mod browser {
             }
             let extract = ui.route.get_untracked() == "Extract";
             let preview = matches!(ui.route.get_untracked().as_str(), "Extract" | "Review");
-            if event.repeat() && !matches!(action, Action::Step(_) | Action::Zoom(_)) {
+            if event.repeat()
+                && !matches!(action, Action::Step(_) | Action::Frame(_) | Action::Zoom(_))
+            {
                 event.prevent_default();
                 return;
             }
@@ -123,6 +126,7 @@ mod browser {
                 Action::Redo => ui.redo(),
                 Action::Play if preview => ui.toggle_play(),
                 Action::Step(delta) if preview => ui.step(delta),
+                Action::Frame(direction) if preview => ui.step_frame(direction),
                 Action::SetStart if extract => ui.mark_range(false),
                 Action::SetEnd if extract => ui.mark_range(true),
                 Action::DeleteRegion if extract && ui.remove_selected_region() => {}
@@ -214,7 +218,11 @@ mod tests {
         assert_eq!(shortcut(" ", false, false, false), Some(Action::Play));
         assert_eq!(
             shortcut("ArrowLeft", false, false, false),
-            Some(Action::Step(-40))
+            Some(Action::Frame(-1))
+        );
+        assert_eq!(
+            shortcut("ArrowRight", false, false, false),
+            Some(Action::Frame(1))
         );
         assert_eq!(
             shortcut("ArrowRight", false, true, false),

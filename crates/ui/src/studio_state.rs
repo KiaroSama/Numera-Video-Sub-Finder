@@ -18,6 +18,8 @@ pub(crate) struct Studio {
     pub(crate) roi_drag: RwSignal<Option<Drag>>,
     pub(crate) shortcuts: RwSignal<bool>,
     pub(crate) close_open: RwSignal<bool>,
+    pub(crate) transport: RwSignal<crate::transport::Transport>,
+    pub(crate) frame_duration: RwSignal<Option<u64>>,
     history: RwSignal<History<ExtractEdit>>,
     source_generation: RwSignal<u64>,
 }
@@ -32,6 +34,8 @@ impl Studio {
             roi_drag: RwSignal::new(None),
             shortcuts: RwSignal::new(false),
             close_open: RwSignal::new(false),
+            transport: RwSignal::new(crate::transport::Transport::default()),
+            frame_duration: RwSignal::new(None),
             history: RwSignal::new(History::default()),
             source_generation: RwSignal::new(0),
         }
@@ -44,6 +48,9 @@ impl Studio {
     }
 
     pub(crate) fn reset_source(self) {
+        self.transport
+            .update(crate::transport::Transport::reset_source);
+        self.frame_duration.set(None);
         self.source_generation.update(|generation| *generation += 1);
         self.initial.set(false);
         self.playing.set(false);
@@ -63,27 +70,6 @@ impl Ui {
 
     pub(crate) fn open_video(self) {
         self.pick_video(false);
-    }
-
-    pub(crate) fn admit_video(self, source: ipc::Source, initial: bool) {
-        self.studio.reset_source();
-        self.preview_generation
-            .update(|generation| *generation += 1);
-        let old = self.preview_url.get_untracked();
-        self.preview_url.set(String::new());
-        if !old.is_empty() {
-            let _ = web_sys::Url::revoke_object_url(&old);
-        }
-        self.source.set(Some(source));
-        self.time.set(0);
-        if !initial || ipc::e2e_mode() {
-            self.seek(0);
-            return;
-        }
-        self.studio.initial.set(true);
-        if !self.preview_busy.get_untracked() {
-            self.request_initial_frame();
-        }
     }
 
     pub(crate) fn request_initial_frame(self) {

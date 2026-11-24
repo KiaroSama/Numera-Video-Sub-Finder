@@ -414,6 +414,107 @@ jobs:
             .ci-work/ocr-evidence/
           if-no-files-found: error
           retention-days: 7
+      - name: Stage bounded visual and report evidence
+        id: review_evidence
+        if: ${{ !cancelled() }}
+        timeout-minutes: 2
+        env:
+          REVIEW_SOURCE_SHA: ${{ github.sha }}
+          REVIEW_TARGET_ID: ${{ matrix.id }}
+          REVIEW_JOB_STATE: ${{ job.status }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          function Log([ValidateSet('INFO','WARNING','ERROR','DEBUG')][string]$Level, [string]$Message) {
+            Write-Host "[$([DateTime]::UtcNow.ToString('yyyy-MM-dd HH:mm:ss')) UTC] [$Level] [REVIEW-EVIDENCE] $Message"
+          }
+          try {
+            $reviewRoot = Join-Path $env:GITHUB_WORKSPACE '.ci-work/review-evidence'
+            New-Item -ItemType Directory -Path $reviewRoot | Out-Null
+            $script:reviewFiles = [Collections.Generic.List[object]]::new()
+            $script:reviewInvalidJson = [Collections.Generic.List[string]]::new()
+            $script:reviewBytes = [long]0
+            function Add-ReviewFile([IO.FileInfo]$File, [string]$Relative) {
+              if (($File.Attributes -band ([IO.FileAttributes]::ReparsePoint -bor [IO.FileAttributes]::Directory)) -or $File.Length -gt 16MB -or $script:reviewFiles.Count -ge 128 -or $script:reviewBytes + $File.Length -gt 64MB) {
+                throw "Unsafe or oversized review file: $Relative"
+              }
+              $destination = Join-Path $reviewRoot $Relative
+              [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($destination)) | Out-Null
+              [IO.File]::Copy($File.FullName, $destination, $false)
+              $copied = Get-Item -LiteralPath $destination
+              if ($copied.Length -ne $File.Length -or $script:reviewBytes + $copied.Length -gt 64MB) {
+                throw "Changed input or review evidence exceeds 64MiB: $Relative"
+              }
+              if ($File.Extension -eq '.json') {
+                $record = $null
+                try { $record = Get-Content -LiteralPath $destination -Raw -Encoding utf8 | ConvertFrom-Json -AsHashtable }
+                catch {
+                  if ($env:REVIEW_JOB_STATE -eq 'success') { throw "Malformed review JSON: $Relative" }
+                  $script:reviewInvalidJson.Add($Relative)
+                  Log WARNING "Preserving incomplete JSON from failed native checks: $Relative"
+                }
+                if ($record -is [Collections.IDictionary] -and $record.Contains('source_sha')) {
+                  if ($record.source_sha -cne $env:REVIEW_SOURCE_SHA -or ($record.Contains('target') -and $record.target -cne $env:REVIEW_TARGET_ID)) {
+                    throw "Review report source or target differs: $Relative"
+                  }
+                }
+              }
+              $digest = (Get-FileHash -LiteralPath $destination -Algorithm SHA256).Hash.ToLowerInvariant()
+              $script:reviewBytes += $copied.Length
+              $script:reviewFiles.Add([ordered]@{path=$Relative; bytes=$copied.Length; sha256=$digest})
+              Log DEBUG "Collected $Relative ($($copied.Length) bytes)"
+            }
+            function Add-ReviewGroup([string]$Source, [string]$Prefix, [string[]]$Patterns) {
+              if (!(Test-Path -LiteralPath $Source)) { return }
+              $directory = Get-Item -LiteralPath $Source -Force
+              if (!$directory.PSIsContainer -or ($directory.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+                throw "Review source must be an ordinary directory: $Prefix"
+              }
+              foreach ($file in (Get-ChildItem -LiteralPath $Source -File -Force | Sort-Object Name)) {
+                if (@($Patterns | Where-Object { $file.Name -like $_ }).Count -gt 0) {
+                  Add-ReviewFile $file "$Prefix/$($file.Name)"
+                }
+              }
+            }
+            $target = $env:REVIEW_TARGET_ID
+            Add-ReviewGroup '.ci-work/gui-evidence' 'gui' @('*.png','*.json')
+            Add-ReviewGroup '.ci-work/production-evidence' 'production' @('production-gui-report.json')
+            Add-ReviewGroup '.ci-work/packages/reports' 'reports' @("$target.json","$target-*.json")
+            if ($target -eq 'linux-x64') { Add-ReviewGroup '.ci-work/packages/reports' 'reports' @('coverage.json') }
+            if (Test-Path -LiteralPath 'ci/coverage-scope.json') {
+              Add-ReviewFile (Get-Item -LiteralPath 'ci/coverage-scope.json' -Force) 'metadata/coverage-scope.json'
+            }
+            $required = @('gui/actual-gui.png','gui/gui-report.json','production/production-gui-report.json','metadata/coverage-scope.json',"reports/$target.json")
+            foreach ($kind in 'standalone','gui','production','suites','bundles','maintenance','multilingual','runtime-pack','update-assets','worker-faults','specialist','visual-model') {
+              $required += "reports/$target-$kind.json"
+            }
+            if ($target -eq 'linux-x64') { $required += @('reports/coverage.json','reports/linux-x64-media-sanitizer.json') }
+            $missing = @($required | Where-Object { $_ -cnotin $script:reviewFiles.path })
+            if ($missing.Count -gt 0 -and $env:REVIEW_JOB_STATE -eq 'success') {
+              throw "Successful native checks omitted required review evidence: $($missing -join ', ')"
+            }
+            if ($missing.Count -gt 0) { Log WARNING "Failed native checks left $($missing.Count) required review files unavailable" }
+            $manifest = [ordered]@{
+              schema=1; kind='native-review-evidence'; source_sha=$env:REVIEW_SOURCE_SHA; target=$target
+              repository=$env:GITHUB_REPOSITORY; run_id=[long]$env:GITHUB_RUN_ID; run_attempt=[int]$env:GITHUB_RUN_ATTEMPT
+              workflow_ref=$env:GITHUB_WORKFLOW_REF; producer_job_state=$env:REVIEW_JOB_STATE; generated_utc=[DateTime]::UtcNow.ToString('o')
+              qualification='Receipts only; consult exact-source verification and report-specific limits'
+              files=$script:reviewFiles.ToArray(); bytes=$script:reviewBytes; missing_required=$missing; invalid_json=$script:reviewInvalidJson.ToArray()
+            }
+            [IO.File]::WriteAllText((Join-Path $reviewRoot 'evidence-manifest.json'), ($manifest | ConvertTo-Json -Depth 8), [Text.UTF8Encoding]::new($false))
+            Log INFO "Staged $($script:reviewFiles.Count) files and $script:reviewBytes bytes for $target; native state=$env:REVIEW_JOB_STATE"
+          } catch {
+            Log ERROR $_.Exception.Message
+            throw
+          }
+      - name: Upload small review evidence
+        if: ${{ !cancelled() && steps.review_evidence.outcome == 'success' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: review-${{ matrix.id }}-${{ github.sha }}
+          path: .ci-work/review-evidence/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
       - name: Preserve failed diagnostics
         if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

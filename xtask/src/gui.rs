@@ -297,6 +297,7 @@ pub fn smoke(gui: &Path, fixtures: &Path, data: &Path, output: &Path) -> Result<
                 format!("Unexpected initial theme state before user toggle: {initial}").into(),
             );
         }
+        crate::gui_theme_failure::verify(&driver, output)?;
         if initial["theme"] == "dark" {
             driver.click("#header-theme")?;
             driver.wait(
@@ -315,6 +316,7 @@ pub fn smoke(gui: &Path, fixtures: &Path, data: &Path, output: &Path) -> Result<
         crate::gui_visual::layout(&driver, output)?;
         crate::gui_visual::preview_navigation(&driver, output)?;
         crate::gui_studio::verify(&driver, output)?;
+        crate::gui_language::verify(&driver, output)?;
         for (position, route) in [(2, "Queue"), (5, "History")] {
             driver.click(&format!(
                 "nav[aria-label='Workspace navigation'] .nav-item:nth-of-type({position})"
@@ -494,6 +496,10 @@ pub fn smoke(gui: &Path, fixtures: &Path, data: &Path, output: &Path) -> Result<
             output.join("actual-gui.png"),
             decode_base64(screenshot.as_str().ok_or("Missing actual screenshot")?)?,
         )?;
+        let source_switch = crate::gui_source_switch::start_queued_b(&driver, output)?;
+        driver.wait("return document.querySelectorAll('.cue-row').length >= 2 && document.querySelector('h1')?.textContent === 'Review';", 120)?;
+        crate::gui_source_switch::verify_completed_b(&driver, output, source_switch)?;
+        crate::gui_pending_preview::verify(&driver, output)?;
         Ok(())
     })();
     if let Err(error) = &result {
@@ -523,7 +529,7 @@ pub fn smoke(gui: &Path, fixtures: &Path, data: &Path, output: &Path) -> Result<
     std::fs::write(
         output.join("gui-report.json"),
         serde_json::to_vec_pretty(
-            &json!({"schema":1,"source_sha":std::env::var("GITHUB_SHA")?,"target":std::env::var("NVSF_TARGET_ID")?,"passed":true,"tests":23,"failed":0,"skipped":0,"profile":"instrumented","proof":["native startup","fixed source admission and source frame","three persisted themes with measured contrast and circular logo","six workspace destinations","narrow and wide layout","programmatic control focus","zoom/pan/reset with normalized source ROI coordinates","default studio shell zero overflow and resizable inspector","interactive ROI live drag preview, 8 resize handles and 4 separating guides","extract undo/redo and playback transport controls","header save/save-as and shortcuts dialog","content-verified original and selected-frame crop comparison","model catalog IDs and controls","full language catalog and nonpriority extraction choices","automatic update disable persisted through Settings","native diagnostics and unapproved repair guard","actual worker extraction","native close acknowledgement preserves draft/applied revision and blocks shortcuts","Unicode edit and exported bytes","undo without an open project preserves clean review state","native drop event bridge accepts one host grant and refuses replay","pending native recognition blocks draft/apply/undo mutations","later cue edits invalidate an earlier OCR proposal"],"not_proved":["native Tab traversal","physical IME composition","external OS drag gesture","active-extraction review input interaction","production listener absence","real-language quality","positive signed repair/update lifecycle","platform installers"]}),
+            &json!({"schema":1,"source_sha":std::env::var("GITHUB_SHA")?,"target":std::env::var("NVSF_TARGET_ID")?,"passed":true,"tests":27,"failed":0,"skipped":0,"profile":"instrumented","proof":["native startup","fixed source admission and source frame","two persisted themes with measured contrast and circular logo","six workspace destinations","narrow and wide layout","programmatic control focus","zoom/pan/reset with normalized source ROI coordinates","default studio shell zero overflow and resizable inspector","interactive ROI live drag preview, 8 resize handles and 4 separating guides","extract undo/redo, source-PTS frame stepping and monotonic playback transport","header save/save-as and shortcuts dialog","content-verified original and selected-frame crop comparison","model catalog IDs and controls","full language catalog and nonpriority extraction choices","automatic update disable persisted through Settings","native diagnostics and unapproved repair guard","actual worker extraction","native close acknowledgement preserves draft/applied revision and blocks shortcuts","Unicode edit and exported bytes","undo without an open project preserves clean review state","native drop event bridge accepts one host grant and refuses replay","pending native recognition blocks draft/apply/undo mutations","later cue edits invalidate an earlier OCR proposal","language search preserves the committed native queue configuration","failed theme transitions retire their canvas and GPU resources","queued source replacement displays the admitted video pixels","delayed native source-A response cannot publish over source B"],"not_proved":["native Tab traversal","physical IME composition","external OS drag gesture","active-extraction review input interaction","production listener absence","real-language quality","positive signed repair/update lifecycle","platform installers"]}),
         )?,
     )?;
     Ok(())

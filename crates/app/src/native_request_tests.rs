@@ -1,6 +1,79 @@
 use super::*;
 
 #[test]
+fn transport_preview_rejects_invalid_steps_and_unbound_frame_metadata() {
+    for step in [-2, 2] {
+        assert!(
+            Operation::TransportFrame { at_ms: 0, step }
+                .validate()
+                .is_err()
+        );
+    }
+    assert!(
+        Operation::TransportFrame {
+            at_ms: 360_000_000_000,
+            step: 0
+        }
+        .validate()
+        .is_err()
+    );
+    for step in [-1, 0, 1] {
+        let operation = Operation::TransportFrame { at_ms: 40, step };
+        assert!(operation.validate().is_ok());
+        assert!(
+            operation
+                .accepts(&Response::TransportFrame {
+                    width: 4,
+                    height: 2,
+                    bytes: 100,
+                    time_ms: 33,
+                    estimated_duration_ms: 167,
+                })
+                .is_ok()
+        );
+        assert!(
+            operation
+                .accepts(&Response::Preview {
+                    width: 4,
+                    height: 2,
+                    bytes: 100
+                })
+                .is_err()
+        );
+        for (width, height, bytes, time_ms, duration) in [
+            (0, 2, 100, 33, 167),
+            (7681, 4320, 100, 33, 167),
+            (4, 2, 8_388_609, 33, 167),
+            (4, 2, 100, 360_000_000_000, 167),
+            (4, 2, 100, 33, 0),
+        ] {
+            assert!(
+                operation
+                    .accepts(&Response::TransportFrame {
+                        width,
+                        height,
+                        bytes,
+                        time_ms,
+                        estimated_duration_ms: duration,
+                    })
+                    .is_err()
+            );
+        }
+    }
+    assert!(
+        Operation::TransportFrame { at_ms: 40, step: 0 }
+            .accepts(&Response::TransportFrame {
+                width: 4,
+                height: 2,
+                bytes: 100,
+                time_ms: 41,
+                estimated_duration_ms: 40,
+            })
+            .is_err()
+    );
+}
+
+#[test]
 fn request_policy_rejects_invalid_time_language_and_region() {
     assert!(
         Operation::Preview {

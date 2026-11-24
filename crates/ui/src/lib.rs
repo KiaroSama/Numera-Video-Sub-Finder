@@ -1,5 +1,10 @@
 pub mod helpers;
 
+#[cfg(any(target_arch = "wasm32", test))]
+mod source_admission;
+#[cfg(test)]
+mod source_admission_tests;
+
 #[cfg(target_arch = "wasm32")]
 mod close_modal;
 #[cfg(any(target_arch = "wasm32", test))]
@@ -14,6 +19,8 @@ mod roi_geometry;
 mod studio_state;
 #[cfg(target_arch = "wasm32")]
 mod toolbar;
+#[cfg(any(target_arch = "wasm32", test))]
+mod transport;
 #[cfg(any(target_arch = "wasm32", test))]
 mod undo;
 #[cfg(target_arch = "wasm32")]
@@ -30,9 +37,13 @@ mod extract;
 #[cfg(target_arch = "wasm32")]
 mod glimm;
 #[cfg(any(target_arch = "wasm32", test))]
+mod glimm_resource;
+#[cfg(any(target_arch = "wasm32", test))]
 mod ipc;
 #[cfg(any(target_arch = "wasm32", test))]
 mod job_watch;
+#[cfg(any(target_arch = "wasm32", test))]
+mod language_search;
 #[cfg(target_arch = "wasm32")]
 mod languages;
 #[cfg(any(target_arch = "wasm32", test))]

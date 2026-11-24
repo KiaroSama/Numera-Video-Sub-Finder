@@ -57,6 +57,7 @@ fn desktop_workflow_commands_are_registered_in_both_manifests() {
         "save_project_as",
         "restart_app",
         "preview_initial_frame",
+        "preview_transport",
         "confirm_close",
     ] {
         let entry = format!("\"{command}\"");

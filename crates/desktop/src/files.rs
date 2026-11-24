@@ -258,7 +258,7 @@ fn decode_preview(host: &Host, path: &Path, at_ms: u64) -> Result<Vec<u8>> {
     Ok(bytes)
 }
 
-async fn with_source_preview<T: Send + 'static>(
+pub(crate) async fn with_source_preview<T: Send + 'static>(
     host: &Host,
     token: String,
     preview: impl FnOnce(&Host, &Path) -> Result<T> + Send + 'static,

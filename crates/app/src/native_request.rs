@@ -20,6 +20,10 @@ pub enum Operation {
     Preview {
         at_ms: u64,
     },
+    TransportFrame {
+        at_ms: u64,
+        step: i8,
+    },
     Suggest {
         language: String,
     },
@@ -49,7 +53,18 @@ struct Request {
 #[serde(tag = "result", content = "data", deny_unknown_fields)]
 pub enum Response {
     Probe(MediaInfo),
-    Preview { width: u32, height: u32, bytes: u64 },
+    Preview {
+        width: u32,
+        height: u32,
+        bytes: u64,
+    },
+    TransportFrame {
+        width: u32,
+        height: u32,
+        bytes: u64,
+        time_ms: u64,
+        estimated_duration_ms: u64,
+    },
     Suggest(Vec<Rect>),
     Recognize(Recognition),
     Visual(crate::assistant::Proposal),
@@ -61,6 +76,12 @@ impl Operation {
         let (time, language) = match self {
             Self::Probe => (None, None),
             Self::Preview { at_ms } => (Some(*at_ms), None),
+            Self::TransportFrame { at_ms, step } => {
+                if !(-1..=1).contains(step) {
+                    return Err(fail("Frame preview step must be -1, 0 or 1"));
+                }
+                (Some(*at_ms), None)
+            }
             Self::Suggest { language } => (None, Some(language)),
             Self::Visual { at_ms, region } => {
                 region.validate()?;
@@ -92,6 +113,27 @@ impl Operation {
                     && u64::from(info.width) * u64::from(info.height) <= 33_177_600
                     && info.time_base_num > 0
                     && info.time_base_den > 0 =>
+            {
+                Ok(())
+            }
+            (
+                Self::TransportFrame { at_ms, step },
+                Response::TransportFrame {
+                    width,
+                    height,
+                    bytes,
+                    time_ms,
+                    estimated_duration_ms,
+                },
+            ) if *width > 0
+                && *height > 0
+                && u64::from(*width) * u64::from(*height) <= 33_177_600
+                && *bytes > 0
+                && *bytes <= PREVIEW_LIMIT
+                && *time_ms <= 359_999_999_999
+                && *estimated_duration_ms > 0
+                && *estimated_duration_ms <= 359_999_999_999
+                && (*step != 0 || time_ms <= at_ms) =>
             {
                 Ok(())
             }
@@ -275,15 +317,16 @@ pub fn supervise(
         JSON_LIMIT,
     )?)?;
     request.operation.accepts(&result)?;
-    let preview = if let Response::Preview { bytes, .. } = &result {
-        let data = read_bounded(&scratch.path().join("preview.png"), PREVIEW_LIMIT)?;
-        if data.len() as u64 != *bytes || !data.starts_with(b"\x89PNG\r\n\x1a\n") {
-            return Err(fail("Native preview length or PNG signature mismatch"));
-        }
-        data
-    } else {
-        Vec::new()
-    };
+    let preview =
+        if let Response::Preview { bytes, .. } | Response::TransportFrame { bytes, .. } = &result {
+            let data = read_bounded(&scratch.path().join("preview.png"), PREVIEW_LIMIT)?;
+            if data.len() as u64 != *bytes || !data.starts_with(b"\x89PNG\r\n\x1a\n") {
+                return Err(fail("Native preview length or PNG signature mismatch"));
+            }
+            data
+        } else {
+            Vec::new()
+        };
     Ok((result, preview))
 }
 
@@ -340,20 +383,26 @@ fn execute(paths: &Paths, request: &Request, directory: &Path) -> Result<Respons
         }
         Operation::Preview { at_ms } => {
             let rgb = crate::media::MediaRuntime::load(paths)?.preview(&request.input, *at_ms)?;
-            let (width, height) = rgb.dimensions();
-            let mut buffer = Cursor::new(Vec::new());
-            DynamicImage::ImageRgb8(rgb)
-                .write_to(&mut buffer, ImageFormat::Png)
-                .map_err(|e| fail(e.to_string()))?;
-            let bytes = buffer.into_inner();
-            if bytes.len() as u64 > PREVIEW_LIMIT {
-                return Err(fail("Preview exceeds8MiB IPC bound"));
-            }
-            storage::write_atomic(&directory.join("preview.png"), &bytes, false)?;
+            let (width, height, bytes) = save_preview(directory, rgb)?;
             Response::Preview {
                 width,
                 height,
-                bytes: bytes.len() as u64,
+                bytes,
+            }
+        }
+        Operation::TransportFrame { at_ms, step } => {
+            let frame = crate::media::MediaRuntime::load(paths)?.preview_frame(
+                &request.input,
+                *at_ms,
+                *step,
+            )?;
+            let (width, height, bytes) = save_preview(directory, frame.image)?;
+            Response::TransportFrame {
+                width,
+                height,
+                bytes,
+                time_ms: frame.time_ms,
+                estimated_duration_ms: frame.estimated_duration_ms,
             }
         }
         Operation::Suggest { language } => {
@@ -378,6 +427,20 @@ fn execute(paths: &Paths, request: &Request, directory: &Path) -> Result<Respons
             language,
         )?),
     })
+}
+
+fn save_preview(directory: &Path, rgb: image::RgbImage) -> Result<(u32, u32, u64)> {
+    let (width, height) = rgb.dimensions();
+    let mut buffer = Cursor::new(Vec::new());
+    DynamicImage::ImageRgb8(rgb)
+        .write_to(&mut buffer, ImageFormat::Png)
+        .map_err(|error| fail(error.to_string()))?;
+    let bytes = buffer.into_inner();
+    if bytes.len() as u64 > PREVIEW_LIMIT {
+        return Err(fail("Preview exceeds 8MiB IPC bound"));
+    }
+    storage::write_atomic(&directory.join("preview.png"), &bytes, false)?;
+    Ok((width, height, bytes.len() as u64))
 }
 
 #[cfg(test)]

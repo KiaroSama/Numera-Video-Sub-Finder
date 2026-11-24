@@ -89,3 +89,52 @@ fn preview_never_substitutes_a_later_frame_when_no_preceding_frame_exists() {
     assert!(preview.finish().is_err());
     assert!(Preview::new(0).finish().is_err());
 }
+
+#[test]
+fn adjacent_frames_follow_literal_cfr_and_vfr_pts_in_both_directions() {
+    for (times, at, direction, expected) in [
+        ([0, 41, 83], 0, 1, 41),
+        ([0, 41, 83], 41, -1, 0),
+        ([0, 16, 33], 0, 1, 16),
+        ([0, 16, 33], 33, -1, 16),
+        ([0, 33, 200], 33, 1, 200),
+        ([0, 33, 200], 200, -1, 33),
+        ([0, 33, 200], 100, 1, 200),
+        ([0, 33, 200], 100, -1, 33),
+    ] {
+        let mut adjacent = super::Adjacent::new(at, direction);
+        for time in times {
+            if !adjacent.observe(frame(time, 40, time as u8)) {
+                break;
+            }
+        }
+        let selected = adjacent.finish().unwrap();
+        assert_eq!(selected.time_ms, expected, "at={at}, direction={direction}");
+        assert_eq!(selected.image.get_pixel(0, 0)[0], expected as u8);
+    }
+}
+
+#[test]
+fn adjacent_frame_boundaries_keep_the_first_or_last_real_frame() {
+    for (at, direction, expected) in [(0, -1, 50), (50, -1, 50), (90, 1, 90), (1000, 1, 90)] {
+        let mut adjacent = super::Adjacent::new(at, direction);
+        for time in [50, 90] {
+            if !adjacent.observe(frame(time, 40, 1)) {
+                break;
+            }
+        }
+        assert_eq!(adjacent.finish().unwrap().time_ms, expected);
+    }
+    assert!(super::Adjacent::new(0, 1).finish().is_err());
+}
+
+#[test]
+fn visible_frame_metadata_keeps_source_pts_instead_of_the_requested_seek_time() {
+    let mut preview = Preview::new(80);
+    assert!(preview.observe(frame(33, 167, 7)));
+    assert!(!preview.observe(frame(200, 40, 8)));
+    let selected = preview.finish_frame().unwrap();
+    assert_eq!(selected.time_ms, 33);
+    assert_eq!(selected.estimated_duration_ms, 167);
+    assert_eq!(selected.image.get_pixel(0, 0)[0], 7);
+}

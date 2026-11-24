@@ -20,6 +20,12 @@ pub fn FixtureControls(ui: Ui) -> impl IntoView {
         <button id="e2e-load" data-testid="e2e-load-fixture" on:click={move |_|ui.request::<Grant>("e2e_fixture",json!({"fixture":"en.mp4","output":"ui-en.srt"}),move |grant|{
             ui.output.set(Some(grant.output));ui.admit_video(grant.source, false);
         })} disabled=move ||ui.busy.get()>"Admit English CI fixture"</button>
+        <button data-testid="e2e-load-contrast" on:click={move |_|ui.request::<Grant>("e2e_fixture",json!({"fixture":"source-a.mp4","output":"ui-source-a.srt"}),move |grant|{
+            ui.output.set(Some(grant.output));ui.admit_video(grant.source, false);
+        })} disabled=move ||ui.busy.get()>"Admit contrast fixture"</button>
+        <button data-testid="e2e-load-queue-fixture" on:click={move |_|ui.request::<Grant>("e2e_fixture",json!({"fixture":"en.mp4","output":"ui-queue-b.srt"}),move |grant|{
+            ui.output.set(Some(grant.output));ui.admit_video(grant.source, false);
+        })} disabled=move ||ui.busy.get()>"Admit queue source B"</button>
         <button data-testid="e2e-save-edits" disabled=move ||ui.busy.get()||ui.preview_busy.get()||ui.project.with(Option::is_none)||ui.draft_dirty.get() on:click=move |_|{
             let Some(project)=ui.project.get_untracked()else{return;};let Some(output)=ui.output.get_untracked()else{return;};
             if ui.busy.get_untracked()||ui.preview_busy.get_untracked(){return;}ui.busy.set(true);
