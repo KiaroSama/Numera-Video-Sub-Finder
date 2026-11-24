@@ -112,7 +112,12 @@ pub(crate) fn validate_ico(bytes: &[u8]) -> Result<[u32; 7]> {
         return Err("Native icon container missing or malformed: icon.ico".into());
     }
     let mut offset = directory_end;
-    for (entry, size) in bytes[6..directory_end].chunks_exact(16).zip(ICO_SIZES) {
+    for (entry, size) in bytes[6..directory_end]
+        .as_chunks::<16>()
+        .0
+        .iter()
+        .zip(ICO_SIZES)
+    {
         if entry[..8] != directory_entry(size)
             || usize::try_from(u32::from_le_bytes(entry[12..16].try_into()?))? != offset
         {
