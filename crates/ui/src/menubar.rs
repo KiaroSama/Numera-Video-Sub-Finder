@@ -1,4 +1,4 @@
-use crate::{close_modal::StudioDialog, ipc::Doctor, maintenance::Status, state::Ui};
+use crate::{close_modal::StudioDialog, maintenance::Status, state::Ui};
 use leptos::{ev, prelude::*};
 use serde_json::json;
 use wasm_bindgen::JsCast;
@@ -7,7 +7,7 @@ const TITLES: [&str; 5] = ["File", "Edit", "View", "Tools", "Help"];
 const IDS: [&str; 5] = ["file", "edit", "view", "tools", "help"];
 
 #[derive(Clone, Copy)]
-enum Action {
+enum MenuAction {
     Open,
     Save(bool),
     Export,
@@ -18,14 +18,14 @@ enum Action {
     Zoom(i8),
     Theme,
     Route(&'static str),
-    Doctor,
+    RunDoctor,
     Updates,
     Shortcuts,
     About,
 }
-use Action::*;
+use MenuAction::*;
 
-const MENUS: [&[(&str, &str, Action)]; 5] = [
+const MENUS: [&[(&str, &str, MenuAction)]; 5] = [
     &[
         ("Open video", "Ctrl+O", Open),
         ("Save project", "Ctrl+S", Save(false)),
@@ -52,7 +52,7 @@ const MENUS: [&[(&str, &str, Action)]; 5] = [
         ("Settings", "", Route("Settings")),
     ],
     &[
-        ("Run diagnostics", "", Doctor),
+        ("Run diagnostics", "", RunDoctor),
         ("Check for updates", "", Updates),
         ("Open Queue", "", Route("Queue")),
         ("Manage Models", "", Route("Models")),
@@ -63,11 +63,11 @@ const MENUS: [&[(&str, &str, Action)]; 5] = [
     ],
 ];
 
-impl Action {
+impl MenuAction {
     fn disabled(self, ui: Ui) -> bool {
         ui.closing.get()
             || match self {
-                Open | Doctor | Updates => ui.busy.get(),
+                Open | RunDoctor | Updates => ui.busy.get(),
                 Save(_) => !ui.can_save(),
                 Export => ui.project.with(Option::is_none),
                 Undo => !ui.can_undo(),
@@ -128,7 +128,7 @@ impl Action {
             Zoom(delta) => ui.change_zoom(delta),
             Theme => ui.toggle_theme(),
             Route(route) => ui.route.set(route.into()),
-            Doctor => {
+            RunDoctor => {
                 ui.route.set("Settings".into());
                 ui.request::<crate::ipc::Doctor>("doctor", json!({}), move |d| {
                     ui.diagnostics.set(Some(d))
@@ -163,12 +163,14 @@ fn focus_trigger(menu: usize) {
     focus(&format!("#menu-trigger-{}", IDS[menu]));
 }
 
-fn move_item(key: &str) {
-    let Ok(nodes) = document().query_selector_all(".app-menu:not([hidden]) button:enabled") else {
-        return;
-    };
-    let items: Vec<_> = (0..nodes.length())
-        .filter_map(|i| nodes.item(i)?.dyn_into::<web_sys::HtmlElement>().ok())
+fn move_item(menu: usize, key: &str) {
+    let doc = document();
+    let items: Vec<_> = (0..MENUS[menu].len())
+        .filter_map(|i| {
+            doc.query_selector(&format!("#menu-item-{}-{i}:enabled", IDS[menu]))
+                .ok()?
+                .and_then(|item| item.dyn_into::<web_sys::HtmlElement>().ok())
+        })
         .collect();
     if items.is_empty() {
         return;
@@ -220,7 +222,7 @@ pub(crate) fn MenuBar(ui: Ui, about: RwSignal<bool>) -> impl IntoView {
             }
             "ArrowDown" | "ArrowUp" | "Home" | "End" => {
                 open.set(Some(menu));
-                later(move || move_item(&key));
+                later(move || move_item(menu, &key));
             }
             "Escape" if open.get_untracked().is_some() => {
                 open.set(None);
