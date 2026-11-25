@@ -1,11 +1,14 @@
 ---
 name: numera-video-sub-finder
-description: Use when extracting burned-in video subtitles locally, detecting subtitle regions, inspecting or editing .nvsf.json subtitle projects, running concurrent multi-video bulk extraction, managing the persistent extraction queue, exporting SRT/VTT/ASS/JSON subtitles, or verifying runtimes, models, language packs, and updates through the nvsf CLI.
+description: Use the nvsf CLI to extract burned-in subtitles locally, detect subtitle regions (ROIs), preview frames or draw grids, review or edit .nvsf.json projects, run bulk extraction or manage the queue, export SRT/VTT/ASS/JSON, and run diagnostics or check for updates.
+compatibility: Requires nvsf CLI v0.6.0 on 64-bit Windows or Linux. Runs offline except for explicit model, language, or update downloads.
 ---
 
 # Numera Video Sub Finder CLI
 
-Use `nvsf` for local, non-interactive video subtitle extraction, cue review, and batch or bulk processing. Every subcommand writes structured JSON to stdout (or plain confirmation text for legacy maintenance commands) and sends progress lines to stderr.
+Use `nvsf` v0.6.0 for local, non-interactive video subtitle extraction, cue review, and batch or bulk processing. Every subcommand writes structured JSON to stdout (or plain confirmation text for legacy maintenance commands) and sends progress lines to stderr.
+
+The CLI shares queue, project, model, and log storage with the Graphite Studio desktop app (`numera-video-sub-finder`) when both use the same `--data-root`.
 
 Read `references/cli-reference.md` for exact flags, JSON schemas, and recovery rules before constructing unfamiliar commands.
 

@@ -2,6 +2,20 @@
 
 Exact command, flag, JSON output, and exit-code specification for `nvsf` (`crates/cli/`).
 
+CLI version: v0.6.0
+
+**Contents**
+
+- [Global flags](#global-flags)
+- [Exit codes](#exit-codes)
+- [Preflight and provisioning](#preflight-and-provisioning)
+- [Regions and frame preview](#regions-and-frame-preview)
+- [Extraction, resume, export, batch, and bulk](#extraction-resume-export-batch-and-bulk)
+- [Project inspection, search, editing, and review](#project-inspection-search-editing-and-review)
+- [Persistent queue](#persistent-queue)
+- [Updates and preferences](#updates-and-preferences)
+- [Error recovery rules](#error-recovery-rules)
+
 ## Global flags
 
 - `--data-root <PATH>`: Override the application data directory (models, projects, logs, cache, `desktop-queue.json`, `updates.json`). Can appear before or after the subcommand.
@@ -328,8 +342,10 @@ Stored at `<data-root>/desktop-queue.json` (schema 1, max 100 entries, max 2 MiB
 
 ## Updates and preferences
 
-- `nvsf updates status [--format portable|nsis|msi|appimage|deb|rpm]`: returns `{"current_version", "target", "enabled", "last_attempt", "offer"}`.
-- `nvsf updates check [--format portable|nsis|msi|appimage|deb|rpm]`: fetches signed `latest.json` and `latest.json.sig`, verifies minisign signature, caches any available offer in `<data-root>/cache/cli-update-offer.json`, and updates `last_attempt` in `updates.json`.
+Official releases cover `windows-x64`, `windows-arm64`, `linux-x64`, and `linux-arm64`. GitHub Actions publishes the release packages and `SHA256SUMS.txt` through the `numera-signing` environment. Update checks use the separately signed `latest.json` feed.
+
+- `nvsf updates status [--format portable|msi|appimage|deb|rpm]`: returns `{"current_version", "target", "enabled", "last_attempt", "offer"}`.
+- `nvsf updates check [--format portable|msi|appimage|deb|rpm]`: fetches signed `latest.json` and `latest.json.sig`, verifies minisign signature, caches any available offer in `<data-root>/cache/cli-update-offer.json`, and updates `last_attempt` in `updates.json`.
 - `nvsf updates config --enabled <true|false>`: updates `updates.json` preference.
 - `nvsf updates download --token <TOKEN> --consent [--output <PATH>] [--overwrite]`: fails closed without `--consent` (exit `3`). Downloads the official GitHub release asset to a staging file, verifies byte size, SHA-256, minisign artifact signature, and target binary header before writing to `--output` (or `<data-root>/cache/updates/<filename>`).
 - `nvsf updates verify --token <TOKEN> [--file <PATH>]` or `nvsf updates verify --file <PATH> --signature <SIG_OR_PATH> --version <SEMVER> [--sha256 <HEX>] [--target <TARGET>]`: verifies SHA-256, minisign signature, and optional target header offline.
