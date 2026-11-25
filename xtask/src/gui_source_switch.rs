@@ -6,20 +6,45 @@ use std::{
 };
 
 fn pixels(driver: &Driver) -> Result<Value> {
-    driver.script(
-        r#"
-        const image=document.querySelector('.source-frame');
-        if(!image?.complete||!image.naturalWidth) return null;
-        const canvas=document.createElement('canvas');
-        canvas.width=image.naturalWidth;canvas.height=image.naturalHeight;
-        const context=canvas.getContext('2d');context.drawImage(image,0,0);
-        const data=context.getImageData(0,0,canvas.width,canvas.height).data;
-        let hash=2166136261;
-        for(const value of data) hash=Math.imul(hash^value,16777619);
-        const samples=[[10,10],[20,20],[30,30]].map(([x,y])=>
-            Array.from(context.getImageData(x,y,1,1).data).slice(0,3));
-        return {width:canvas.width,height:canvas.height,samples,pixel_hash:hash>>>0};
-    "#,
+    driver.request(
+        reqwest::Method::POST,
+        "/execute/async",
+        json!({"args": [], "script": r#"
+        const done=arguments[arguments.length-1];
+        const deadline=performance.now()+5000;
+        const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+        (async()=>{
+            while(performance.now()<deadline){
+                const image=document.querySelector('.source-frame');
+                if(image?.complete&&image.naturalWidth){
+                    const source=image.currentSrc;
+                    const decoded=typeof image.decode!=='function'||await Promise.race([
+                        image.decode().then(()=>true,()=>false),
+                        pause(Math.max(0,deadline-performance.now())).then(()=>false)
+                    ]);
+                    if(decoded&&image.currentSrc===source&&document.querySelector('.source-frame')===image){
+                        const canvas=document.createElement('canvas');
+                        canvas.width=image.naturalWidth;canvas.height=image.naturalHeight;
+                        const context=canvas.getContext('2d');
+                        if(context){
+                            context.drawImage(image,0,0);
+                            const points=[[10,10],[20,20],[30,30]].map(([x,y])=>
+                                context.getImageData(x,y,1,1).data);
+                            if(points.every(point=>point[3]!==0)){
+                                let hash=2166136261;
+                                for(const value of context.getImageData(0,0,canvas.width,canvas.height).data)
+                                    hash=Math.imul(hash^value,16777619);
+                                return {width:canvas.width,height:canvas.height,
+                                    samples:points.map(point=>Array.from(point).slice(0,3)),pixel_hash:hash>>>0};
+                            }
+                        }
+                    }
+                }
+                await pause(50);
+            }
+            return null;
+        })().then(done,()=>done(null));
+    "#}),
     )
 }
 
