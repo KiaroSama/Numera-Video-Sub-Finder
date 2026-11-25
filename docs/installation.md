@@ -27,7 +27,7 @@ Minimum-OS and clean-install behavior remain unqualified until their dedicated t
 
 ### Windows development signature check
 
-The signing path covers the portable GUI and `nvsf.exe`, the MSI-packaged GUI, and the final `.msi` installer. Vendor DLLs are not re-signed.
+The signing path covers the portable GUI and `nvsf.exe`, the MSI-packaged GUI, and the final `.msi` installer. Vendor DLLs are not re-signed. Binary and updater signing credentials live only in the protected `numera-signing` GitHub Actions deployment environment.
 
 The development signer is self-signed `CN=Numera Video Sub Finder`, RSA 3072 with code-signing EKU `1.3.6.1.5.5.7.3.3`, expiring 2027-11-03. Its public certificate DER SHA-256 pin is:
 

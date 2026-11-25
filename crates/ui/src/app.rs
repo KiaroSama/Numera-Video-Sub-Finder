@@ -278,9 +278,11 @@ fn App(initial_theme: String) -> impl IntoView {
     let fixture_controls = view! { <crate::e2e::FixtureControls ui/> }.into_any();
     #[cfg(not(feature = "e2e"))]
     let fixture_controls = ().into_any();
+    let about = RwSignal::new(false);
     view! {
         <a class="skip-link" href="#main-content">"Skip to workspace"</a>
         <div class="app-shell shell" data-native-drop-ready=move ||drop_ready.get().to_string()>
+            <crate::menubar::MenuBar ui about/>
             <aside class="sidebar">
                 <a class="brand" href="#extract" on:click=move |_|ui.route.set("Extract".into()) aria-label="Numera Video Sub Finder home">
                     <img src="logo.svg" width="32" height="32" alt=""/>
@@ -311,6 +313,7 @@ fn App(initial_theme: String) -> impl IntoView {
                 <footer class="statusbar" role="status">{move ||if ui.busy.get(){"Native operation in progress"}else if ui.active(){"Extraction active"}else{"No active extraction"}}</footer>
             </div>
         </div>
+        <crate::menubar::AboutModal visible=about/>
         <ShortcutsModal ui/>
         <CloseModal ui/>
         <Show when=move || ui.dragging.get()>

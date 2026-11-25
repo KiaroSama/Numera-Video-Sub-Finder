@@ -5,19 +5,20 @@
 # Numera Video Sub Finder
 
 [![Final verification](https://github.com/KiaroSama/Numera-Video-Sub-Finder/actions/workflows/verify.yml/badge.svg)](https://github.com/KiaroSama/Numera-Video-Sub-Finder/actions/workflows/verify.yml)
-[![License GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-2563eb)](LICENSE)
-[![Version 0.5.0](https://img.shields.io/badge/version-0.5.0-059669)](Cargo.toml)
-[![Rust 1.100.0 toolchain](https://img.shields.io/badge/rust-1.100.0-8b5cf6)](rust-toolchain.toml)
-[![Runs on Windows and Linux, x64 and ARM64](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%28x64%2C%20ARM64%29-0891b2)](ci/targets.json)
-[![Project guides](https://img.shields.io/badge/docs-project%20guides-1d4ed8)](docs/architecture.md)
-[![Tracked repository working tree size 8.0 MB](https://img.shields.io/badge/repo%20size-8.0%20MB-ca8a04)](docs/installation.md)
-[![Rust edition 2024](https://img.shields.io/badge/edition-2024-ea580c)](Cargo.toml)
-[![Tauri 2 desktop shell](https://img.shields.io/badge/Tauri-2-0d9488)](crates/desktop/Cargo.toml)
-[![Leptos Rust and WebAssembly UI](https://img.shields.io/badge/UI-Leptos%20%7C%20WASM-dc2626)](crates/ui/Cargo.toml)
-[![Native FFmpeg media decoding](https://img.shields.io/badge/media-FFmpeg-16a34a)](vcpkg.json)
-[![ONNX Runtime OCR](https://img.shields.io/badge/OCR-ONNX%20Runtime-4b5563)](ci/native-lock.json)
-[![Tesseract verifier](https://img.shields.io/badge/verifier-Tesseract-7c2d12)](ci/tessdata.json)
-[![Support donations](https://img.shields.io/badge/Support-donations-d04a9a)](#donate)
+[![License GPL-3.0-or-later](https://img.shields.io/github/license/KiaroSama/Numera-Video-Sub-Finder?style=flat-square&color=2563eb)](LICENSE)
+[![Latest Git tag](https://img.shields.io/github/v/tag/KiaroSama/Numera-Video-Sub-Finder?style=flat-square&color=059669&label=tag)](https://github.com/KiaroSama/Numera-Video-Sub-Finder/tags)
+[![Latest GitHub release](https://img.shields.io/github/v/release/KiaroSama/Numera-Video-Sub-Finder?style=flat-square&color=0284c7&label=release)](#releases-and-tags)
+[![Rust 1.100.0 toolchain](https://img.shields.io/badge/rust-1.100.0-8b5cf6?style=flat-square)](rust-toolchain.toml)
+[![Runs on Windows and Linux, x64 and ARM64](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%28x64%2C%20ARM64%29-0891b2?style=flat-square)](ci/targets.json)
+[![Project guides](https://img.shields.io/badge/docs-project%20guides-1d4ed8?style=flat-square)](docs/architecture.md)
+[![GitHub repository size](https://img.shields.io/github/repo-size/KiaroSama/Numera-Video-Sub-Finder?style=flat-square&color=ca8a04)](docs/installation.md)
+[![Rust edition 2024](https://img.shields.io/badge/edition-2024-ea580c?style=flat-square)](Cargo.toml)
+[![Tauri 2 desktop shell](https://img.shields.io/badge/Tauri-2-0d9488?style=flat-square)](crates/desktop/Cargo.toml)
+[![Leptos Rust and WebAssembly UI](https://img.shields.io/badge/UI-Leptos%20%7C%20WASM-dc2626?style=flat-square)](crates/ui/Cargo.toml)
+[![Native FFmpeg media decoding](https://img.shields.io/badge/media-FFmpeg-16a34a?style=flat-square)](vcpkg.json)
+[![ONNX Runtime OCR](https://img.shields.io/badge/OCR-ONNX%20Runtime-4b5563?style=flat-square)](ci/native-lock.json)
+[![Tesseract verifier](https://img.shields.io/badge/verifier-Tesseract-7c2d12?style=flat-square)](ci/tessdata.json)
+[![Support donations](https://img.shields.io/badge/Support-donations-d04a9a?style=flat-square)](#donate)
 
 </div>
 
@@ -29,15 +30,23 @@ An offline-first desktop workspace for extracting visible, burned-in subtitles f
 
 ## Status
 
-Active 0.x releases follow sequential minor versions (`0.2.0`, `0.3.0`, `0.4.0`, `0.5.0`, ...) with matching Git tags and GitHub Releases built on exact verified commits. The live CI badge is authoritative for hosted checks. See [validation status](docs/validation.md) for current verification coverage and remaining external gates. Android and iPhone applications are not included.
+The live CI badge shows the status of hosted checks. See [validation status](docs/validation.md) for verification coverage and remaining external gates. Android and iPhone applications are not included.
 
-The four native 64-bit targets are Windows x64, Windows ARM64, Linux x64 and Linux ARM64. All 32-bit builds are excluded. Hosted CPU CI is separate from real-device accelerator qualification. Windows binaries and MSI installers are signed with the project owner's self-signed Authenticode certificate (`D-014`, thumbprint `B2A45C4E8257197BBF067ED94F83E626AC6CE1C5`); no public CA certificate is used. Verify downloaded packages against the published `SHA256SUMS.txt`. Users upgrading from a `0.4.0` or earlier NSIS installation should uninstall the old NSIS build once before installing the `0.5.0` MSI package.
+The four native 64-bit targets are Windows x64, Windows ARM64, Linux x64 and Linux ARM64. All 32-bit builds are excluded. Hosted CPU CI is separate from real-device accelerator qualification. Windows binaries and MSI installers are signed with the project owner's self-signed Authenticode certificate (`D-014`, thumbprint `B2A45C4E8257197BBF067ED94F83E626AC6CE1C5`); no public CA certificate is used. Verify downloaded packages against the published `SHA256SUMS.txt`. If you installed `0.4.0` or earlier using NSIS, uninstall it before switching to an MSI package.
+
+## Releases and Tags
+
+The 0.x series increments the minor version: `v0.2.0`, `v0.3.0`, `v0.4.0`, `v0.5.0`, then `v0.6.0`. The badges above update from [GitHub Tags](https://github.com/KiaroSama/Numera-Video-Sub-Finder/tags) and [GitHub Releases](https://github.com/KiaroSama/Numera-Video-Sub-Finder/releases) as tags and releases are published.
+
+GitHub Actions signs Windows binaries and updater artifacts only in the protected `numera-signing` deployment environment. The release workflow publishes artifacts from the exact verified commit.
 
 ## Installation and setup
 
 Download the matching 64-bit package for your OS and architecture from [GitHub Releases](https://github.com/KiaroSama/Numera-Video-Sub-Finder/releases) and follow the [installation guide](docs/installation.md) to verify checksums, install required models, and run a first extraction. Windows packages carry the owner's self-signed Authenticode signature (`D-014`), so Windows SmartScreen may prompt before first launch.
 
 ## Workflow
+
+The Graphite Studio desktop workspace has a menu bar in the top left: **File**, **Edit**, **View**, **Tools**, and **Help**.
 
 1. Load media either through the native **Open video** dialog (`Ctrl+O`) or by dragging and dropping onto the window:
    - Drop a **single video file** (`.mp4`, `.mkv`, `.mov`, `.avi`, `.webm`, `.m4v`, `.ts`, `.mts`, `.m2ts`, `.mpeg`, `.wmv`) to open it directly in **Extract**, where the preview automatically seeks past a black opening frame when present, then pick an `.srt` destination.
@@ -122,9 +131,13 @@ Builds run only in GitHub Actions. Manually dispatch Final verification (`verify
 
 See [testing](docs/testing.md), [architecture](docs/architecture.md), [OCR contracts](docs/ocr-models.md), [performance policy](docs/performance.md), [platform support](docs/platform-support.md), [CI matrix](docs/ci-matrix.md), [troubleshooting](docs/troubleshooting.md), [references](docs/references.md), and [third-party notices](THIRD_PARTY_NOTICES.md). Generated synthetic fixtures cover integration and timing mechanics only, not held-out real-world CER or subtitle-event recall.
 
+## Author
+
+[KiaroSama](https://github.com/KiaroSama) ([Kiaro.Sama.Dev@gmail.com](mailto:Kiaro.Sama.Dev@gmail.com))
+
 ## License
 
-Application code: GPL-3.0-or-later. Models, native libraries and licensed media retain their own terms. The official logo was supplied by the project owner. No source or branding from unrelated subtitle-finder applications is copied.
+KiaroSama owns the copyright to the application code and licenses it under [GPL-3.0-or-later](LICENSE).
 
 ## Donate
 

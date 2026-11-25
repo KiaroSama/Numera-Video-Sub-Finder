@@ -2,13 +2,14 @@ use super::gui::{Driver, Result};
 use serde_json::json;
 use std::path::Path;
 
-/// Verifies v0.5.0 studio ergonomics on the Extract workspace:
+/// Verifies studio ergonomics on the Extract workspace:
 /// - zero outer vertical scrollbar at default studio viewport and zero inner preview scrollbar at 100% Fit
 /// - live ROI drag preview (`.roi-draft`), 8 resize handles, 4 VideoSubFinder separating guides
 /// - Extract Undo/Redo toolbar controls revert and restore ROI changes
 /// - playback transport bar (`#preview-play`, `#preview-stop`, `#preview-timeline`, `#set-start`, `#set-end`)
 /// - header Save / Save As and F1 Shortcuts modal open and dismiss cleanly
 pub fn verify(driver: &Driver, output: &Path) -> Result<()> {
+    verify_menubar(driver)?;
     // 1. Default studio geometry: no outer vertical overflow and no preview inner scrollbars at Fit (100%).
     let geom = driver.script(
         "const doc=document.documentElement,vp=document.querySelector('.preview-viewport');\
@@ -355,4 +356,25 @@ fn stationary(driver: &Driver) -> Result<serde_json::Value> {
         return Err(format!("Paused or manually sought frame kept advancing: {result}").into());
     }
     Ok(result)
+}
+
+fn verify_menubar(driver: &Driver) -> Result<()> {
+    driver.wait(r#"const bar = document.querySelector('#app-menubar[role=menubar][aria-label="Application menu"]');
+        const items = [...(bar?.querySelectorAll(':scope > button[role=menuitem]') ?? [])];
+        return !!bar?.getBoundingClientRect().height && items.map(item => item.textContent.trim()).join(',') === 'File,Edit,View,Tools,Help'
+          && items.every((item, i) => item.getAttribute('tabindex') === (i ? '-1' : '0'))
+          && document.documentElement.scrollHeight <= document.documentElement.clientHeight
+          && getComputedStyle(document.querySelector('.preview-shell')).colorScheme.includes('dark');"#, 5)?;
+    driver.click("#menu-trigger-file")?;
+    driver.wait(r#"return !!document.querySelector('#menu-trigger-file[aria-expanded=true]') && !!document.querySelector('[aria-labelledby=menu-trigger-file]:not([hidden]) [role=menuitem]');"#, 5)?;
+    driver.script(r#"document.querySelector('#menu-trigger-file').dispatchEvent(new KeyboardEvent('keydown', {key:'ArrowRight', bubbles:true})); return true;"#)?;
+    driver.wait(r#"return !!document.querySelector('#menu-trigger-file[aria-expanded=false]') && document.activeElement === document.querySelector('#menu-trigger-edit[aria-expanded=true]');"#, 5)?;
+    driver.script(r#"document.activeElement.dispatchEvent(new KeyboardEvent('keydown', {key:'Escape', bubbles:true})); return true;"#)?;
+    driver.wait(r#"return document.activeElement === document.querySelector('#menu-trigger-edit[aria-expanded=false]');"#, 5)?;
+    driver.click("#menu-trigger-help")?;
+    driver.click("#menu-item-help-1")?;
+    driver.wait(&format!(r#"const dialog = document.querySelector('#about-modal[open][role=dialog][aria-modal=true]'); return !!dialog && [...dialog.querySelectorAll('p')].some(p => p.textContent.trim() === 'Version {}');"#, env!("CARGO_PKG_VERSION")), 5)?;
+    driver.click("#about-modal button")?;
+    driver.wait("return !document.querySelector('#about-modal[open]');", 5)?;
+    Ok(())
 }

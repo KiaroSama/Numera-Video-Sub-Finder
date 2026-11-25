@@ -49,6 +49,8 @@ mod languages;
 #[cfg(any(target_arch = "wasm32", test))]
 mod maintenance;
 #[cfg(target_arch = "wasm32")]
+mod menubar;
+#[cfg(target_arch = "wasm32")]
 mod models;
 #[cfg(target_arch = "wasm32")]
 mod review;

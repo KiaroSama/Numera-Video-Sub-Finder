@@ -2,30 +2,30 @@
    Strong control borders and light muted text meet the rendered contrast contract. */
 :root, :root[data-theme="dark"] {
   color-scheme: dark;
-  --bg: #0a0a0a;
-  --surface: #0a0a0a;
-  --surface-alt: #171717;
-  --input: #171717;
-  --sidebar: #0a0a0a;
-  --chrome: #171717;
-  --text: #fafafa;
-  --muted: #a3a3a3;
-  --border: #262626;
-  --strong-border: #737373;
-  --accent: #fafafa;
-  --accent-hover: #f5f5f5;
-  --accent-pressed: #e5e5e5;
+  --bg: #101114;
+  --surface: #1B1D21;
+  --surface-alt: #22252B;
+  --input: #22252B;
+  --sidebar: #141518;
+  --chrome: #141518;
+  --text: #F2F3F5;
+  --muted: #B0B6C0;
+  --border: #2A2E37;
+  --strong-border: #69717E;
+  --accent: #C63D3D;
+  --accent-hover: #D44A4A;
+  --accent-pressed: #AF3333;
   --accent-soft: #262626;
-  --on-accent: #171717;
-  --focus: #a3a3a3;
+  --on-accent: #FFFFFF;
+  --focus: #F28A8A;
   --scroll-thumb: #737373;
   --error: #fca5a5;
   --error-bg: #2a1215;
   --dirty: #facc15;
-  --roi: #22d3ee;
-  --exclude: #fbbf24;
+  --roi: #38BDF8;
+  --exclude: #F59E0B;
   --radius: 6px;
-  font-family: Vazirmatn, "Segoe UI", system-ui, sans-serif;
+  font-family: 'Segoe UI Variable Text', 'Segoe UI', Vazirmatn, Vazir, system-ui, -apple-system, sans-serif;
   font-size: 100%;
   background: var(--bg);
   color: var(--text);
@@ -33,22 +33,22 @@
 }
 :root[data-theme="light"] {
   color-scheme: light;
-  --bg: #ffffff;
-  --surface: #ffffff;
-  --surface-alt: #f5f5f5;
-  --input: #ffffff;
-  --sidebar: #fafafa;
-  --chrome: #f8f8f8;
-  --text: #0a0a0a;
-  --muted: #525252;
-  --border: #e5e5e5;
-  --strong-border: #737373;
-  --accent: #171717;
-  --accent-hover: #262626;
-  --accent-pressed: #0a0a0a;
+  --bg: #F3F4F6;
+  --surface: #FFFFFF;
+  --surface-alt: #F6F7F9;
+  --input: #F6F7F9;
+  --sidebar: #EAEDF1;
+  --chrome: #EAEDF1;
+  --text: #20242B;
+  --muted: #59616D;
+  --border: #DCE0E6;
+  --strong-border: #747F8D;
+  --accent: #C63D3D;
+  --accent-hover: #D44A4A;
+  --accent-pressed: #AF3333;
   --accent-soft: #e5e5e5;
-  --on-accent: #fafafa;
-  --focus: #525252;
+  --on-accent: #FFFFFF;
+  --focus: #A92A2A;
   --scroll-thumb: #737373;
   --error: #991b1b;
   --error-bg: #fef2f2;
@@ -94,7 +94,7 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; }
 .skip-link { position: fixed; top: -80px; left: 10px; padding: 10px; background: var(--surface); color: var(--text); z-index: 4; }
 .skip-link:focus { top: 8px; }
-.shell { display: grid; grid-template-columns: 200px minmax(0,1fr); }
+.shell { display: grid; grid-template-columns: 168px minmax(0,1fr); }
 .sidebar { display: flex; flex-direction: column; background: var(--sidebar); border-inline-end: 1px solid var(--border); padding: 8px; overflow: auto; min-width: 0; }
 .brand { display: flex; align-items: center; gap: 8px; min-height: 44px; color: var(--text); text-decoration: none; padding: 3px 7px; margin-bottom: 8px; }
 .brand img { object-fit: contain; flex: none; border-radius: 50%; }
@@ -125,13 +125,13 @@ main:focus-visible { outline-offset: -2px; }
 .inspector-splitter { flex: 0 0 6px; cursor: col-resize; position: relative; }
 .inspector-splitter::after { content: ""; position: absolute; inset: 0 2px; background: var(--border); }
 .inspector-splitter:hover::after, .inspector-splitter:focus-visible::after { background: var(--focus); }
-.settings-panel { flex: 0 0 auto; width: var(--inspector-w, 340px); max-width: calc(100% - 486px); min-height: 0; overflow: auto; }
+.settings-panel { flex: 0 0 auto; width: var(--inspector-w, 320px); max-width: calc(100% - 486px); min-height: 0; overflow: auto; }
 .inspector-section { padding: 6px 0; border-top: 1px solid var(--border); }
 .source-line { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 4px 12px; }
 .source-line strong { min-width: 0; overflow-wrap: anywhere; }
 .source-line .muted { font-size: .75rem; }
 /* Keep the Fit canvas inside both viewport dimensions; a zoomed canvas uses viewport width for pan parity. */
-.preview-shell { position: relative; min-height: 160px; overflow: hidden; border-radius: var(--radius); background: #171717; border: 1px solid var(--border); }
+.preview-shell { position: relative; min-height: 160px; overflow: hidden; border-radius: var(--radius); background: #0B0C0E; color-scheme: only dark; border: 1px solid var(--border); }
 .source-panel .preview-shell { flex: 1; }
 .editor-panel .preview-shell { height: clamp(160px, 34vh, 460px); }
 .preview-empty { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; color: #fafafa; padding: 12px; }
@@ -218,7 +218,7 @@ kbd { color: var(--text); border: 1px solid var(--strong-border); border-radius:
 .filter { min-width: min(100%, 145px); }
 .review-toolbar .muted, .edit-state { font-size: .75rem; }
 .edit-state { width: 100%; color: var(--muted); }
-.review-grid { display: grid; grid-template-columns: minmax(0,.9fr) minmax(0,1.1fr); gap: 8px; align-items: start; }
+.review-grid { display: grid; grid-template-columns: minmax(0, 340px) minmax(0, 1fr); gap: 8px; align-items: start; }
 .cue-panel { padding: 0; overflow: hidden; }
 .cue-heading { padding: 10px; display: flex; justify-content: space-between; align-items: center; gap: 8px; border-bottom: 1px solid var(--border); }
 .cue-heading h2 { margin: 0; }
@@ -322,3 +322,27 @@ html[data-glimm-transition]::view-transition-old(root) { z-index: 2; clip-path: 
 html[data-glimm-transition]::view-transition-new(root) { z-index: 1; }
 html[data-glimm-transition]::view-transition-group(glimm-layer) { z-index: 2147483647; }
 html[data-glimm-transition]::view-transition-old(glimm-layer) { display: none; }
+
+/* The menu owns a separate chrome row so its dropdowns clear the workspace clips. */
+.shell { grid-template-rows: 32px minmax(0, 1fr); }
+#app-menubar { grid-column: 1 / -1; position: relative; z-index: 20; display: flex; align-items: center; padding-inline: 6px; background: var(--chrome); border-bottom: 1px solid var(--border); }
+.menu-trigger { min-height: 26px; padding: 1px 9px; border-color: transparent; background: transparent; }
+.menu-trigger[aria-expanded="true"] { background: var(--surface-alt); }
+.app-menu { position: absolute; inset-block-start: 100%; inset-inline-start: clamp(4px, var(--menu-left), calc(100% - 254px)); width: min(248px, calc(100vw - 8px)); max-height: calc(100vh - 38px); overflow: auto; padding: 4px; background: var(--surface); border: 1px solid var(--strong-border); border-radius: 8px; }
+.app-menu button { width: 100%; min-height: 36px; padding: 4px 8px; display: flex; align-items: center; justify-content: space-between; gap: 8px; text-align: start; border-color: transparent; background: transparent; }
+.app-menu button:not(:disabled):hover, .app-menu button:focus-visible { background: var(--surface-alt); }
+.app-menu kbd { flex: none; font-size: 12px; color: var(--muted); }
+.panel, .studio-dialog, .preview-shell { border-radius: 8px; }
+.mono, input[type="number"], kbd { font-variant-numeric: tabular-nums; }
+.eyebrow { display: none; }
+main, .sidebar, .settings-panel, .source-panel, .cue-list, .preview-viewport, .app-menu, .studio-dialog { scrollbar-color: var(--scroll-thumb) transparent; scrollbar-width: thin; }
+@supports not (scrollbar-color: auto) {
+  * { scrollbar-width: auto; }
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-thumb { background: var(--scroll-thumb); border-radius: 6px; }
+}
+@media (max-width: 540px) {
+  .shell { grid-template-rows: 32px auto minmax(0, 1fr); }
+}
+
+.app-menu[hidden] { display: none; }

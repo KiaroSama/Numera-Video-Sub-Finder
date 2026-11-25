@@ -19,6 +19,7 @@
 **/.ignoreme
 
 /target/
+/bin/
 /crates/ui/dist/
 /crates/desktop/icons/
 /crates/desktop/gen/

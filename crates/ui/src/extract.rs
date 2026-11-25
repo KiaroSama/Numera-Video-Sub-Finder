@@ -37,7 +37,7 @@ pub fn Extract(ui: Ui) -> impl IntoView {
         }
     });
     let split = NodeRef::<leptos::html::Div>::new();
-    let width = RwSignal::new(340i32);
+    let width = RwSignal::new(320i32);
     let drag = RwSignal::new(None::<(i32, i32)>);
     let max_width = move || {
         split
@@ -77,7 +77,7 @@ pub fn Extract(ui: Ui) -> impl IntoView {
                     event.prevent_default();width.set(next.clamp(260,max_width()));
                 }></div>
             <section id="extract-inspector" class="panel settings-panel" aria-label="Extraction inspector">
-                <div class="panel-heading"><h2>"Inspector"</h2></div>
+                <div class="panel-heading"><h2>"Recognition"</h2></div>
                 <div class="inspector-section">
                 <label for="language-search">"Subtitle language"</label>
                 <div class="language-picker">

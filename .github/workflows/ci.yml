@@ -1,13 +1,6 @@
 name: Desktop CI
 on:
   workflow_call:
-    secrets:
-      TAURI_SIGNING_PRIVATE_KEY:
-        required: true
-      NVSF_WINDOWS_CODESIGN_PFX:
-        required: true
-      NVSF_WINDOWS_CODESIGN_PASSWORD:
-        required: true
 permissions:
   contents: read
 concurrency:

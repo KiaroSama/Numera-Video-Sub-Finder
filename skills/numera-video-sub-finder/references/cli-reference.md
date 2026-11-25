@@ -28,8 +28,8 @@ Checks CLI version, build commit SHA, OS/architecture, paths, native runtime dia
 Stdout JSON:
 ```json
 {
-  "version": "0.5.0",
-  "source_sha": "af4917c...",
+  "version": "0.6.0",
+  "source_sha": "...",
   "os": "windows",
   "architecture": "x86_64",
   "data_root": "...",

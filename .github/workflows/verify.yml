@@ -50,10 +50,7 @@ jobs:
   native:
     uses: ./.github/workflows/ci.yml
     # The called native job selects the protected environment on main.
-    secrets:
-      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-      NVSF_WINDOWS_CODESIGN_PFX: ${{ secrets.NVSF_WINDOWS_CODESIGN_PFX }}
-      NVSF_WINDOWS_CODESIGN_PASSWORD: ${{ secrets.NVSF_WINDOWS_CODESIGN_PASSWORD }}
+    secrets: inherit
   portable:
     uses: ./.github/workflows/quality.yml
   dependencies:
