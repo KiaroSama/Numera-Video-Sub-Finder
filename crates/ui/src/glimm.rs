@@ -1,14 +1,17 @@
 //! Native Rust/WASM WebGL1 sweep transition ported from glimm (MIT, Noman Ijaz)
 //! with the brushed-silver cosine palette from godverify.com.
 
-use crate::helpers::{ease_sweep, sweep_clip_inset};
+use crate::{
+    glimm_resource::OwnedResource,
+    helpers::{ease_sweep, sweep_clip_inset},
+};
 use gloo_timers::callback::Timeout;
 use std::{cell::RefCell, rc::Rc};
 use wasm_bindgen::{JsCast, JsValue, closure::Closure};
 use wasm_bindgen_futures::{JsFuture, spawn_local};
 use web_sys::{
-    Document, Element, HtmlCanvasElement, HtmlElement, WebGlContextAttributes, WebGlProgram,
-    WebGlRenderingContext as Gl, WebGlShader, WebGlUniformLocation, Window,
+    Document, Element, HtmlCanvasElement, HtmlElement, WebGlBuffer, WebGlContextAttributes,
+    WebGlProgram, WebGlRenderingContext as Gl, WebGlShader, WebGlUniformLocation, Window,
 };
 
 const DURATION_MS: f64 = 680.0;
@@ -104,9 +107,10 @@ struct Uniforms {
 }
 
 struct GlEngine {
-    canvas: HtmlCanvasElement,
+    canvas: OwnedResource<HtmlCanvasElement>,
     gl: Gl,
-    program: WebGlProgram,
+    program: OwnedResource<WebGlProgram>,
+    _buffer: OwnedResource<WebGlBuffer>,
     u: Uniforms,
     origin_ms: f64,
 }
@@ -124,8 +128,11 @@ thread_local! {
     static STATE: RefCell<SweepState> = RefCell::new(SweepState::default());
 }
 
-fn compile_shader(gl: &Gl, kind: u32, source: &str) -> Option<WebGlShader> {
-    let shader = gl.create_shader(kind)?;
+fn compile_shader(gl: &Gl, kind: u32, source: &str) -> Option<OwnedResource<WebGlShader>> {
+    let cleanup = gl.clone();
+    let shader = OwnedResource::new(gl.create_shader(kind)?, move |shader| {
+        cleanup.delete_shader(Some(shader));
+    });
     gl.shader_source(&shader, source);
     gl.compile_shader(&shader);
     if gl
@@ -135,7 +142,6 @@ fn compile_shader(gl: &Gl, kind: u32, source: &str) -> Option<WebGlShader> {
     {
         Some(shader)
     } else {
-        gl.delete_shader(Some(&shader));
         None
     }
 }
@@ -143,18 +149,18 @@ fn compile_shader(gl: &Gl, kind: u32, source: &str) -> Option<WebGlShader> {
 fn init_engine(window: &Window, document: &Document) -> Option<Rc<GlEngine>> {
     let body = document.body()?;
     let canvas: HtmlCanvasElement = document.create_element("canvas").ok()?.dyn_into().ok()?;
-    let _ = canvas.set_attribute("id", "nvsf-glimm-canvas");
-    let _ = canvas.set_attribute("data-glimm-layer", "");
-    let _ = canvas.set_attribute("aria-hidden", "true");
+    let canvas = OwnedResource::new(canvas, |canvas| canvas.remove());
+    canvas.set_attribute("id", "nvsf-glimm-canvas").ok()?;
+    canvas.set_attribute("data-glimm-layer", "").ok()?;
+    canvas.set_attribute("aria-hidden", "true").ok()?;
     let style = canvas.style();
-    let _ = style.set_property("position", "fixed");
-    let _ = style.set_property("inset", "0");
-    let _ = style.set_property("width", "100vw");
-    let _ = style.set_property("height", "100vh");
-    let _ = style.set_property("pointer-events", "none");
-    let _ = style.set_property("z-index", "2147483646");
-    let _ = style.set_property("opacity", "0");
-    let _ = body.append_child(&canvas);
+    style.set_property("position", "fixed").ok()?;
+    style.set_property("inset", "0").ok()?;
+    style.set_property("width", "100vw").ok()?;
+    style.set_property("height", "100vh").ok()?;
+    style.set_property("pointer-events", "none").ok()?;
+    style.set_property("z-index", "2147483646").ok()?;
+    style.set_property("opacity", "0").ok()?;
 
     let attrs = WebGlContextAttributes::new();
     attrs.set_alpha(true);
@@ -167,23 +173,30 @@ fn init_engine(window: &Window, document: &Document) -> Option<Rc<GlEngine>> {
 
     let vs = compile_shader(&gl, Gl::VERTEX_SHADER, VS)?;
     let fs = compile_shader(&gl, Gl::FRAGMENT_SHADER, FS)?;
-    let program = gl.create_program()?;
+    let cleanup = gl.clone();
+    let program = OwnedResource::new(gl.create_program()?, move |program| {
+        cleanup.use_program(None);
+        cleanup.delete_program(Some(program));
+    });
     gl.attach_shader(&program, &vs);
     gl.attach_shader(&program, &fs);
     gl.link_program(&program);
-    gl.delete_shader(Some(&vs));
-    gl.delete_shader(Some(&fs));
+    gl.detach_shader(&program, &vs);
+    gl.detach_shader(&program, &fs);
+    drop(vs);
+    drop(fs);
     if !gl
         .get_program_parameter(&program, Gl::LINK_STATUS)
         .as_bool()
         .unwrap_or(false)
     {
-        gl.delete_program(Some(&program));
-        canvas.remove();
         return None;
     }
 
-    let buffer = gl.create_buffer()?;
+    let cleanup = gl.clone();
+    let buffer = OwnedResource::new(gl.create_buffer()?, move |buffer| {
+        cleanup.delete_buffer(Some(buffer));
+    });
     gl.bind_buffer(Gl::ARRAY_BUFFER, Some(&buffer));
     let verts = js_sys::Float32Array::from(&[-1.0_f32, -1.0, 3.0, -1.0, -1.0, 3.0][..]);
     gl.buffer_data_with_array_buffer_view(Gl::ARRAY_BUFFER, &verts, Gl::STATIC_DRAW);
@@ -217,11 +230,16 @@ fn init_engine(window: &Window, document: &Document) -> Option<Rc<GlEngine>> {
         pal_c: gl.get_uniform_location(&program, "uPalC"),
         pal_d: gl.get_uniform_location(&program, "uPalD"),
     };
+    if gl.is_context_lost() || gl.get_error() != Gl::NO_ERROR {
+        return None;
+    }
+    body.append_child(&canvas).ok()?;
     let origin_ms = now_ms(window);
     Some(Rc::new(GlEngine {
         canvas,
         gl,
         program,
+        _buffer: buffer,
         u,
         origin_ms,
     }))
@@ -332,11 +350,20 @@ fn cancel_active(window: &Window, root: &Element) -> u64 {
     let (frame, transition, deadline, engine, next_gen) = STATE.with(|cell| {
         let mut st = cell.borrow_mut();
         st.generation = st.generation.wrapping_add(1);
+        let engine = if st
+            .engine
+            .as_ref()
+            .is_some_and(|engine| engine.gl.is_context_lost())
+        {
+            st.engine.take()
+        } else {
+            st.engine.clone()
+        };
         (
             st.frame.take(),
             st.transition.take(),
             st.deadline.take(),
-            st.engine.clone(),
+            engine,
             st.generation,
         )
     });
@@ -351,7 +378,12 @@ fn cancel_active(window: &Window, root: &Element) -> u64 {
         skip_transition(&vt);
     }
     if let Some(eng) = engine {
-        eng.hide();
+        if eng.gl.is_context_lost() {
+            // A cancelled frame can still own the engine until its callback is released.
+            eng.canvas.remove();
+        } else {
+            eng.hide();
+        }
     }
     next_gen
 }
@@ -457,6 +489,10 @@ pub fn sweep_theme(from: &str, to: &str) {
     let target_loop = to.to_owned();
     let step = Closure::new(move |_raf_ts: f64| {
         if !is_generation(my_gen) {
+            return;
+        }
+        if engine.gl.is_context_lost() {
+            finish_generation(&win_loop, &root_loop, my_gen, &target_loop);
             return;
         }
         let now = now_ms(&win_loop);

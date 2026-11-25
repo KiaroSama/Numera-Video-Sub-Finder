@@ -162,14 +162,7 @@ impl Ui {
             s.as_ref()
                 .is_some_and(|s| s.fingerprint == project.source_hash)
         }) {
-            self.source.set(None);
-            #[cfg(target_arch = "wasm32")]
-            self.studio.reset_source();
-            let old = self.preview_url.get_untracked();
-            self.preview_url.set(String::new());
-            if !old.is_empty() {
-                let _ = web_sys::Url::revoke_object_url(&old);
-            }
+            self.replace_source(None);
         }
         #[cfg(target_arch = "wasm32")]
         self.studio.reset_extract();
@@ -181,6 +174,17 @@ impl Ui {
         self.draft_dirty.set(false);
         self.revision.update(|v| *v += 1);
         self.route.set("Review".into());
+        #[cfg(target_arch = "wasm32")]
+        if self.review_source_linked()
+            && self.preview_url.get_untracked().is_empty()
+            && !self.studio.initial.get_untracked()
+        {
+            let time = self.selected_cue().map_or_else(
+                || self.config.with_untracked(|config| config.start_ms),
+                |cue| cue.start_ms,
+            );
+            self.seek(time);
+        }
     }
     #[cfg(target_arch = "wasm32")]
     pub fn pick_source(self) {
@@ -339,9 +343,8 @@ impl Ui {
     }
     pub fn start_saved(self, id: String) {
         self.request::<Started>("queue_start", json!({"id":id}), move |started| {
-            self.source.set(Some(started.source));
-            self.output.set(Some(started.output));
-            self.watch_job(started.id);
+            let id = self.accept_started_source(started);
+            self.watch_job(id);
         });
     }
     pub fn resume_picker(self) {

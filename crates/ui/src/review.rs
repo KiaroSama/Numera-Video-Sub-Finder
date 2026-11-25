@@ -60,7 +60,7 @@ pub fn Review(ui: Ui) -> impl IntoView {
                         <div style=move ||format!("height:{}px",indices.with(|i|helpers::window_range(i.len(),scroll.get()).start)*helpers::ROW_HEIGHT) aria-hidden="true"></div>
                         <For each=rows key=|cue| (cue.id,cue.text.clone(),cue.reviewed,cue.start_ms,cue.end_ms,cue.confidence.map(f32::to_bits)) children=move |cue|{
                             let id=cue.id; let start=cue.start_ms;
-                            view!{<button class="cue-row" disabled=move ||ui.busy.get()||ui.closing.get() class:selected=move ||ui.selected.get()==Some(id) aria-pressed=move ||ui.selected.get()==Some(id)
+                            view!{<button class="cue-row" disabled=move ||ui.busy.get()||ui.closing.get() class:selected=move ||ui.selected.get()==Some(id) aria-pressed=move ||if ui.selected.get()==Some(id){"true"}else{"false"}
                                 on:click=move |_|{if ui.draft_dirty.get_untracked(){ui.error.set(Some("Apply or discard your current cue draft before selecting another cue".into()));}else{ui.selected.set(Some(id));ui.seek(start);}}>
                                 <span class="cue-number mono">{format!("{:04}",id)}</span>
                                 <span class="cue-content"><span class="cue-text" dir="auto">{cue.text}</span><span class="cue-meta mono">{format!("{} → {} · Track {}",helpers::time_label(start),helpers::time_label(cue.end_ms),cue.track)}</span></span>

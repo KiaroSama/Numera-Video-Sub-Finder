@@ -58,10 +58,30 @@ pub async fn call<T: DeserializeOwned>(
     serde_wasm_bindgen::from_value(value).map_err(|e| format!("Invalid native response: {e}"))
 }
 
-pub async fn preview(token: &str, time_ms: u64) -> Result<String, String> {
-    let args = arguments(&serde_json::json!({"token": token, "timeMs": time_ms}))?;
-    let bytes = invoke("preview_frame", args).await.map_err(error_text)?;
-    image_url(bytes)
+pub struct SourceFrame {
+    pub url: String,
+    pub time_ms: u64,
+    pub duration_ms: u64,
+}
+
+pub async fn preview(token: &str, time_ms: u64, step: i8) -> Result<SourceFrame, String> {
+    let args = arguments(&serde_json::json!({"token": token, "timeMs": time_ms, "step": step}))?;
+    let bytes = js_sys::Uint8Array::new(
+        &invoke("preview_transport", args)
+            .await
+            .map_err(error_text)?,
+    );
+    if bytes.length() as usize > crate::transport::PACKET_LIMIT {
+        return Err("Preview exceeds binary transport limit".into());
+    }
+    let bytes = bytes.to_vec();
+    let packet = crate::transport::parse_packet(&bytes)?;
+    let url = image_url(js_sys::Uint8Array::from(packet.png).into())?;
+    Ok(SourceFrame {
+        url,
+        time_ms: packet.time_ms,
+        duration_ms: packet.duration_ms,
+    })
 }
 
 pub async fn cue_evidence(cue_id: u64) -> Result<String, String> {

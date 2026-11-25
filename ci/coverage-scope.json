@@ -6,7 +6,7 @@
       "path": "crates/desktop/src/files.rs",
       "start": 40,
       "end": 50,
-      "source_sha256": "1a63eb010203cc85266d28081e6e145a42f1394bdef0decaf6363ff3bf70d3a7",
+      "source_sha256": "758abcff7aed11d2849aa19b9301ba1633a4d312fc42f9b85e166127048ab00c",
       "category": "native-dialog",
       "reason": "Native source picker invocation; cancellation and grants remain measured.",
       "acceptance": "OPEN: native source selection/cancellation on all desktops, unchanged grants after cancellation."
@@ -15,7 +15,7 @@
       "path": "crates/desktop/src/files.rs",
       "start": 70,
       "end": 76,
-      "source_sha256": "1a63eb010203cc85266d28081e6e145a42f1394bdef0decaf6363ff3bf70d3a7",
+      "source_sha256": "758abcff7aed11d2849aa19b9301ba1633a4d312fc42f9b85e166127048ab00c",
       "category": "native-dialog",
       "reason": "Native output picker invocation only.",
       "acceptance": "OPEN: native output selection/cancellation and preservation of existing files."
@@ -24,7 +24,7 @@
       "path": "crates/desktop/src/files.rs",
       "start": 413,
       "end": 419,
-      "source_sha256": "1a63eb010203cc85266d28081e6e145a42f1394bdef0decaf6363ff3bf70d3a7",
+      "source_sha256": "758abcff7aed11d2849aa19b9301ba1633a4d312fc42f9b85e166127048ab00c",
       "category": "native-dialog",
       "reason": "Native project save picker invocation only.",
       "acceptance": "OPEN: native project save selection/cancellation, retained overwrite consent and corrections."
@@ -33,7 +33,7 @@
       "path": "crates/desktop/src/files.rs",
       "start": 492,
       "end": 498,
-      "source_sha256": "1a63eb010203cc85266d28081e6e145a42f1394bdef0decaf6363ff3bf70d3a7",
+      "source_sha256": "758abcff7aed11d2849aa19b9301ba1633a4d312fc42f9b85e166127048ab00c",
       "category": "native-dialog",
       "reason": "Native subtitle export picker invocation only.",
       "acceptance": "OPEN: native export selection/cancellation and no unapproved replacement."
@@ -42,7 +42,7 @@
       "path": "crates/desktop/src/files.rs",
       "start": 571,
       "end": 576,
-      "source_sha256": "1a63eb010203cc85266d28081e6e145a42f1394bdef0decaf6363ff3bf70d3a7",
+      "source_sha256": "758abcff7aed11d2849aa19b9301ba1633a4d312fc42f9b85e166127048ab00c",
       "category": "native-dialog",
       "reason": "Native project open picker invocation only.",
       "acceptance": "OPEN: native project selection/cancellation, original workspace retained on cancellation."

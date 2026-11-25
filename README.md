@@ -48,7 +48,7 @@ Download the matching 64-bit package for your OS and architecture from [GitHub R
 5. Review original frames, edit text and times, split or merge cues, undo or redo changes (`Ctrl+Z` / `Ctrl+Y` in both **Extract** and **Review**), and explicitly accept re-recognition proposals.
 6. Use **Save** (`Ctrl+S`), **Save As** (`Ctrl+Shift+S`), or export SRT, WebVTT, basic ASS, or JSON evidence. Closing with unsaved edits prompts you to save and exit, exit without saving, or cancel. Press `F1` at any time to view all keyboard shortcuts.
 
-Monochrome Dark and Light themes run locally: first launch follows the operating system color scheme until you switch themes with the single-click toggle, which plays a native Rust/WASM WebGL1 brushed-silver sweep (`glimm`) and honors `prefers-reduced-motion`. There are no remote fonts, cloud transcription or authored JavaScript application components. Generated Tauri/WASM glue is required by the frameworks.
+Monochrome Dark and Light themes run locally: Dark is the initial default, and your explicit theme choice is saved. The single-click toggle plays a native Rust/WASM WebGL1 brushed-silver sweep (`glimm`) and honors `prefers-reduced-motion`. There are no remote fonts, cloud transcription or authored JavaScript application components. Generated Tauri/WASM glue is required by the frameworks.
 
 ## CLI
 

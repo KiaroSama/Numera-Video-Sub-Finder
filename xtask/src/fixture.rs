@@ -89,6 +89,8 @@ pub fn generate(ffmpeg: &Path, output: &Path) -> Result<(), Box<dyn Error>> {
         &filter,
         "-c:v",
         "mpeg4",
+        "-g",
+        "10",
         "-threads",
         "2",
         "-q:v",
@@ -97,6 +99,29 @@ pub fn generate(ffmpeg: &Path, output: &Path) -> Result<(), Box<dyn Error>> {
     ])
     .arg(output.join("en.mp4"));
     bounded(&mut c, Duration::from_secs(30))?;
+    let mut contrast = Command::new(ffmpeg);
+    contrast
+        .args([
+            "-nostdin",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-filter_threads",
+            "2",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=0xb82a36:s=320x240:r=10:d=1",
+            "-c:v",
+            "mpeg4",
+            "-threads",
+            "2",
+            "-q:v",
+            "2",
+            "-n",
+        ])
+        .arg(output.join("source-a.mp4"));
+    bounded(&mut contrast, Duration::from_secs(10))?;
     std::fs::write(
         output.join("CORPUS_STATUS.json"),
         serde_json::to_vec_pretty(

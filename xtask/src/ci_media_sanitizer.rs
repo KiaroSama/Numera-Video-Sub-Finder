@@ -464,14 +464,14 @@ impl Admission<'_> {
         }) {
             return Err("Actual caller executable does not export its Rust ASan runtime.".into());
         }
-        self.tests("native-abi-geometry", callee, None, None)?;
+        self.tests("native-abi-geometry", callee, None, Some(19))?;
         self.tests(
             "callbacks",
             caller,
             Some("media::callback_tests::"),
             Some(3),
         )?;
-        let geometry = self.tests("display-geometry", geometry, None, Some(3))?;
+        let geometry = self.tests("display-geometry", geometry, None, Some(4))?;
         let mut loaded = Vec::new();
         for json in geometry.lines().filter_map(|line| {
             line.split_once("NVSF_MEDIA_ASAN_LOADED=")
@@ -488,9 +488,9 @@ impl Admission<'_> {
             }
             loaded.push(record);
         }
-        if loaded.len() != 3 {
+        if loaded.len() != 4 {
             return Err(
-                "All three actual Y4M tests must report their live loaded media/FFmpeg closure."
+                "All four actual Y4M tests must report their live loaded media/FFmpeg closure."
                     .into(),
             );
         }

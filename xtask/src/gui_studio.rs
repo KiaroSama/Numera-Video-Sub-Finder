@@ -85,6 +85,14 @@ pub fn verify(driver: &Driver, output: &Path) -> Result<()> {
         )
         .into());
     }
+    let drawn_pressed = roi_pressed(driver, before_count + 1, before_count)?;
+    driver.click("button[aria-label='Select region 1']")?;
+    let canvas_pressed = roi_pressed(driver, before_count + 1, 0)?;
+    driver.click(&format!(
+        ".region-list .region-row:nth-child({}) .region-select",
+        before_count + 1
+    ))?;
+    let inspector_pressed = roi_pressed(driver, before_count + 1, before_count)?;
 
     // Undo removes the drawn ROI; Redo restores it; second Undo returns to baseline cleanly.
     driver.click("#header-undo")?;
@@ -102,17 +110,8 @@ pub fn verify(driver: &Driver, output: &Path) -> Result<()> {
     );
     driver.wait(&wait_restored, 5)?;
 
-    // 3. Playback transport toggle (Play -> Stop) without leaving playback running.
-    driver.click("#preview-play")?;
-    driver.wait(
-        "return document.querySelector('#preview-play')?.getAttribute('aria-pressed')==='true';",
-        5,
-    )?;
-    driver.click("#preview-stop")?;
-    driver.wait(
-        "return document.querySelector('#preview-play')?.getAttribute('aria-pressed')==='false';",
-        5,
-    )?;
+    // 3. Actual source PTS, compressed keyframe stepping and elapsed-time playback.
+    let transport = transport(driver)?;
 
     // 4. Shortcuts modal opens via header button and closes cleanly.
     driver.click("#header-shortcuts")?;
@@ -134,10 +133,226 @@ pub fn verify(driver: &Driver, output: &Path) -> Result<()> {
             "geometry": geom,
             "roi_drag_preview": roi,
             "handles_and_guides": handles_and_guides,
+            "roi_pressed_states": [drawn_pressed, canvas_pressed, inspector_pressed],
             "undo_redo_verified": true,
             "transport_verified": true,
+            "transport": transport,
             "shortcuts_modal_verified": true
         }))?,
     )?;
     Ok(())
+}
+
+fn roi_pressed(driver: &Driver, count: u64, selected: u64) -> Result<serde_json::Value> {
+    driver.wait(
+        &format!(
+            "const groups=['.roi:not(.excluded) .roi-pick','.region-list .region-select'].map(selector=>Array.from(document.querySelectorAll(selector)));return groups.every(buttons=>buttons.length==={count}&&buttons.every((button,index)=>button.getAttribute('aria-pressed')===(index==={selected}?'true':'false')&&button.parentElement.classList.contains('selected')===(index==={selected})));"
+        ),
+        5,
+    )?;
+    driver.script("return {canvas:Array.from(document.querySelectorAll('.roi:not(.excluded) .roi-pick'),button=>button.getAttribute('aria-pressed')),inspector:Array.from(document.querySelectorAll('.region-list .region-select'),button=>button.getAttribute('aria-pressed'))};")
+}
+
+fn frame(driver: &Driver, expected: u64) -> Result<()> {
+    driver.wait(
+        &format!(
+            "const p=document.querySelector('.preview-shell'),image=document.querySelector('.source-frame');return p?.getAttribute('aria-busy')==='false' && p?.dataset.displayedTimeMs==='{expected}' && p?.dataset.frameDurationMs==='100' && image?.complete && image.naturalWidth>0 && document.querySelector('#preview-timeline')?.value==='{expected}' && document.querySelector('#preview-play')?.getAttribute('aria-pressed')==='false';"
+        ),
+        30,
+    )
+}
+
+fn seek(driver: &Driver, at: u64) -> Result<()> {
+    driver.script(&format!(
+        "const t=document.querySelector('#preview-timeline');t.value='{at}';t.dispatchEvent(new Event('input',{{bubbles:true}}));return true;"
+    ))?;
+    frame(driver, at)
+}
+
+fn transport(driver: &Driver) -> Result<serde_json::Value> {
+    // The shared en.mp4 fixture has 10 fps and an explicit 10-frame GOP.
+    seek(driver, 0)?;
+    driver.click("[data-testid=next-frame]")?;
+    frame(driver, 100)?;
+    for (key, expected) in [("ArrowRight", 200), ("ArrowLeft", 100)] {
+        driver.script(&format!(
+            "const v=document.querySelector('.preview-viewport');v.focus();v.dispatchEvent(new KeyboardEvent('keydown',{{key:'{key}',bubbles:true}}));return true;"
+        ))?;
+        frame(driver, expected)?;
+    }
+    for _ in 0..2 {
+        driver.click("[data-testid=previous-frame]")?;
+        frame(driver, 0)?;
+    }
+    seek(driver, 1000)?;
+    driver.click("[data-testid=previous-frame]")?;
+    frame(driver, 900)?;
+    driver.click("[data-testid=next-frame]")?;
+    frame(driver, 1000)?;
+    seek(driver, 5900)?;
+    driver.click("[data-testid=next-frame]")?;
+    frame(driver, 5900)?;
+
+    seek(driver, 5500)?;
+    driver.click("#preview-play")?;
+    frame(driver, 5900)?;
+    let playback = driver.request(
+        reqwest::Method::POST,
+        "/execute/async",
+        json!({"script":r#"
+            const done=arguments[arguments.length-1],started=performance.now(),loadedFrames=[];
+            const oldUrl=document.querySelector('.source-frame')?.currentSrc;
+            const onLoad=event=>{
+                const image=event.target;
+                if(!image?.matches?.('.source-frame')||!image.complete||!image.naturalWidth)return;
+                const pts=Number(document.querySelector('.preview-shell')?.dataset.displayedTimeMs);
+                const playing=document.querySelector('#preview-play')?.getAttribute('aria-pressed')==='true';
+                if(!playing||!Number.isFinite(pts)||image.currentSrc!==image.src||image.currentSrc===oldUrl)return;
+                if(loadedFrames.some(frame=>frame.url===image.currentSrc))return;
+                loadedFrames.push({url:image.currentSrc,pts,playing,width:image.naturalWidth,height:image.naturalHeight});
+            };
+            document.addEventListener('load',onLoad,true);
+            document.querySelector('#preview-play').click();
+            setTimeout(()=>{
+                document.removeEventListener('load',onLoad,true);
+                done({
+                    elapsed:performance.now()-started,
+                    position:Number(document.querySelector('#preview-timeline').value),
+                    displayed:Number(document.querySelector('.preview-shell').dataset.displayedTimeMs),
+                    playing:document.querySelector('#preview-play').getAttribute('aria-pressed')==='true',
+                    old_url:oldUrl,loaded_frames:loadedFrames
+                });
+            },1500);
+        "#,"args":[]}),
+    )?;
+    let elapsed = playback["elapsed"]
+        .as_f64()
+        .ok_or("Missing elapsed playback time")?;
+    let position = playback["position"]
+        .as_f64()
+        .ok_or("Missing playback position")?;
+    if elapsed < 1450.0 || (position - elapsed).abs() > 400.0 || playback["playing"] != true {
+        return Err(format!("Playback did not restart and follow elapsed time: {playback}").into());
+    }
+    let loaded_frames = playback["loaded_frames"]
+        .as_array()
+        .ok_or("Missing decoded playback image loads")?;
+    if !loaded_frames.iter().any(|frame| {
+        frame["playing"] == true
+            && frame["url"].as_str().is_some_and(|url| !url.is_empty())
+            && frame["url"] != playback["old_url"]
+            && frame["pts"]
+                .as_u64()
+                .is_some_and(|pts| pts > 0 && pts < 5900)
+            && frame["width"] == 640
+            && frame["height"] == 360
+    }) {
+        return Err(
+            format!("No advancing decoded image loaded during playback: {playback}").into(),
+        );
+    }
+    driver.click("#preview-play")?;
+    driver.wait(
+        "const p=document.querySelector('.preview-shell'),image=document.querySelector('.source-frame'),timeline=document.querySelector('#preview-timeline');return document.querySelector('#preview-play')?.getAttribute('aria-pressed')==='false' && p?.getAttribute('aria-busy')==='false' && image?.complete && image.naturalWidth>0 && p?.dataset.displayedTimeMs!==undefined && timeline?.value===p.dataset.displayedTimeMs;",
+        30,
+    )?;
+    let paused = stationary(driver)?;
+    driver.click("#preview-play")?;
+    driver.wait(
+        "return document.querySelector('#preview-play')?.getAttribute('aria-pressed')==='true';",
+        5,
+    )?;
+    seek(driver, 2500)?;
+    let manual_seek = stationary(driver)?;
+    if manual_seek["after"]["time"].as_u64() != Some(2500)
+        || manual_seek["after"]["displayed"].as_u64() != Some(2500)
+    {
+        return Err(format!("Manual seek did not replace playback: {manual_seek}").into());
+    }
+    driver.script(
+        "const timeline=document.querySelector('#preview-timeline');timeline.value='5999';timeline.dispatchEvent(new Event('input',{bubbles:true}));return true;",
+    )?;
+    frame(driver, 5900)?;
+    let manual_end_restart = driver.request(
+        reqwest::Method::POST,
+        "/execute/async",
+        json!({"script":r#"
+            const done=arguments[arguments.length-1];
+            const sample=()=>({
+                position:Number(document.querySelector('#preview-timeline')?.value),
+                displayed:Number(document.querySelector('.preview-shell')?.dataset.displayedTimeMs),
+                playing:document.querySelector('#preview-play')?.getAttribute('aria-pressed')==='true'
+            });
+            const before=sample();
+            document.querySelector('#preview-play').click();
+            setTimeout(()=>done({requested_seek_ms:5999,play_presses:1,before,after:sample()}),0);
+        "#,"args":[]}),
+    )?;
+    if manual_end_restart["before"]["position"] != 5900
+        || manual_end_restart["before"]["displayed"] != 5900
+        || manual_end_restart["before"]["playing"] != false
+        || manual_end_restart["after"]["playing"] != true
+        || manual_end_restart["after"]["position"]
+            .as_u64()
+            .is_none_or(|position| position >= 5900)
+    {
+        return Err(format!(
+            "First Play did not restart the manual endpoint: {manual_end_restart}"
+        )
+        .into());
+    }
+    driver.click("#preview-stop")?;
+    frame(driver, 0)?;
+    Ok(json!({
+        "source": "en.mp4; generated 10fps MPEG-4 with GOP10",
+        "button_and_keyboard_pts": [0,100,200,100,0],
+        "keyframe_pts": [1000,900,1000],
+        "first_and_last_clamped": [0,5900],
+        "natural_end_restart_and_clock": playback,
+        "paused": paused,
+        "manual_seek": manual_seek,
+        "manual_end_restart": manual_end_restart,
+        "stop_returned_to_start": true
+    }))
+}
+
+fn stationary(driver: &Driver) -> Result<serde_json::Value> {
+    let result = driver.request(
+        reqwest::Method::POST,
+        "/execute/async",
+        json!({"script":r#"
+            const done=arguments[arguments.length-1];
+            const sample=()=>{
+                const preview=document.querySelector('.preview-shell'),image=document.querySelector('.source-frame');
+                return {time:Number(document.querySelector('#preview-timeline')?.value),
+                    displayed:Number(preview?.dataset.displayedTimeMs),
+                    pressed:document.querySelector('#preview-play')?.getAttribute('aria-pressed'),
+                    busy:preview?.getAttribute('aria-busy'),
+                    complete:image?.complete===true&&image.naturalWidth>0,
+                    source:image?.currentSrc};
+            };
+            const before=sample();
+            if(before.pressed!=='false'||before.busy!=='false'||!before.complete||before.time!==before.displayed){
+                done({before,unsettled:true});return;
+            }
+            setTimeout(()=>done({before,after:sample()}),350);
+        "#,"args":[]}),
+    )?;
+    let before = &result["before"];
+    let after = &result["after"];
+    if before["time"].as_u64().is_none()
+        || before["displayed"].as_u64().is_none()
+        || before["time"] != after["time"]
+        || before["displayed"] != after["displayed"]
+        || before["source"] != after["source"]
+        || [before, after].iter().any(|sample| {
+            sample["pressed"] != "false"
+                || sample["busy"] != "false"
+                || sample["complete"] != true
+                || sample["time"] != sample["displayed"]
+        })
+    {
+        return Err(format!("Paused or manually sought frame kept advancing: {result}").into());
+    }
+    Ok(result)
 }

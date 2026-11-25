@@ -1,4 +1,10 @@
-use crate::{helpers, player::Preview, roi_editor::Regions, state::Ui};
+use crate::{
+    helpers,
+    language_search::{KeyAction, LanguageSearch, current_language_option},
+    player::Preview,
+    roi_editor::Regions,
+    state::Ui,
+};
 use leptos::ev;
 use leptos::prelude::*;
 use nvsf_core::Rect;
@@ -6,7 +12,30 @@ use serde_json::json;
 
 #[component]
 pub fn Extract(ui: Ui) -> impl IntoView {
-    let lang_query = RwSignal::new(String::new());
+    let language_search = RwSignal::new(LanguageSearch::default());
+    let language_matches = Memo::new(move |_| language_search.with(LanguageSearch::options));
+    let language_input = NodeRef::<leptos::html::Input>::new();
+    Effect::new(move |_| {
+        let Some(code) = language_search.with(LanguageSearch::active_code) else {
+            return;
+        };
+        let document = document();
+        if let (Some(list), Some(option)) = (
+            document.get_element_by_id("language-results"),
+            document.get_element_by_id(&format!("language-option-{code}")),
+        ) {
+            let bounds = list.get_bounding_client_rect();
+            let item = option.get_bounding_client_rect();
+            let top = bounds.top() + f64::from(list.client_top());
+            let bottom = top + f64::from(list.client_height());
+            let delta = if item.top() < top {
+                item.top() - top
+            } else {
+                (item.bottom() - bottom).max(0.0)
+            };
+            list.set_scroll_top(list.scroll_top() + delta.round() as i32);
+        }
+    });
     let split = NodeRef::<leptos::html::Div>::new();
     let width = RwSignal::new(340i32);
     let drag = RwSignal::new(None::<(i32, i32)>);
@@ -55,75 +84,91 @@ pub fn Extract(ui: Ui) -> impl IntoView {
                     <div class="language-search-row">
                         <input
                             id="language-search"
+                            node_ref=language_input
                             type="search"
                             autocomplete="off"
                             placeholder="Search language by name or code…"
                             aria-label="Search subtitle language"
-                            prop:value=move || lang_query.get()
-                            on:input=move |e| lang_query.set(event_target_value(&e))
+                            role="combobox"
+                            aria-autocomplete="list"
+                            aria-controls="language-results"
+                            aria-expanded=move || language_search.with(LanguageSearch::is_open).to_string()
+                            aria-activedescendant=move || language_search.with(LanguageSearch::active_code).map(|code|format!("language-option-{code}"))
+                            prop:value=move || language_search.with(|search|search.query().to_owned())
+                            on:input=move |e| language_search.update(|search|search.set_query(event_target_value(&e)))
+                            on:focus=move |_| language_search.update(LanguageSearch::open)
+                            on:blur=move |_| language_search.update(LanguageSearch::close)
                             on:keydown=move |e: web_sys::KeyboardEvent| {
-                                if e.is_composing() || e.key_code() == 229 {return;}
-                                if e.key() == "Escape" && !lang_query.get_untracked().is_empty() {
+                                let mut action = KeyAction::Ignored;
+                                language_search.update(|search|action=search.key(&e.key(),e.is_composing()||e.key_code()==229));
+                                if action != KeyAction::Ignored {
                                     e.prevent_default();
-                                    lang_query.set(String::new());
-                                } else if e.key() == "Enter" {
-                                    let matches = helpers::language_options(&lang_query.get_untracked());
-                                    if let Some(first) = matches.first() {
-                                        ui.config.update(|c| c.language = first.code.clone());
-                                        lang_query.set(String::new());
-                                        e.prevent_default();
-                                    }
+                                }
+                                if let KeyAction::Selected(code)=action {
+                                    ui.config.update(|c|c.language=code);
                                 }
                             }
                         />
-                        <Show when=move || !lang_query.get().is_empty()>
+                        <Show when=move || language_search.with(|search|!search.query().is_empty())>
                             <button
                                 type="button"
                                 class="clear-search"
                                 aria-label="Clear language search"
-                                on:click=move |_| lang_query.set(String::new())
+                                on:mousedown=move |e|e.prevent_default()
+                                on:click=move |_| {
+                                    language_search.update(LanguageSearch::clear);
+                                    if let Some(input)=language_input.get_untracked(){let _=input.focus();}
+                                }
                             >"×"</button>
                         </Show>
                     </div>
-                    <Show when=move || !lang_query.get().trim().is_empty()>
-                        <div class="language-matches" role="listbox" aria-label="Matching subtitle languages">
+                    <Show when=move || language_search.with(LanguageSearch::is_open)>
+                        <div id="language-results" class="language-matches" role="listbox" aria-label="Matching subtitle languages">
                             {move || {
-                                let matches = helpers::language_options(&lang_query.get());
-                                if matches.is_empty() {
-                                    view! { <div class="language-empty muted">"No matching language"</div> }.into_any()
-                                } else {
-                                    matches
+                                    language_matches.get()
                                         .into_iter()
-                                        .take(30)
                                         .map(|lang| {
                                             let code = lang.code.clone();
                                             let active_code = lang.code.clone();
+                                            let selected_code = lang.code.clone();
                                             view! {
                                                 <button
+                                                    id=format!("language-option-{}",lang.code)
                                                     type="button"
                                                     role="option"
+                                                    tabindex="-1"
                                                     class="language-option"
-                                                    class:active=move || ui.config.with(|c| c.language == active_code)
+                                                    class:active=move || language_search.with(|search|search.active_code().as_ref()==Some(&active_code))
+                                                    aria-selected=move || language_search.with(|search|search.active_code().as_ref()==Some(&selected_code)).to_string()
+                                                    on:mousedown=move |e|e.prevent_default()
                                                     on:click=move |_| {
-                                                        ui.config.update(|c| c.language = code.clone());
-                                                        lang_query.set(String::new());
+                                                        let mut selected=None;
+                                                        language_search.update(|search|selected=search.choose(&code));
+                                                        if let Some(code)=selected {ui.config.update(|c|c.language=code);}
+                                                        if let Some(input)=language_input.get_untracked(){let _=input.focus();}
                                                     }
                                                 >{lang.label}</button>
                                             }
                                         })
                                         .collect_view()
-                                        .into_any()
-                                }
                             }}
                         </div>
+                        <Show when=move ||language_matches.with(Vec::is_empty)>
+                            <div class="language-empty muted" role="status">"No matching language"</div>
+                        </Show>
                     </Show>
-                    <select id="language" aria-label="Selected subtitle language" prop:value=move || ui.config.with(|c| c.language.clone()) on:change=move |e| ui.config.update(|c| c.language = event_target_value(&e))>
-                        {move || {
-                            helpers::language_options(&lang_query.get())
+                    <select id="language" aria-label="Selected subtitle language" prop:value=move || ui.config.with(|c| c.language.clone()) on:change=move |e| {
+                        ui.config.update(|c|c.language=event_target_value(&e));language_search.update(LanguageSearch::clear);
+                    }>
+                        {
+                            helpers::language_options("")
                                 .into_iter()
                                 .map(|language| view! { <option value=language.code>{language.label}</option> })
                                 .collect_view()
-                        }}
+                        }
+                        {move ||ui.config.with(|config|current_language_option(&config.language)).map(|language|view!{
+                            <option value=language.code selected=true>{language.label}</option>
+                        })}
                     </select>
                 </div>
                 <label for="device">"Processing device"</label>
@@ -164,7 +209,7 @@ pub fn Extract(ui: Ui) -> impl IntoView {
                 <p class="hint" dir="auto">{move ||ui.output.with(|d|d.as_ref().map(|d|d.name.clone()).unwrap_or_else(||"Choose where to save your subtitles.".into()))}</p>
                 <div class="action-stack">
                     <button id="extract-start" class="primary wide" title="Extract subtitles (Ctrl+Enter)" disabled=move ||!ui.can_extract() on:click=move |_|ui.start_extraction()>"Extract subtitles"</button>
-                    <button class="wide" disabled=move ||ui.busy.get()||ui.source.with(Option::is_none)||ui.output.with(Option::is_none) on:click=move |_|{
+                    <button id="extract-queue" class="wide" disabled=move ||ui.busy.get()||ui.source.with(Option::is_none)||ui.output.with(Option::is_none) on:click=move |_|{
                         ui.add_queue();
                     }>"Add to queue"</button>
                 </div>

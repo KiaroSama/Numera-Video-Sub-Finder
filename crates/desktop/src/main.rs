@@ -10,6 +10,7 @@ mod files;
 mod jobs;
 mod language_manager;
 mod model_manager;
+mod preview_transport;
 mod queue;
 #[cfg(test)]
 mod queue_tests;
@@ -179,6 +180,7 @@ fn main() {
             drop::accept_dropped_paths,
             files::choose_output,
             files::preview_frame,
+            preview_transport::preview_transport,
             files::preview_initial_frame,
             jobs::start_job,
             queue::queue_list,

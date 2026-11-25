@@ -5,6 +5,14 @@ use wasm_bindgen_futures::spawn_local;
 
 const ZOOM: [u32; 5] = [100, 150, 200, 300, 400];
 
+fn now_ms() -> Option<u64> {
+    web_sys::window()
+        .and_then(|window| window.performance())
+        .map(|clock| clock.now())
+        .filter(|now| now.is_finite() && *now >= 0.0)
+        .map(|now| now as u64)
+}
+
 impl Ui {
     fn duration(self) -> Option<u64> {
         self.source.with(|s| s.as_ref()?.media.duration_ms)
@@ -19,26 +27,74 @@ impl Ui {
     }
 
     pub(crate) fn toggle_play(self) {
+        let Some(now) = now_ms() else {
+            self.studio.playing.set(false);
+            self.studio
+                .transport
+                .update(|transport| transport.stop_clock());
+            self.error
+                .set(Some("Monotonic playback clock is unavailable".into()));
+            return;
+        };
         if self.studio.playing.get_untracked() {
             self.studio.playing.set(false);
+            let end = self.duration().unwrap_or(0).saturating_sub(1);
+            if let Some(position) = self
+                .studio
+                .transport
+                .try_update(|transport| transport.pause(now, end))
+                .flatten()
+            {
+                self.time.set(position);
+            }
+            self.pump_preview();
         } else if self.preview_controls_available() && self.duration().is_some_and(|end| end > 1) {
-            if self.time.get_untracked() >= self.duration().unwrap_or(0).saturating_sub(1) {
-                self.seek(self.config.with_untracked(|c| c.start_ms));
+            let position = self.studio.transport.try_update(|transport| {
+                transport.play(
+                    now,
+                    self.time.get_untracked(),
+                    self.config.with_untracked(|c| c.start_ms),
+                    self.duration().unwrap_or(0).saturating_sub(1),
+                )
+            });
+            if let Some(position) = position {
+                self.time.set(position);
             }
             self.studio.playing.set(true);
+            self.pump_preview();
+        }
+    }
+
+    pub(crate) fn step_frame(self, direction: i8) {
+        if self.preview_controls_available() {
+            self.studio.playing.set(false);
+            self.studio
+                .transport
+                .update(|transport| transport.step(direction));
+            self.pump_preview();
         }
     }
 
     pub(crate) fn step(self, delta: i64) {
         if self.preview_controls_available() {
             self.studio.playing.set(false);
-            self.seek(self.time.get_untracked().saturating_add_signed(delta));
+            let position = self
+                .studio
+                .transport
+                .with_untracked(|transport| transport.position());
+            self.seek(position.saturating_add_signed(delta));
         }
     }
 
     pub(crate) fn mark_range(self, end: bool) {
         if self.preview_controls_available() {
-            let time = self.time.get_untracked();
+            let Some(time) = self
+                .studio
+                .transport
+                .with_untracked(|transport| transport.displayed())
+            else {
+                return;
+            };
             if end {
                 self.set_end(Some(time));
             } else {
@@ -101,44 +157,97 @@ impl Ui {
             .duration_ms
             .map_or(time, |duration| time.min(duration.saturating_sub(1)));
         self.time.set(time);
-        if self.preview_busy.get_untracked() || self.studio.initial.get_untracked() {
+        self.studio.playing.set(false);
+        self.studio
+            .transport
+            .update(|transport| transport.seek(time));
+        self.pump_preview();
+    }
+
+    fn pump_preview(self) {
+        if self.closing.get_untracked()
+            || self.preview_busy.get_untracked()
+            || self.studio.initial.get_untracked()
+        {
             return;
         }
+        let Some(source) = self.source.get_untracked() else {
+            return;
+        };
+        if self.route.get_untracked() == "Review" && !self.review_source_linked() {
+            return;
+        }
+        let Some(request) = self
+            .studio
+            .transport
+            .try_update(|transport| transport.take_request(&source.token))
+            .flatten()
+        else {
+            return;
+        };
         self.preview_busy.set(true);
         self.preview_generation
             .update(|generation| *generation += 1);
         let generation = self.preview_generation.get_untracked();
         spawn_local(async move {
-            let preview = ipc::preview(&source.token, time).await;
-            let alive = !self.preview_url.is_disposed();
-            let current = alive
-                && self.preview_generation.get_untracked() == generation
-                && self
-                    .source
-                    .with_untracked(|s| s.as_ref().is_some_and(|s| s.token == source.token));
+            let preview = ipc::preview(&request.source, request.at_ms, request.step).await;
+            if self.preview_url.is_disposed() {
+                if let Ok(frame) = preview {
+                    let _ = web_sys::Url::revoke_object_url(&frame.url);
+                }
+                return;
+            }
+            let token = self
+                .source
+                .with_untracked(|source| source.as_ref().map(|source| source.token.clone()));
+            let token = (self.preview_generation.get_untracked() == generation)
+                .then_some(token)
+                .flatten();
+            let completion = self
+                .studio
+                .transport
+                .try_update(|transport| {
+                    transport.finish(
+                        &request,
+                        token.as_deref(),
+                        preview.as_ref().ok().map(|frame| frame.time_ms),
+                    )
+                })
+                .unwrap_or_default();
             match preview {
-                Ok(url) if current => {
+                Ok(frame) if completion.publish => {
                     let old = self.preview_url.get_untracked();
-                    self.preview_url.set(url);
+                    self.preview_url.set(frame.url);
+                    self.studio.frame_duration.set(Some(frame.duration_ms));
+                    if !self.studio.playing.get_untracked() {
+                        self.time.set(frame.time_ms);
+                    }
                     if !old.is_empty() {
                         let _ = web_sys::Url::revoke_object_url(&old);
                     }
                 }
-                Ok(url) => {
-                    let _ = web_sys::Url::revoke_object_url(&url);
+                Ok(frame) => {
+                    let _ = web_sys::Url::revoke_object_url(&frame.url);
                 }
-                Err(error) if current && self.time.get_untracked() == time => {
+                Err(error) if completion.current => {
                     self.studio.playing.set(false);
+                    self.studio
+                        .transport
+                        .update(|transport| transport.stop_clock());
                     self.error.set(Some(error));
                 }
                 Err(_) => {}
             }
-            if alive {
+            if completion.released {
                 self.preview_busy.set(false);
                 if self.studio.initial.get_untracked() {
                     self.request_initial_frame();
-                } else if !current || self.time.get_untracked() != time {
-                    self.seek(self.time.get_untracked());
+                } else if self
+                    .studio
+                    .transport
+                    .with_untracked(|transport| transport.has_pending())
+                {
+                    self.pump_preview();
                 }
             }
         });
@@ -148,22 +257,41 @@ impl Ui {
 pub(crate) fn watch_playback(ui: Ui) {
     let interval = Interval::new(250, move || {
         if !ui.studio.playing.get_untracked() {
+            ui.studio
+                .transport
+                .update(|transport| transport.stop_clock());
             return;
         }
         if !matches!(ui.route.get_untracked().as_str(), "Extract" | "Review")
             || !ui.preview_controls_available()
         {
             ui.studio.playing.set(false);
-            return;
-        }
-        if ui.preview_busy.get_untracked() {
+            ui.studio
+                .transport
+                .update(|transport| transport.stop_clock());
             return;
         }
         let end = ui.duration().unwrap_or(0).saturating_sub(1);
-        let next = ui.time.get_untracked().saturating_add(250).min(end);
-        ui.seek(next);
-        if next >= end {
+        let Some(now) = now_ms() else {
             ui.studio.playing.set(false);
+            ui.studio
+                .transport
+                .update(|transport| transport.stop_clock());
+            ui.error
+                .set(Some("Monotonic playback clock is unavailable".into()));
+            return;
+        };
+        if let Some((position, ended)) = ui
+            .studio
+            .transport
+            .try_update(|transport| transport.tick(now, end))
+            .flatten()
+        {
+            ui.time.set(position);
+            if ended {
+                ui.studio.playing.set(false);
+            }
+            ui.pump_preview();
         }
     });
     let interval = StoredValue::new_local(Some(interval));
@@ -207,7 +335,9 @@ pub(crate) fn Preview(ui: Ui, #[prop(optional)] editor: bool) -> impl IntoView {
     };
     let disabled = move || !ui.preview_controls_available();
     view! {
-        <div class="preview-shell" aria-busy=move ||ui.preview_busy.get()||ui.studio.initial.get()>
+        <div class="preview-shell" aria-busy=move ||if ui.preview_busy.get()||ui.studio.initial.get(){"true"}else{"false"}
+            data-displayed-time-ms=move || ui.studio.transport.with(|transport| transport.displayed()).map(|time| time.to_string())
+            data-frame-duration-ms=move || ui.studio.frame_duration.get().map(|duration| duration.to_string())>
             <Show when=move || (editor||ui.review_source_linked())&&!ui.preview_url.get().is_empty() fallback=move ||view! {
                 <div class="preview-empty">
                     <svg viewBox="0 0 48 48" aria-hidden="true"><rect x="7" y="12" width="34" height="24" rx="3"/><path d="m20 18 10 6-10 6z"/></svg>
@@ -235,8 +365,8 @@ pub(crate) fn Preview(ui: Ui, #[prop(optional)] editor: bool) -> impl IntoView {
                     on:click=move |_|ui.toggle_play()>{move ||if ui.studio.playing.get(){"Pause"}else{"Play"}}</button>
                 <button id={editor.then_some("preview-stop")} disabled=disabled on:click=move |_|{ui.studio.playing.set(false);ui.seek(ui.config.with_untracked(|c|c.start_ms));}>"Stop"</button>
                 <button title="Jump back one second (Shift+Left)" disabled=disabled on:click=move |_|ui.step(-1000)>"−1s"</button>
-                <button title="Previous frame (Left)" disabled=disabled on:click=move |_|ui.step(-40)>"Prev frame"</button>
-                <button title="Next frame (Right)" disabled=disabled on:click=move |_|ui.step(40)>"Next frame"</button>
+                <button data-testid="previous-frame" title="Previous frame (Left)" disabled=disabled on:click=move |_|ui.step_frame(-1)>"Prev frame"</button>
+                <button data-testid="next-frame" title="Next frame (Right)" disabled=disabled on:click=move |_|ui.step_frame(1)>"Next frame"</button>
                 <button title="Jump forward one second (Shift+Right)" disabled=disabled on:click=move |_|ui.step(1000)>"+1s"</button>
                 {editor.then(||view! {
                     <button id="set-start" title="Set start (I)" disabled=disabled on:click=move |_|ui.mark_range(false)>"Set start"</button>

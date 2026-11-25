@@ -176,6 +176,37 @@ impl MediaRuntime {
         )?;
         preview.finish()
     }
+
+    /// Returns the source frame and its actual presentation time. A step of -1 or 1
+    /// selects the nearest preceding or following timestamp, clamped at the clip edges.
+    pub fn preview_frame(&self, path: &Path, time_ms: u64, step: i8) -> Result<DecodedFrame> {
+        if step == 0 {
+            let mut preview = preview::Preview::new(time_ms);
+            self.decode_inner(
+                path,
+                time_ms,
+                None,
+                true,
+                |frame| Ok(preview.observe(frame)),
+            )?;
+            preview.finish_frame()
+        } else if matches!(step, -1 | 1) {
+            let mut adjacent = preview::Adjacent::new(time_ms, step);
+            // Seeking just before the reference also includes the predecessor when the
+            // displayed frame is itself a keyframe. Decode still uses source PTS.
+            let seek_ms = if step < 0 {
+                time_ms.saturating_sub(1)
+            } else {
+                time_ms
+            };
+            self.decode_inner(path, seek_ms, None, true, |frame| {
+                Ok(adjacent.observe(frame))
+            })?;
+            adjacent.finish()
+        } else {
+            Err(fail("Frame preview step must be -1, 0 or 1"))
+        }
+    }
 }
 
 fn input_path(path: &Path) -> Result<String> {

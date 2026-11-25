@@ -127,3 +127,57 @@ fn native_preview_selects_the_frame_displayed_at_the_requested_time() {
         "extraction must retain its start-bound filtering"
     );
 }
+
+#[test]
+fn native_frame_steps_keep_24_and_60_fps_neighbors_and_source_bytes() {
+    let directory = tempfile::tempdir().unwrap();
+    let runtime = runtime(directory.path());
+    for (rate, timestamps, duration) in [(24, [0, 41, 83], 125), (60, [0, 16, 33], 50)] {
+        let path = directory.path().join(format!("adjacent 日本 {rate}.y4m"));
+        let mut bytes = format!("YUV4MPEG2 W4 H2 F{rate}:1 Ip A1:1 C444\n").into_bytes();
+        for luma in [16, 128, 235] {
+            bytes.extend_from_slice(b"FRAME\n");
+            bytes.extend_from_slice(&[luma; 8]);
+            bytes.extend_from_slice(&[128; 16]);
+        }
+        std::fs::write(&path, &bytes).unwrap();
+        assert_eq!(runtime.probe(&path).unwrap().duration_ms, Some(duration));
+        let first = runtime.preview_frame(&path, 0, 0).unwrap();
+        let middle = runtime.preview_frame(&path, first.time_ms, 1).unwrap();
+        let last = runtime.preview_frame(&path, middle.time_ms, 1).unwrap();
+        assert_eq!([first.time_ms, middle.time_ms, last.time_ms], timestamps);
+        assert!(first.image.get_pixel(0, 0)[0] < middle.image.get_pixel(0, 0)[0]);
+        assert!(middle.image.get_pixel(0, 0)[0] < last.image.get_pixel(0, 0)[0]);
+        assert_eq!(
+            runtime
+                .preview_frame(&path, last.time_ms, -1)
+                .unwrap()
+                .time_ms,
+            timestamps[1]
+        );
+        assert_eq!(
+            runtime
+                .preview_frame(&path, middle.time_ms, -1)
+                .unwrap()
+                .time_ms,
+            0
+        );
+        assert_eq!(runtime.preview_frame(&path, 0, -1).unwrap().time_ms, 0);
+        assert_eq!(
+            runtime
+                .preview_frame(&path, last.time_ms, 1)
+                .unwrap()
+                .time_ms,
+            timestamps[2]
+        );
+        assert_eq!(runtime.preview_frame(&path, 10, 0).unwrap().time_ms, 0);
+        let tail = runtime.preview_frame(&path, duration - 1, 0).unwrap();
+        assert_eq!(tail.time_ms, last.time_ms);
+        assert_eq!(tail.image, last.image);
+        assert_eq!(runtime.preview(&path, duration - 1).unwrap(), last.image);
+        assert!(runtime.preview_frame(&path, duration, 0).is_err());
+        assert!(runtime.preview(&path, duration).is_err());
+        assert!(runtime.preview_frame(&path, 0, 2).is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), bytes);
+    }
+}

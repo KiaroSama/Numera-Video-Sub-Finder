@@ -264,6 +264,54 @@ impl Fuzz<'_> {
                 "Fuzz build lacks actual ASan and coverage instrumentation evidence.".into(),
             );
         }
+        // Bind report metadata to the dependency that the locked build resolved.
+        let package_capture = self.work.join("logs/libfuzzer-sys-package-id.stdout");
+        let mut package = Command::new("cargo");
+        package.arg(format!("+{NIGHTLY}")).args([
+            "pkgid",
+            "--frozen",
+            "--manifest-path",
+            "fuzz/Cargo.toml",
+            "libfuzzer-sys",
+        ]);
+        let package_guard =
+            self.guard("fuzz-package-id", 30, 10, package, Some(&package_capture))?;
+        evidence(
+            self.root,
+            "fuzz-package-id",
+            &package_guard,
+            8 * 1024 * 1024,
+        )?;
+        if ci_guard::unlinked(&package_capture)?.len() > 1024 {
+            return Err("Oversized libfuzzer-sys package identity.".into());
+        }
+        let package_id = fs::read_to_string(&package_capture)?;
+        let version = package_id
+            .trim()
+            .rsplit_once("#libfuzzer-sys@")
+            .map(|(_, version)| version)
+            .filter(|version| {
+                !version.is_empty()
+                    && version.len() <= 128
+                    && version.bytes().all(|byte| {
+                        byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'+')
+                    })
+            })
+            .ok_or("Unexpected fully qualified libfuzzer-sys package identity.")?;
+        if package_id.trim().lines().count() != 1 {
+            return Err("libfuzzer-sys identity must contain exactly one package.".into());
+        }
+        self.report["libfuzzer_sys"] = json!(version);
+        self.report["dependency_identity"] = json!({
+            "file":"logs/libfuzzer-sys-package-id.stdout",
+            "sha256":hash(&package_capture)?,
+        });
+        log(
+            self.log,
+            "SRT-FUZZ",
+            "DEBUG",
+            &format!("Resolved locked libfuzzer-sys dependency version={version}"),
+        )?;
         if hash(&lock)? != lock_before {
             return Err("Fuzz build changed its committed lockfile.".into());
         }
@@ -508,7 +556,7 @@ pub(crate) fn run() -> Result<()> {
         eprintln!("Fuzz file logging initialization failed; no admission result was produced.")
     })?;
     let started = Instant::now();
-    let mut output = json!({"schema":1,"source_sha":sha,"target":"linux-x64","profile":"bounded-srt-libfuzzer","passed":false,"tests":1,"failed":1,"skipped":0,"sanitizer":"address","workers":1,"nightly":NIGHTLY,"cargo_fuzz":"0.13.2","libfuzzer_sys":"0.4.13","limits":{"campaign_seconds":30,"wall_seconds":90,"idle_seconds":45,"max_len":4096,"input_timeout_seconds":2,"rss_mb":512,"malloc_mb":64},"qualification":"bounded parser campaign only; not native FFI, Loom or full CT-06 qualification"});
+    let mut output = json!({"schema":1,"source_sha":sha,"target":"linux-x64","profile":"bounded-srt-libfuzzer","passed":false,"tests":1,"failed":1,"skipped":0,"sanitizer":"address","workers":1,"nightly":NIGHTLY,"cargo_fuzz":"0.13.2","libfuzzer_sys":null,"limits":{"campaign_seconds":30,"wall_seconds":90,"idle_seconds":45,"max_len":4096,"input_timeout_seconds":2,"rss_mb":512,"malloc_mb":64},"qualification":"bounded parser campaign only; not native FFI, Loom or full CT-06 qualification"});
     report(&path, &output)?;
     let result = Fuzz {
         root: &root,

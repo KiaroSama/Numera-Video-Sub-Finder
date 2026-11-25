@@ -174,7 +174,7 @@ pub(crate) fn RoiCanvas(
                     on:mousedown=move |e|if editor {begin_edit(ui,bounds,&e,id,(0,0))}>
                     {if editor {
                         let name = if excluded {format!("Select exclusion {}",index+1)} else {format!("Select region {}",index+1)};
-                        view! {<button type="button" class="roi-pick" aria-label=name aria-pressed=move ||ui.studio.roi.get()==Some(id)
+                        view! {<button type="button" class="roi-pick" aria-label=name aria-pressed=move ||if ui.studio.roi.get()==Some(id){"true"}else{"false"}
                             on:click=move |_|ui.studio.roi.set(Some(id))>{label}</button>}.into_any()
                     } else {view! {<span class="roi-label">{label}</span>}.into_any()}}
                     {editor.then(||HANDLES.into_iter().map(|(name,edges)|view! {
@@ -234,7 +234,7 @@ pub(crate) fn Regions(ui: Ui) -> impl IntoView {
             let remove_disabled = !excluded && c.regions.len() == 1;
             view! {
                 <div class="region-row" class:selected=move ||ui.studio.roi.get()==Some(id)>
-                    <button class="region-select" type="button" aria-pressed=move ||ui.studio.roi.get()==Some(id)
+                    <button class="region-select" type="button" aria-pressed=move ||if ui.studio.roi.get()==Some(id){"true"}else{"false"}
                         on:click=move |_|ui.studio.roi.set(Some(id))>{format!("{kind} {number}")}</button>
                     <input aria-label=field prop:value=format!("{:.4},{:.4},{:.4},{:.4}",rect.x,rect.y,rect.width,rect.height)
                         on:focus=move |_|ui.studio.roi.set(Some(id))

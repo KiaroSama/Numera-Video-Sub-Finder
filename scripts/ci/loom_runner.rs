@@ -139,6 +139,8 @@ fn main() {
 
     let sha = std::env::var("GITHUB_SHA").unwrap_or_default();
     let mut prod_hash = String::new();
+    let mut lock_hash = String::new();
+    let mut loom_version = String::new();
     let mut executions = 0_u64;
     let outcome: Result<(), Box<dyn Error>> = (|| {
         if sha.len() != 40 || !sha.bytes().all(|b| b.is_ascii_hexdigit()) {
@@ -149,7 +151,9 @@ fn main() {
             return Err("Loom checkout source mismatch.".into());
         }
         let source = root.join("crates/core/src/close_admission.rs");
+        let lockfile = root.join("ci/loom/Cargo.lock");
         prod_hash = sha256_file(&source)?;
+        lock_hash = sha256_file(&lockfile)?;
         let capture = work.join("model.stdout");
         log_line(
             &mut log,
@@ -210,32 +214,89 @@ fn main() {
         }
         executions = exec_lines[0];
 
-        let mut guards: Vec<PathBuf> = Vec::new();
-        for entry in std::fs::read_dir(ci_work.join("logs"))? {
-            let entry = entry?;
-            let name = entry.file_name();
-            let s = name.to_string_lossy();
-            if s.starts_with("guard-close-loom_")
-                && s.ends_with("_UTC.log")
-                && entry.file_type()?.is_file()
-            {
-                guards.push(entry.path());
+        // Resolve the dependency used by the locked model, after its fetch/build.
+        // A copied version literal would silently drift after Dependabot updates.
+        let package_capture = work.join("loom-package-id.stdout");
+        let status = Command::new(&xtask)
+            .args([
+                "ci-guard",
+                "--name",
+                "loom-package-id",
+                "--wall-seconds",
+                "30",
+                "--idle-seconds",
+                "10",
+                "--executable",
+                "cargo",
+                "--capture-stdout-path",
+            ])
+            .arg(&package_capture)
+            .args([
+                "--",
+                "pkgid",
+                "--frozen",
+                "--manifest-path",
+                "ci/loom/Cargo.toml",
+                "loom",
+            ])
+            .status()?;
+        if !status.success() || package_capture.metadata()?.len() > 1024 {
+            return Err("Missing successful bounded Loom package identity.".into());
+        }
+        let package_id = std::fs::read_to_string(&package_capture)?;
+        let version = package_id
+            .trim()
+            .rsplit_once("#loom@")
+            .map(|(_, version)| version)
+            .filter(|version| {
+                !version.is_empty()
+                    && version.len() <= 128
+                    && version.bytes().all(|byte| {
+                        byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'+')
+                    })
+            })
+            .ok_or("Unexpected fully qualified Loom package identity.")?;
+        if package_id.trim().lines().count() != 1 {
+            return Err("Loom package identity must contain exactly one package.".into());
+        }
+        loom_version = version.to_owned();
+        log_line(
+            &mut log,
+            "DEBUG",
+            &format!("Resolved locked Loom dependency version={loom_version}"),
+        );
+
+        for guard_name in ["close-loom", "loom-package-id"] {
+            let mut guards: Vec<PathBuf> = Vec::new();
+            for entry in std::fs::read_dir(ci_work.join("logs"))? {
+                let entry = entry?;
+                let name = entry.file_name();
+                let s = name.to_string_lossy();
+                if s.starts_with(&format!("guard-{guard_name}_"))
+                    && s.ends_with("_UTC.log")
+                    && entry.file_type()?.is_file()
+                {
+                    guards.push(entry.path());
+                }
+            }
+            if guards.len() != 1 || guards[0].metadata()?.len() > 8_388_608 {
+                return Err(format!("Missing unique bounded {guard_name} guard evidence.").into());
+            }
+            let guard_text = std::fs::read_to_string(&guards[0])?;
+            let cleaned = guard_text
+                .contains(&format!("Command finished name={guard_name} exit_code=0 "))
+                && guard_text
+                    .split("Cleanup verified pid=")
+                    .nth(1)
+                    .is_some_and(|tail| tail.bytes().next().is_some_and(|b| b.is_ascii_digit()));
+            if !cleaned {
+                return Err(format!("{guard_name} requires successful owned cleanup.").into());
             }
         }
-        if guards.len() != 1 || guards[0].metadata()?.len() > 8_388_608 {
-            return Err("Missing unique bounded Loom guard evidence.".into());
-        }
-        let guard_text = std::fs::read_to_string(&guards[0])?;
-        let cleaned = guard_text.contains("Command finished name=close-loom exit_code=0 ")
-            && guard_text
-                .split("Cleanup verified pid=")
-                .nth(1)
-                .is_some_and(|tail| tail.bytes().next().is_some_and(|b| b.is_ascii_digit()));
-        if !cleaned {
-            return Err("Loom requires successful owned cleanup.".into());
-        }
-        if sha256_file(&source)? != prod_hash {
-            return Err("Production model source changed during execution.".into());
+        if sha256_file(&source)? != prod_hash || sha256_file(&lockfile)? != lock_hash {
+            return Err(
+                "Production model source or dependency lock changed during execution.".into(),
+            );
         }
         log_line(
             &mut log,
@@ -251,14 +312,21 @@ fn main() {
     }
     let report = if passed {
         format!(
-            "{{\"schema\":1,\"source_sha\":\"{sha}\",\"target\":\"linux-x64\",\"passed\":true,\"tests\":1,\"failed\":0,\"skipped\":0,\"scope\":\"production close-request lease only\",\"suites\":[{{\"name\":\"actual_close_lease_excludes_duplicates_and_reopens_after_drop\",\"tests\":1,\"failed\":0,\"skipped\":0}}],\"production_source_sha256\":\"{prod_hash}\",\"loom_version\":\"0.7.2\",\"model_executions\":{executions},\"cleanup_verified\":true}}\n"
+            "{{\"schema\":1,\"source_sha\":\"{sha}\",\"target\":\"linux-x64\",\"passed\":true,\"tests\":1,\"failed\":0,\"skipped\":0,\"scope\":\"production close-request lease only\",\"suites\":[{{\"name\":\"actual_close_lease_excludes_duplicates_and_reopens_after_drop\",\"tests\":1,\"failed\":0,\"skipped\":0}}],\"production_source_sha256\":\"{prod_hash}\",\"loom_version\":\"{loom_version}\",\"loom_lockfile_sha256\":\"{lock_hash}\",\"model_executions\":{executions},\"cleanup_verified\":true}}\n"
         )
     } else {
         format!(
             "{{\"schema\":1,\"source_sha\":\"{sha}\",\"target\":\"linux-x64\",\"passed\":false,\"tests\":0,\"failed\":1,\"skipped\":0,\"scope\":\"production close-request lease only\",\"suites\":[]}}\n"
         )
     };
-    let _ = std::fs::write(work.join("loom-report.json"), report);
+    if let Err(e) = std::fs::write(work.join("loom-report.json"), report) {
+        log_line(
+            &mut log,
+            "ERROR",
+            &format!("Failed to write Loom evidence: {e}"),
+        );
+        std::process::exit(1);
+    }
     if outcome.is_err() {
         std::process::exit(1);
     }

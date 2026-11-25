@@ -28,13 +28,56 @@ impl Preview {
     }
 
     pub(super) fn finish(self) -> Result<RgbImage> {
+        self.finish_frame().map(|frame| frame.image)
+    }
+
+    pub(super) fn finish_frame(self) -> Result<DecodedFrame> {
         if let Some(frame) = self.preceding
             && (self.observed_next
                 || self.at_ms < frame.time_ms.saturating_add(frame.estimated_duration_ms))
         {
-            return Ok(frame.image);
+            return Ok(frame);
         }
         Err(fail("No frame at the requested presentation time"))
+    }
+}
+
+pub(super) struct Adjacent {
+    at_ms: u64,
+    direction: i8,
+    selected: Option<DecodedFrame>,
+}
+
+impl Adjacent {
+    pub(super) fn new(at_ms: u64, direction: i8) -> Self {
+        Self {
+            at_ms,
+            direction,
+            selected: None,
+        }
+    }
+
+    pub(super) fn observe(&mut self, frame: DecodedFrame) -> bool {
+        if self.direction < 0 {
+            if frame.time_ms >= self.at_ms {
+                // At the first source frame there is no predecessor: retain that frame.
+                if self.selected.is_none() {
+                    self.selected = Some(frame);
+                }
+                return false;
+            }
+            self.selected = Some(frame);
+            true
+        } else {
+            let following = frame.time_ms > self.at_ms;
+            self.selected = Some(frame);
+            !following
+        }
+    }
+
+    pub(super) fn finish(self) -> Result<DecodedFrame> {
+        self.selected
+            .ok_or_else(|| fail("No frame available for adjacent-frame preview"))
     }
 }
 

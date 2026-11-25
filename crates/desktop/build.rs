@@ -24,6 +24,7 @@ fn main() {
             "accept_dropped_paths",
             "choose_output",
             "preview_frame",
+            "preview_transport",
             "start_job",
             "queue_list",
             "queue_add",
