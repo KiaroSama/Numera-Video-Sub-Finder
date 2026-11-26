@@ -18,7 +18,44 @@ CLI version: v0.6.0
 
 ## Global flags
 
-- `--data-root <PATH>`: Override the application data directory (models, projects, logs, cache, `desktop-queue.json`, `updates.json`). Can appear before or after the subcommand.
+- `--data-root <PATH>`: Override the CLI's application data directory (models, projects, logs, cache, `desktop-queue.json`, `updates.json`). Can appear before or after the subcommand. The desktop executable does not parse this flag.
+
+### Shared desktop and CLI data directory
+
+Both programs resolve storage in this order: an explicit CLI `--data-root` when supplied, the process environment variable `NVSF_DATA_ROOT`, the executable's sibling `data` directory when `portable.flag` exists, then the platform-local `Numera Video Sub Finder` application-data directory. The desktop starts without an explicit CLI path. A conflicting CLI flag overrides the shared environment setting.
+
+To use an existing desktop data directory, read **Settings → Resources and diagnostics → Data root** and pass that directory to the CLI. To choose a shared directory for new launches, exit the desktop normally first and set `NVSF_DATA_ROOT` in the launching shell. This selects storage; it does not move existing files. An already running desktop keeps its original directory.
+
+PowerShell 7 example for a Windows portable package; adjust the package and data paths to your installation:
+
+```powershell
+function Write-NvsfLog {
+    param(
+        [ValidateSet('INFO', 'WARNING', 'ERROR', 'DEBUG')][string]$Level,
+        [string]$Message
+    )
+    $nvsfTimestamp = [DateTimeOffset]::UtcNow.ToString('o')
+    Write-Information "[$nvsfTimestamp] [$Level] [DATA] $Message" -InformationAction Continue
+}
+
+$nvsfPackage = 'G:\Program Files\Numera Video Sub Finder'
+$env:NVSF_DATA_ROOT = 'G:\Program Files\Portable\Scripts\Numera-Video-Sub-Finder\data'
+Write-NvsfLog INFO 'Selected the shared data directory for this shell and its child processes.'
+Write-NvsfLog WARNING 'Exit any existing desktop instance normally before continuing.'
+
+try {
+    Write-NvsfLog DEBUG 'Inspecting the CLI data_root before requesting a new desktop launch.'
+    & (Join-Path $nvsfPackage 'nvsf.exe') preferences get
+    if ($LASTEXITCODE -ne 0) { throw 'The CLI preferences lookup failed.' }
+    Start-Process -FilePath (Join-Path $nvsfPackage 'Numera Video Sub Finder.exe') -ErrorAction Stop
+    Write-NvsfLog INFO 'Desktop launch requested with the shared data-root environment.'
+} catch {
+    Write-NvsfLog ERROR 'Could not inspect settings or launch the desktop; check executable paths and directory permissions.'
+    throw
+}
+```
+
+Compare the printed `data_root` with the desktop's Settings value after launch. Keep this environment setting for later CLI commands, or pass the same directory explicitly with `--data-root`.
 
 ## Exit codes
 

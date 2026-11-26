@@ -9,7 +9,7 @@ use std::path::Path;
 /// - playback transport bar (`#preview-play`, `#preview-stop`, `#preview-timeline`, `#set-start`, `#set-end`)
 /// - header Save / Save As and F1 Shortcuts modal open and dismiss cleanly
 pub fn verify(driver: &Driver, output: &Path) -> Result<()> {
-    verify_menubar(driver)?;
+    verify_menubar(driver, output)?;
     // 1. Default studio geometry: no outer vertical overflow and no preview inner scrollbars at Fit (100%).
     let geom = driver.script(
         "const doc=document.documentElement,vp=document.querySelector('.preview-viewport');\
@@ -358,23 +358,190 @@ fn stationary(driver: &Driver) -> Result<serde_json::Value> {
     Ok(result)
 }
 
-fn verify_menubar(driver: &Driver) -> Result<()> {
+fn verify_menubar(driver: &Driver, output: &Path) -> Result<()> {
     driver.wait(r#"const bar = document.querySelector('#app-menubar[role=menubar][aria-label="Application menu"]');
         const items = [...(bar?.querySelectorAll(':scope > button[role=menuitem]') ?? [])];
         return !!bar?.getBoundingClientRect().height && items.map(item => item.textContent.trim()).join(',') === 'File,Edit,View,Tools,Help'
           && items.every((item, i) => item.getAttribute('tabindex') === (i ? '-1' : '0'))
           && document.documentElement.scrollHeight <= document.documentElement.clientHeight
           && getComputedStyle(document.querySelector('.preview-shell')).colorScheme.includes('dark');"#, 5)?;
+    let mut keyboard = Vec::new();
+    // These cancelable events exercise the app handlers, not native keyboard delivery.
+    for (menu, key) in [("file", "Enter"), ("view", " ")] {
+        driver.script(&format!(
+            "document.querySelector('#menu-trigger-{menu}').focus();return true;"
+        ))?;
+        let opened = menu_key(driver, key, false)?;
+        if opened["prevented"] != true {
+            return Err(format!(
+                "Menu activation did not cancel the native button toggle: {opened}"
+            )
+            .into());
+        }
+        driver.wait(&format!("const menu=document.querySelector('[aria-labelledby=menu-trigger-{menu}]:not([hidden])');return !!menu&&document.activeElement===menu.querySelector('button:enabled');"), 5)?;
+        keyboard.push(opened);
+        for (arrow, index) in [("ArrowUp", "items.length-1"), ("ArrowDown", "0")] {
+            keyboard.push(menu_key(driver, arrow, false)?);
+            driver.wait(&format!("const items=[...document.querySelectorAll('[aria-labelledby=menu-trigger-{menu}] button:enabled')];return items.length>0&&document.activeElement===items[{index}];"), 5)?;
+        }
+        keyboard.push(menu_key(driver, "Escape", false)?);
+        driver.wait(&format!("return document.activeElement===document.querySelector('#menu-trigger-{menu}[aria-expanded=false]');"), 5)?;
+    }
     driver.click("#menu-trigger-file")?;
     driver.wait(r#"return !!document.querySelector('#menu-trigger-file[aria-expanded=true]') && !!document.querySelector('[aria-labelledby=menu-trigger-file]:not([hidden]) [role=menuitem]');"#, 5)?;
-    driver.script(r#"document.querySelector('#menu-trigger-file').dispatchEvent(new KeyboardEvent('keydown', {key:'ArrowRight', bubbles:true})); return true;"#)?;
+    keyboard.push(menu_key(driver, "ArrowRight", false)?);
     driver.wait(r#"return !!document.querySelector('#menu-trigger-file[aria-expanded=false]') && document.activeElement === document.querySelector('#menu-trigger-edit[aria-expanded=true]');"#, 5)?;
-    driver.script(r#"document.activeElement.dispatchEvent(new KeyboardEvent('keydown', {key:'Escape', bubbles:true})); return true;"#)?;
+    keyboard.push(menu_key(driver, "Escape", false)?);
     driver.wait(r#"return document.activeElement === document.querySelector('#menu-trigger-edit[aria-expanded=false]');"#, 5)?;
+    std::fs::write(
+        output.join("menubar-keyboard.json"),
+        serde_json::to_vec_pretty(
+            &json!({"method":"synthetic cancelable keydown on focused controls; native keyboard delivery unverified","events":keyboard}),
+        )?,
+    )?;
+    verify_about(driver, output)?;
+    Ok(())
+}
+
+fn menu_key(driver: &Driver, key: &str, control: bool) -> Result<serde_json::Value> {
+    driver.script(&format!(r#"
+        const target=document.activeElement;
+        if(!target)throw new Error('No focused control for keyboard witness');
+        const event=new KeyboardEvent('keydown',{{key:{},ctrlKey:{control},bubbles:true,cancelable:true}});
+        target.dispatchEvent(event);
+        return {{key:event.key,control:event.ctrlKey,target:target.id||target.tagName,prevented:event.defaultPrevented}};
+    "#, serde_json::to_string(key)?))
+}
+
+fn modal_workspace(driver: &Driver) -> Result<serde_json::Value> {
+    driver.script(r#"
+        const required=selector=>{const element=document.querySelector(selector);if(!element)throw new Error(`Missing modal witness control: ${selector}`);return element;};
+        const regions=[...document.querySelectorAll('.region-row input')].map(input=>input.value);
+        const selected=[...document.querySelectorAll('.region-select')].map(button=>button.getAttribute('aria-pressed'));
+        const image=required('.source-frame'),preview=required('.preview-shell');
+        if(!regions.length||selected.length!==regions.length||selected.some(value=>!['true','false'].includes(value))||
+            regions.some(value=>{const numbers=value.split(',').map(Number);return numbers.length!==4||numbers.some(number=>!Number.isFinite(number));})||
+            !image.complete||image.naturalWidth!==640||image.naturalHeight!==360||!preview.dataset.displayedTimeMs)
+            throw new Error('Modal witness requires loaded fixture pixels, source PTS, and nonempty region controls');
+        return {route:required('h1').textContent,source:required('.source-line strong').textContent,
+            regions,selected,frameSize:[image.naturalWidth,image.naturalHeight],
+            timeline:required('#preview-timeline').value,displayed:preview.dataset.displayedTimeMs,
+            playing:required('#preview-play').getAttribute('aria-pressed'),
+            zoom:required('select[aria-label="Preview zoom"]').value,
+            start:required('#range-start').value,end:required('#range-end').value,
+            saveDisabled:required('#header-save').disabled,
+            dialogs:[...document.querySelectorAll('dialog[open]')].map(dialog=>dialog.id)};
+    "#)
+}
+
+fn verify_about(driver: &Driver, output: &Path) -> Result<()> {
+    seek(driver, 1000)?;
+    let original = modal_workspace(driver)?;
+    if original["route"] != "Extract"
+        || original["source"] != "en.mp4"
+        || original["timeline"] != "1000"
+        || original["displayed"] != "1000"
+        || original["playing"] != "false"
+    {
+        return Err(format!(
+            "About witness did not start from the paused source fixture: {original}"
+        )
+        .into());
+    }
+    let exclusions = driver
+        .script("return document.querySelectorAll('.roi.excluded').length;")?
+        .as_u64()
+        .ok_or("Missing exclusion count")?;
+    driver.click("#menu-trigger-edit")?;
+    driver.click("#menu-item-edit-3")?;
+    driver.wait(&format!("return document.querySelectorAll('.roi.excluded').length==={}&&!!document.querySelector('.roi.excluded.selected');", exclusions + 1), 5)?;
     driver.click("#menu-trigger-help")?;
-    driver.click("#menu-item-help-1")?;
-    driver.wait(&format!(r#"const dialog = document.querySelector('#about-modal[open][role=dialog][aria-modal=true]'); return !!dialog && [...dialog.querySelectorAll('p')].some(p => p.textContent.trim() === 'Version {}');"#, env!("CARGO_PKG_VERSION")), 5)?;
+    click_about(driver)?;
+    driver.wait(&format!(r#"const dialog=document.querySelector('#about-modal[open][role=dialog][aria-modal=true]');return !!dialog&&dialog.contains(document.activeElement)&&[...dialog.querySelectorAll('p')].some(p=>p.textContent.trim()==='Version {}');"#, env!("CARGO_PKG_VERSION")), 5)?;
+    let before = modal_workspace(driver)?;
+    let mut events = Vec::new();
+    for (key, control) in [
+        ("Delete", false),
+        ("z", true),
+        ("ArrowRight", false),
+        ("i", false),
+        ("o", false),
+        ("=", true),
+        ("F1", false),
+    ] {
+        let event = menu_key(driver, key, control)?;
+        driver.wait(
+            "return document.querySelector('.preview-shell')?.getAttribute('aria-busy')==='false';",
+            30,
+        )?;
+        let after = modal_workspace(driver)?;
+        if event["prevented"] != true || after != before {
+            return Err(format!(
+                "About allowed a background command: event={event} before={before} after={after}"
+            )
+            .into());
+        }
+        events.push(json!({"event":event,"after":after}));
+    }
     driver.click("#about-modal button")?;
+    driver.wait("return !document.querySelector('#about-modal[open]')&&document.activeElement===document.querySelector('#menu-trigger-help');", 5)?;
+    driver.script("document.querySelector('.preview-viewport').focus();return true;")?;
+    let resumed = menu_key(driver, "Delete", false)?;
+    driver.wait(
+        &format!("return document.querySelectorAll('.roi.excluded').length==={exclusions};"),
+        5,
+    )?;
+    let restored = modal_workspace(driver)?;
+    if resumed["prevented"] != true || restored["regions"] != original["regions"] {
+        return Err(format!(
+            "Background hotkey did not resume after About closed: {resumed} {restored}"
+        )
+        .into());
+    }
+    driver.click("#menu-trigger-help")?;
+    click_about(driver)?;
+    driver.wait("return !!document.querySelector('#about-modal[open]')&&document.querySelector('#about-modal').contains(document.activeElement);", 5)?;
+    let escape = menu_key(driver, "Escape", false)?;
+    if escape["prevented"] != false {
+        return Err(format!("About swallowed the native Escape cancellation: {escape}").into());
+    }
+    // Synthetic keys have no native default action; invoke the browser's cancel event separately.
+    let cancel = driver.script("const event=new Event('cancel',{cancelable:true});document.querySelector('#about-modal').dispatchEvent(event);return {prevented:event.defaultPrevented};")?;
     driver.wait("return !document.querySelector('#about-modal[open]');", 5)?;
+    let shortcuts_open = menu_key(driver, "F1", false)?;
+    driver.wait("return !!document.querySelector('#shortcuts-modal[open]')&&document.querySelector('#shortcuts-modal').contains(document.activeElement);", 5)?;
+    let shortcuts_escape = menu_key(driver, "Escape", false)?;
+    driver.wait(
+        "return !document.querySelector('#shortcuts-modal[open]');",
+        5,
+    )?;
+    menu_key(driver, "F1", false)?;
+    driver.wait("return !!document.querySelector('#shortcuts-modal[open]')&&document.querySelector('#shortcuts-modal').contains(document.activeElement);", 5)?;
+    let shortcuts_close = menu_key(driver, "F1", false)?;
+    driver.wait(
+        "return !document.querySelector('#shortcuts-modal[open]');",
+        5,
+    )?;
+    if cancel["prevented"] != true
+        || shortcuts_open["prevented"] != true
+        || shortcuts_escape["prevented"] != true
+        || shortcuts_close["prevented"] != true
+    {
+        return Err(format!("Modal cancel or shortcuts handling failed: {cancel} {shortcuts_open} {shortcuts_escape} {shortcuts_close}").into());
+    }
+    seek(driver, 0)?;
+    std::fs::write(
+        output.join("about-shortcut-isolation.json"),
+        serde_json::to_vec_pretty(
+            &json!({"method":"synthetic cancelable keydown on focused controls and separate dialog cancel event; native keyboard delivery unverified","about_activation":"DOM focus before native button click method; physical pointer delivery unverified","before":before,"blocked_commands":events,"after_close":restored,"resumed_hotkey":resumed,"escape":escape,"cancel":cancel,"shortcuts_open":shortcuts_open,"shortcuts_escape":shortcuts_escape,"shortcuts_close":shortcuts_close}),
+        )?,
+    )?;
+    Ok(())
+}
+
+fn click_about(driver: &Driver) -> Result<()> {
+    // The pinned click endpoint focuses after dispatch, overriding the menu's focus restoration.
+    // Match the browser's focus-before-click order while retaining the actual button handler.
+    driver.script("const item=document.querySelector('#menu-item-help-1');if(!item||item.disabled||!item.getClientRects().length)throw new Error('About menu item is not available');item.focus();item.click();return true;")?;
     Ok(())
 }

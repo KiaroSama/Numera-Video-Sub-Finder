@@ -211,7 +211,15 @@ pub(crate) fn MenuBar(ui: Ui, about: RwSignal<bool>) -> impl IntoView {
         }
         let menu = active.get_untracked();
         let key = event.key();
+        let trigger = event
+            .target()
+            .and_then(|target| target.dyn_into::<web_sys::Element>().ok())
+            .is_some_and(|target| target.closest(".menu-trigger").ok().flatten().is_some());
         match key.as_str() {
+            "Enter" | " " if trigger => {
+                open.set(Some(menu));
+                later(move || move_item(menu, "Home"));
+            }
             "ArrowLeft" | "ArrowRight" => {
                 let next = (menu + if key == "ArrowLeft" { IDS.len() - 1 } else { 1 }) % IDS.len();
                 active.set(next);

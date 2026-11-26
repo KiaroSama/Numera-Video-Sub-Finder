@@ -73,6 +73,7 @@ jobs:
           REPO: ${{ github.repository }}
           RUN_ID: ${{ github.run_id }}
           SOURCE_SHA: ${{ github.sha }}
+          ANNOUNCE: ${{ needs.announce.result }}
           NATIVE: ${{ needs.native.result }}
           PORTABLE: ${{ needs.portable.result }}
           DEPENDENCIES: ${{ needs.dependencies.result }}
@@ -119,7 +120,8 @@ jobs:
           done <<<"$jobs_lines"
 
           overall="failure"
-          if [ "$NATIVE" = "success" ] \
+          if [ "$ANNOUNCE" = "success" ] \
+            && [ "$NATIVE" = "success" ] \
             && [ "$PORTABLE" = "success" ] \
             && [ "$DEPENDENCIES" = "success" ] \
             && [ "$SOURCE_ANALYSIS" = "success" ] \
@@ -131,7 +133,7 @@ jobs:
           if [ "$overall" = "success" ]; then
             req_desc="All 14 exact-source verification jobs passed"
           else
-            req_desc="Verification failed or incomplete (children=${child_count}, failed=${child_failures})"
+            req_desc="Verification failed or incomplete (announce=${ANNOUNCE}, children=${child_count}, failed=${child_failures})"
           fi
           gh api --method POST "repos/${REPO}/statuses/${SOURCE_SHA}" \
             -f state="$overall" \
