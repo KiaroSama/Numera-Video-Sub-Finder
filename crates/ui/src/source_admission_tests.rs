@@ -150,4 +150,3 @@ fn loading_an_incomplete_setup_project_routes_to_extract() {
         assert_eq!(ui.route.get_untracked(), "Extract");
     });
 }
-

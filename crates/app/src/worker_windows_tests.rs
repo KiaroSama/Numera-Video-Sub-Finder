@@ -97,4 +97,3 @@ fn job_handle_is_send() {
     fn assert_send<T: Send>() {}
     assert_send::<Job>();
 }
-
