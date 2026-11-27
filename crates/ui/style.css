@@ -13,7 +13,7 @@
   --border: #2A2E37;
   --strong-border: #69717E;
   --accent: #C63D3D;
-  --accent-hover: #D44A4A;
+  --accent-hover: #CB4242;
   --accent-pressed: #AF3333;
   --accent-soft: #262626;
   --on-accent: #FFFFFF;
@@ -44,7 +44,7 @@
   --border: #DCE0E6;
   --strong-border: #747F8D;
   --accent: #C63D3D;
-  --accent-hover: #D44A4A;
+  --accent-hover: #CB4242;
   --accent-pressed: #AF3333;
   --accent-soft: #e5e5e5;
   --on-accent: #FFFFFF;
@@ -92,7 +92,8 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round
 .eyebrow { color: var(--muted); font-size: .75rem; }
 .wide { width: 100%; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; }
-.skip-link { position: fixed; top: -80px; left: 10px; padding: 10px; background: var(--surface); color: var(--text); z-index: 4; }
+/* The focused skip link must clear the application menu's z-index of 20. */
+.skip-link { position: fixed; top: -80px; left: 10px; padding: 10px; background: var(--surface); color: var(--text); z-index: 30; }
 .skip-link:focus { top: 8px; }
 .shell { position: relative; display: grid; grid-template-columns: 168px minmax(0,1fr); }
 .sidebar { min-height: 0; display: flex; flex-direction: column; background: var(--sidebar); border-inline-end: 1px solid var(--border); padding: 8px; overflow: auto; min-width: 0; }

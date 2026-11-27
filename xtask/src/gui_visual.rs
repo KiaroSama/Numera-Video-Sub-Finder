@@ -30,7 +30,7 @@ pub fn icons(output: &Path) -> Result<()> {
 
 pub fn theme(driver: &Driver, output: &Path, name: &str) -> Result<()> {
     let observation = driver.script(
-        "const root=getComputedStyle(document.documentElement);const panel=getComputedStyle(document.querySelector('.panel'));const frame=getComputedStyle(document.querySelector('.source-frame'));const logo=document.querySelector('.brand img');return {theme:document.documentElement.dataset.theme,background:panel.backgroundColor,text:panel.color,muted:root.getPropertyValue('--muted').trim(),control:root.getPropertyValue('--strong-border').trim(),input:root.getPropertyValue('--input').trim(),accent:root.getPropertyValue('--accent').trim(),onAccent:root.getPropertyValue('--on-accent').trim(),frameFilter:frame.filter,frameOpacity:frame.opacity,sourcePixels:(()=>{const im=document.querySelector('.source-frame');const c=document.createElement('canvas');c.width=im.naturalWidth;c.height=im.naturalHeight;const x=c.getContext('2d');x.drawImage(im,0,0);let h=2166136261;for(const v of x.getImageData(0,0,c.width,c.height).data)h=Math.imul(h^v,16777619);return [c.width,c.height,h>>>0];})(),logoLoaded:logo.complete&&logo.naturalWidth>0,logoSource:logo.getAttribute('src'),logoAlpha:(()=>{const c=document.createElement('canvas');c.width=c.height=32;const x=c.getContext('2d');x.drawImage(logo,0,0,32,32);return [x.getImageData(0,0,1,1).data[3],x.getImageData(31,31,1,1).data[3],x.getImageData(16,16,1,1).data[3]];})()};",
+        "const root=getComputedStyle(document.documentElement);const panel=getComputedStyle(document.querySelector('.panel'));const frame=getComputedStyle(document.querySelector('.source-frame'));const logo=document.querySelector('.brand img');return {theme:document.documentElement.dataset.theme,background:panel.backgroundColor,text:panel.color,muted:root.getPropertyValue('--muted').trim(),control:root.getPropertyValue('--strong-border').trim(),input:root.getPropertyValue('--input').trim(),accent:root.getPropertyValue('--accent').trim(),accentHover:root.getPropertyValue('--accent-hover').trim(),accentPressed:root.getPropertyValue('--accent-pressed').trim(),onAccent:root.getPropertyValue('--on-accent').trim(),frameFilter:frame.filter,frameOpacity:frame.opacity,sourcePixels:(()=>{const im=document.querySelector('.source-frame');const c=document.createElement('canvas');c.width=im.naturalWidth;c.height=im.naturalHeight;const x=c.getContext('2d');x.drawImage(im,0,0);let h=2166136261;for(const v of x.getImageData(0,0,c.width,c.height).data)h=Math.imul(h^v,16777619);return [c.width,c.height,h>>>0];})(),logoLoaded:logo.complete&&logo.naturalWidth>0,logoSource:logo.getAttribute('src'),logoAlpha:(()=>{const c=document.createElement('canvas');c.width=c.height=32;const x=c.getContext('2d');x.drawImage(logo,0,0,32,32);return [x.getImageData(0,0,1,1).data[3],x.getImageData(31,31,1,1).data[3],x.getImageData(16,16,1,1).data[3]];})()};",
     )?;
     let baseline_path = output.join("source-pixels.json");
     if name == "dark" {
@@ -48,8 +48,14 @@ pub fn theme(driver: &Driver, output: &Path, name: &str) -> Result<()> {
     let muted = contrast(&observation["muted"], &observation["background"])?;
     let control = contrast(&observation["control"], &observation["input"])?;
     let accent = contrast(&observation["onAccent"], &observation["accent"])?;
-    if text < 4.5 || muted < 4.5 || control < 3.0 || accent < 4.5 {
-        return Err(format!("Rendered {name} contrast failed: text={text:.2} muted={muted:.2} control={control:.2} accent={accent:.2}").into());
+    let hover = contrast(&observation["onAccent"], &observation["accentHover"])?;
+    let pressed = contrast(&observation["onAccent"], &observation["accentPressed"])?;
+    if text < 4.5
+        || muted < 4.5
+        || control < 3.0
+        || [accent, hover, pressed].iter().any(|c| *c < 4.5)
+    {
+        return Err(format!("Rendered {name} contrast failed: text={text:.2} muted={muted:.2} control={control:.2} accent={accent:.2} hover={hover:.2} pressed={pressed:.2}").into());
     }
     if observation["frameFilter"] != "none"
         || observation["frameOpacity"] != "1"
@@ -62,7 +68,7 @@ pub fn theme(driver: &Driver, output: &Path, name: &str) -> Result<()> {
     std::fs::write(
         output.join(format!("visual-{name}.json")),
         serde_json::to_vec_pretty(
-            &json!({"observation":observation,"text_contrast":text,"muted_contrast":muted,"control_contrast":control,"accent_contrast":accent}),
+            &json!({"observation":observation,"text_contrast":text,"muted_contrast":muted,"control_contrast":control,"accent_contrast":accent,"accent_hover_contrast":hover,"accent_pressed_contrast":pressed,"accent_state_method":"computed theme tokens used by normal/hover/pressed CSS; physical pointer states unverified"}),
         )?,
     )?;
     let screenshot = driver.request(reqwest::Method::GET, "/screenshot", json!({}))?;
@@ -200,11 +206,51 @@ pub fn layout(driver: &Driver, output: &Path) -> Result<()> {
                 format!("Control focus is not visible: native={native} webview={focused}").into(),
             );
         }
-        Ok(())
+        skip_link(driver, output)
     })();
     let restored = driver.request(reqwest::Method::POST, "/window/rect", original);
     result?;
     restored?;
+    Ok(())
+}
+
+fn skip_link(driver: &Driver, output: &Path) -> Result<()> {
+    driver.wait("const link=document.querySelector('.skip-link');link.focus();return document.activeElement===link&&link.matches(':focus');", 5)?;
+    let receipt = driver.script(r#"
+        const link=document.querySelector('.skip-link'),r=link.getBoundingClientRect();
+        const points=[[r.left+r.width/2,r.top+r.height/2],[r.left+12,r.top+12],[r.right-12,r.top+12]];
+        return {method:'programmatic focus, rendered hit testing, and DOM link activation; native Tab traversal unverified',
+            previousHash:location.hash,
+            bounds:[r.x,r.y,r.width,r.height],viewport:[innerWidth,innerHeight],
+            visible:r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight,
+            points:points.map(([x,y])=>{const hit=document.elementFromPoint(x,y);return {x,y,link:link.contains(hit),hit:hit?.id||hit?.tagName};})};
+    "#)?;
+    let screenshot = driver.request(reqwest::Method::GET, "/screenshot", json!({}))?;
+    std::fs::write(
+        output.join("skip-link-focus.png"),
+        decode_base64(screenshot.as_str().ok_or("Missing skip-link screenshot")?)?,
+    )?;
+    driver.script("document.querySelector('.skip-link').click();return true;")?;
+    driver.wait(
+        "return document.activeElement===document.querySelector('#main-content');",
+        5,
+    )?;
+    let activation = driver.script("return {activeId:document.activeElement?.id,hash:location.hash,route:document.querySelector('h1')?.textContent};")?;
+    std::fs::write(
+        output.join("skip-link-focus.json"),
+        serde_json::to_vec_pretty(&json!({"focus":receipt,"activation":activation}))?,
+    )?;
+    driver.script(&format!(
+        "location.hash={};document.querySelector('#header-theme').focus();return true;",
+        serde_json::to_string(&receipt["previousHash"])?
+    ))?;
+    if receipt["visible"] != true
+        || receipt["points"].as_array().is_none_or(|points| {
+            points.len() != 3 || points.iter().any(|point| point["link"] != true)
+        })
+    {
+        return Err(format!("Focused skip link is obscured by workspace chrome: {receipt}").into());
+    }
     Ok(())
 }
 

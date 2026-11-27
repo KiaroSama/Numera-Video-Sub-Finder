@@ -103,6 +103,28 @@ mod browser {
             {
                 return;
             }
+            if document()
+                .query_selector("dialog[open]")
+                .ok()
+                .flatten()
+                .is_some()
+            {
+                let shortcuts_target = target.as_ref().is_some_and(|target| {
+                    target
+                        .closest("#shortcuts-modal[open]")
+                        .ok()
+                        .flatten()
+                        .is_some()
+                });
+                // Modal children still bubble keys to Window; retain the shortcuts dialog's own keys.
+                if !matches!(action, Action::Help | Action::Escape) || !shortcuts_target {
+                    // Leave Escape to the native dialog's cancel event.
+                    if !matches!(action, Action::Escape) {
+                        event.prevent_default();
+                    }
+                    return;
+                }
+            }
             if ui.studio.shortcuts.get_untracked()
                 && !matches!(action, Action::Help | Action::Escape)
             {

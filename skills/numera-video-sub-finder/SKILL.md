@@ -8,7 +8,7 @@ compatibility: Requires nvsf CLI v0.6.0 on 64-bit Windows or Linux. Runs offline
 
 Use `nvsf` v0.6.0 for local, non-interactive video subtitle extraction, cue review, and batch or bulk processing. Every subcommand writes structured JSON to stdout (or plain confirmation text for legacy maintenance commands) and sends progress lines to stderr.
 
-The CLI shares queue, project, model, and log storage with the Graphite Studio desktop app (`numera-video-sub-finder`) when both use the same `--data-root`.
+Use the same resolved data directory to share queue, project, model, and log storage with the Graphite Studio desktop app (`numera-video-sub-finder`). `--data-root` is a CLI-only flag; set `NVSF_DATA_ROOT` before launching either program, or point the CLI flag at the desktop's **Data root** shown in Settings. An explicit CLI flag overrides the environment variable. See the [shared-directory PowerShell 7 example](references/cli-reference.md#shared-desktop-and-cli-data-directory).
 
 Read `references/cli-reference.md` for exact flags, JSON schemas, and recovery rules before constructing unfamiliar commands.
 
