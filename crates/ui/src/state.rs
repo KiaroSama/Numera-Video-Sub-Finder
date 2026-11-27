@@ -266,7 +266,7 @@ impl Ui {
         self.studio.reset_extract();
         self.config.set(project.config.clone());
         self.selected.set(project.cues.first().map(|c| c.id));
-        let route = if project.cues.is_empty() {
+        let route = if project.cues.is_empty() && !project.completed {
             "Extract"
         } else {
             "Review"

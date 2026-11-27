@@ -138,3 +138,16 @@ fn source_replacement_retires_each_owned_url_once_and_never_releases_busy_owners
         assert!(ui.preview_busy.get_untracked());
     });
 }
+
+#[test]
+fn loading_an_incomplete_setup_project_routes_to_extract() {
+    Owner::new().with(|| {
+        let ui = Ui::new("dark".into());
+        let mut setup = project("video-setup");
+        setup.completed = false;
+        setup.processed_ms = 0;
+        ui.load(setup);
+        assert_eq!(ui.route.get_untracked(), "Extract");
+    });
+}
+

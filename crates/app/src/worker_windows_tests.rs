@@ -91,3 +91,10 @@ fn owned_job_closure_stops_the_admitted_worker() {
     );
     drop(lease);
 }
+
+#[test]
+fn job_handle_is_send() {
+    fn assert_send<T: Send>() {}
+    assert_send::<Job>();
+}
+

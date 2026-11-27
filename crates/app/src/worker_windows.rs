@@ -47,6 +47,10 @@ unsafe extern "system" {
 
 pub(super) struct Job(Handle);
 
+// SAFETY: Win32 job object handles are process-wide kernel handles without thread
+// affinity, and Job exclusively owns this noninherited handle until Drop closes it.
+unsafe impl Send for Job {}
+
 impl Job {
     pub(super) fn attach(child: &Child) -> Result<Self> {
         // SAFETY: null attributes create a noninherited private handle. The repr(C)
