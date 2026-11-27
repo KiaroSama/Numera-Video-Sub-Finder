@@ -33,7 +33,12 @@ const TEXT_EXTS: &[&str] = &[
 
 const TEXT_NAMES: &[&str] = &["LICENSE", ".gitignore", ".graphifyignore", ".gitattributes"];
 
+const ALLOWED_TRACKED_EXCEPTIONS: &[&str] = &[".agents/plugins/marketplace.json"];
+
 fn is_excluded_path(file: &str) -> bool {
+    if ALLOWED_TRACKED_EXCEPTIONS.contains(&file) {
+        return false;
+    }
     for seg in file.split('/') {
         if FORBIDDEN_DIRS.contains(&seg) {
             return true;
@@ -257,6 +262,8 @@ mod tests {
     #[test]
     fn detects_forbidden_paths_and_extracts_workflow_jobs() {
         assert!(is_excluded_path(".ai/memory.md"));
+        assert!(is_excluded_path(".agents/skills/local.md"));
+        assert!(!is_excluded_path(".agents/plugins/marketplace.json"));
         assert!(is_excluded_path("nested/.env.production"));
         assert!(is_excluded_path("secrets.md"));
         assert!(!is_excluded_path("crates/core/src/lib.rs"));

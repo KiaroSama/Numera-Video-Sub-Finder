@@ -136,7 +136,7 @@ Install `nvsf` v0.7.0 first and make it available on the agent host's `PATH`. Th
 | Host | Installation |
 | --- | --- |
 | Claude Code | Run `/plugin marketplace add KiaroSama/Numera-Video-Sub-Finder` and `/plugin install numera-video-sub-finder@numera-video-sub-finder-marketplace`. To use a checkout, pass its path to `/plugin marketplace add` instead. |
-| Codex | Add the checkout to a [personal marketplace](https://developers.openai.com/plugins/build/plugins#marketplace-metadata) as a local plugin, then select it from `/plugins`. The Codex compatibility manifest is `.codex-plugin/plugin.json`. |
+| Codex | Open the repo marketplace from `.agents/plugins/marketplace.json` (or add the checkout to a [personal marketplace](https://developers.openai.com/codex/plugins/build#marketplace-metadata)) and select it from `/plugins`. The Codex compatibility manifest is `.codex-plugin/plugin.json`. |
 | Cursor | Add the repository to a [Cursor team marketplace](https://cursor.com/docs/plugins#add-a-team-marketplace) and install from that marketplace. The Cursor catalog is `.cursor-plugin/marketplace.json`. |
 | Antigravity | Run `agy plugin install <checkout-path>` with the local repo path, quoted if it contains spaces. |
 | Agent Plugins 1.0 | Import the plugin directory in an [Agent Plugins 1.0](https://agent-plugins.org/specification) host. The portable entry point is the root `plugin.json`. |

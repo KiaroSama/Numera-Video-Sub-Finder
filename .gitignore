@@ -45,6 +45,13 @@ __pycache__/
 .DS_Store
 Thumbs.db
 
+# Public Codex plugin marketplace manifest (keep all other local .agents/ files ignored)
+!/.agents/
+/.agents/*
+!/.agents/plugins/
+/.agents/plugins/*
+!/.agents/plugins/marketplace.json
+
 # Hook Maker: local/private files (auto-managed)
 /.env
 /.env.*

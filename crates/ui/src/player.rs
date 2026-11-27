@@ -426,7 +426,7 @@ pub(crate) fn Preview(ui: Ui, #[prop(optional)] editor: bool) -> impl IntoView {
             }>
                 <div class="preview-viewport" class:zoomed={move || ui.studio.zoom.get() > 100} node_ref=viewport tabindex="0" role="region" aria-label="Source frame viewport"
                     on:wheel=move |e|zoom_tool::wheel(ui,viewport,e) on:mousedown=begin_pan
-                    on:auxclick=move |e|if e.button()==1 && ui.studio.zoom.get_untracked()>100 {e.prevent_default();}>
+                    on:auxclick={move |e| if e.button()==1 && ui.studio.zoom.get_untracked()>100 { e.prevent_default(); }}>
                     <RoiCanvas ui editor viewport/>
                 </div>
             </Show>

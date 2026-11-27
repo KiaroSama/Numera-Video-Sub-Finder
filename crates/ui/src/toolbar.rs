@@ -58,7 +58,7 @@ pub(crate) fn Topbar(ui: Ui) -> impl IntoView {
                     on:click=move |_|ui.toggle_notifications()>
                     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0v4l-2 4h16l-2-4z M10 20h4"/></svg>
                     <span class="hotkey-hint" aria-hidden="true">"(Alt+N)"</span>
-                    <Show when=move ||unread()>0><span class="notif-badge" aria-hidden="true">{unread}</span></Show>
+                    <Show when={move || unread() > 0}><span class="notif-badge" aria-hidden="true">{unread}</span></Show>
                 </button>
             </div>
         </header>

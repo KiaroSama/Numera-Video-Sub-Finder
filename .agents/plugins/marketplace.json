@@ -1,0 +1,21 @@
+{
+  "name": "numera-video-sub-finder-marketplace",
+  "interface": {
+    "displayName": "Numera Video Sub Finder"
+  },
+  "plugins": [
+    {
+      "name": "numera-video-sub-finder",
+      "version": "0.7.0",
+      "source": {
+        "source": "url",
+        "url": "https://github.com/KiaroSama/Numera-Video-Sub-Finder.git"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "NONE"
+      },
+      "category": "Productivity"
+    }
+  ]
+}
