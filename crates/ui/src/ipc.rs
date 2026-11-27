@@ -64,8 +64,17 @@ pub struct SourceFrame {
     pub duration_ms: u64,
 }
 
-pub async fn preview(token: &str, time_ms: u64, step: i8) -> Result<SourceFrame, String> {
-    let args = arguments(&serde_json::json!({"token": token, "timeMs": time_ms, "step": step}))?;
+pub async fn preview(
+    token: &str,
+    time_ms: u64,
+    step: i8,
+    fast: bool,
+) -> Result<SourceFrame, String> {
+    let mut args = serde_json::json!({"token": token, "timeMs": time_ms, "step": step});
+    if fast {
+        args["fast"] = true.into();
+    }
+    let args = arguments(&args)?;
     let bytes = js_sys::Uint8Array::new(
         &invoke("preview_transport", args)
             .await
@@ -75,8 +84,8 @@ pub async fn preview(token: &str, time_ms: u64, step: i8) -> Result<SourceFrame,
         return Err("Preview exceeds binary transport limit".into());
     }
     let bytes = bytes.to_vec();
-    let packet = crate::transport::parse_packet(&bytes)?;
-    let url = image_url(js_sys::Uint8Array::from(packet.png).into())?;
+    let packet = crate::transport::parse_preview_packet(&bytes)?;
+    let url = image_url(js_sys::Uint8Array::from(packet.bytes), packet.mime)?;
     Ok(SourceFrame {
         url,
         time_ms: packet.time_ms,
@@ -86,18 +95,18 @@ pub async fn preview(token: &str, time_ms: u64, step: i8) -> Result<SourceFrame,
 
 pub async fn cue_evidence(cue_id: u64) -> Result<String, String> {
     let args = arguments(&serde_json::json!({"cueId":cue_id}))?;
-    image_url(invoke("cue_evidence", args).await.map_err(error_text)?)
+    let value = invoke("cue_evidence", args).await.map_err(error_text)?;
+    image_url(js_sys::Uint8Array::new(&value), "image/png")
 }
 
-fn image_url(bytes: JsValue) -> Result<String, String> {
-    let bytes = js_sys::Uint8Array::new(&bytes);
+fn image_url(bytes: js_sys::Uint8Array, mime: &str) -> Result<String, String> {
     if bytes.length() > 8 * 1024 * 1024 {
         return Err("Preview exceeds binary transport limit".into());
     }
     let parts = js_sys::Array::new();
     parts.push(&bytes.buffer());
     let options = web_sys::BlobPropertyBag::new();
-    options.set_type("image/png");
+    options.set_type(mime);
     let blob = web_sys::Blob::new_with_buffer_source_sequence_and_options(&parts, &options)
         .map_err(error_text)?;
     web_sys::Url::create_object_url_with_blob(&blob).map_err(error_text)

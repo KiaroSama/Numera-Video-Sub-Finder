@@ -1,0 +1,13 @@
+{
+  "name": "numera-video-sub-finder",
+  "owner": {
+    "name": "Kiaro Sama"
+  },
+  "plugins": [
+    {
+      "name": "numera-video-sub-finder",
+      "source": "./",
+      "description": "Extract burned-in subtitles locally, resume batches, and review or export subtitle projects with the nvsf CLI."
+    }
+  ]
+}

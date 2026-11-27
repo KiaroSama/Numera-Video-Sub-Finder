@@ -1,12 +1,14 @@
 ---
 name: numera-video-sub-finder
-description: Use the nvsf CLI to extract burned-in subtitles locally, detect subtitle regions (ROIs), preview frames or draw grids, review or edit .nvsf.json projects, run bulk extraction or manage the queue, export SRT/VTT/ASS/JSON, and run diagnostics or check for updates.
-compatibility: Requires nvsf CLI v0.6.0 on 64-bit Windows or Linux. Runs offline except for explicit model, language, or update downloads.
+description: Use when extracting burned-in subtitles with the nvsf CLI, previewing subtitle regions, running or resuming a queue, reviewing .nvsf projects, exporting subtitles, or checking local OCR resources.
+compatibility: Requires nvsf CLI v0.7.0 on 64-bit Windows or Linux. Extraction and review run locally. Provisioning and update commands can use the network.
 ---
 
 # Numera Video Sub Finder CLI
 
-Use `nvsf` v0.6.0 for local, non-interactive video subtitle extraction, cue review, and batch or bulk processing. Every subcommand writes structured JSON to stdout (or plain confirmation text for legacy maintenance commands) and sends progress lines to stderr.
+Use `nvsf` v0.7.0 for local, non-interactive video subtitle extraction, cue review, and batch or bulk processing. Every subcommand writes structured JSON to stdout (or plain confirmation text for legacy maintenance commands) and sends progress lines to stderr.
+
+Install the plugin in Claude Code, Codex, Cursor, Antigravity or an Agent Plugins 1.0 host using the [installation guide](../../docs/installation.md#agent-plugins). The host runs the local CLI; no MCP server is required.
 
 Use the same resolved data directory to share queue, project, model, and log storage with the Graphite Studio desktop app (`numera-video-sub-finder`). `--data-root` is a CLI-only flag; set `NVSF_DATA_ROOT` before launching either program, or point the CLI flag at the desktop's **Data root** shown in Settings. An explicit CLI flag overrides the environment variable. See the [shared-directory PowerShell 7 example](references/cli-reference.md#shared-desktop-and-cli-data-directory).
 
@@ -93,6 +95,8 @@ nvsf bulk --input-dir ./clips --extensions mp4,mkv,mov --output-dir ./subs --con
 - For legacy positional batch runs, `nvsf batch clip1.mp4 clip2.mp4 --output-dir ./subs --language en --concurrency 2` also supports `1..=8` workers (`1` by default).
 
 ### 4. Non-interactive cue review, editing, and export
+
+`project` accepts `.nvsf`, `.nvsf.json`, and `.json` files. A `.nvsf` saved in the desktop before extraction can hold the video and settings without any cues. CLI extraction checkpoints still use `.nvsf.json`.
 
 Every `project` mutation validates cues against `nvsf-core` invariants and writes atomically (in-place by default, or to `--output <copy>` to keep the original untouched):
 

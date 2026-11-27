@@ -123,6 +123,37 @@ fn native_panic_is_caught_and_error_text_respects_utf8_byte_bound() {
 }
 
 #[test]
+fn persistent_decoder_keeps_frame_order_and_exact_pixels_after_seeks() {
+    use super::decoder::Decoder;
+    let path = std::env::temp_dir().join(format!("nvsf-native-session-{}.y4m", std::process::id()));
+    let mut bytes = b"YUV4MPEG2 W4 H2 F25:1 Ip A1:1 C444\n".to_vec();
+    for luma in [16, 128, 235] {
+        bytes.extend_from_slice(b"FRAME\n");
+        bytes.extend_from_slice(&[luma; 8]);
+        bytes.extend_from_slice(&[128; 16]);
+    }
+    std::fs::write(&path, bytes).unwrap();
+    let result = (|| -> Result<_> {
+        let mut session = Decoder::open(&path)?;
+        let first = session.preview(0, 0, 0)?;
+        let second = session.preview(1, 2, 0)?;
+        let third = session.preview(41, 2, 0)?;
+        let repeated = session.preview(80, 2, 0)?;
+        let previous = session.preview(80, -1, 0)?;
+        let exact = session.preview(39, 0, 0)?;
+        let forward = session.preview(40, 1, 0)?;
+        Ok((first, second, third, repeated, previous, exact, forward))
+    })();
+    std::fs::remove_file(path).unwrap();
+    let (first, second, third, repeated, previous, exact, forward) = result.unwrap();
+    assert_eq!([first.time_ms, second.time_ms, third.time_ms], [0, 40, 80]);
+    assert_eq!(repeated.image, third.image);
+    assert_eq!(previous.image, second.image);
+    assert_eq!(exact.image, first.image);
+    assert_eq!(forward.image, third.image);
+}
+
+#[test]
 fn response_stop_and_error_are_not_native_success() {
     unsafe extern "C" fn stop(_: *mut c_void, _: *const u8, _: usize) -> i32 {
         STOP

@@ -102,10 +102,12 @@ pub(crate) enum Commands {
     },
     #[command(hide = true)]
     Worker {
-        #[arg(long)]
-        request: PathBuf,
-        #[arg(long)]
-        control: PathBuf,
+        #[command(subcommand)]
+        command: Option<WorkerCommand>,
+        #[arg(long, requires = "control")]
+        request: Option<PathBuf>,
+        #[arg(long, requires = "request")]
+        control: Option<PathBuf>,
         #[arg(long, hide = true)]
         provider_profile: Option<PathBuf>,
         #[arg(long, hide = true, conflicts_with = "provider_profile")]
@@ -114,6 +116,14 @@ pub(crate) enum Commands {
         srt_bom: bool,
         #[arg(long, hide = true, conflicts_with_all = ["provider_profile", "resume_project"])]
         srt_crlf: bool,
+    },
+}
+
+#[derive(Subcommand)]
+pub(crate) enum WorkerCommand {
+    PreviewDaemon {
+        #[arg(long)]
+        input: PathBuf,
     },
 }
 

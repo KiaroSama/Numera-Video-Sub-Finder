@@ -9,14 +9,25 @@ use nvsf_core::{ExtractConfig, Project, Rect};
 use serde_json::json;
 use wasm_bindgen_futures::spawn_local;
 
+const PLAYBACK_RATES: [f64; 4] = [0.5, 1.0, 1.5, 2.0];
+
 #[derive(Clone, Copy)]
 pub(crate) struct Studio {
     pub(crate) zoom: RwSignal<u32>,
+    pub(crate) zoom_tool: RwSignal<bool>,
+    pub(crate) focus_mode: RwSignal<bool>,
+    pub(crate) guides: RwSignal<bool>,
+    pub(crate) exclusion_mode: RwSignal<bool>,
+    pub(crate) loading_video: RwSignal<bool>,
+    pub(crate) extract_baseline: RwSignal<Option<ExtractEdit>>,
+    pub(crate) extract_settings_baseline: RwSignal<Option<(String, String, String)>>,
+    pub(crate) playback_rate: RwSignal<f64>,
     pub(crate) playing: RwSignal<bool>,
     pub(crate) initial: RwSignal<bool>,
     pub(crate) roi: RwSignal<Option<RegionId>>,
     pub(crate) roi_drag: RwSignal<Option<Drag>>,
     pub(crate) shortcuts: RwSignal<bool>,
+    pub(crate) menu_open: RwSignal<Option<usize>>,
     pub(crate) close_open: RwSignal<bool>,
     pub(crate) transport: RwSignal<crate::transport::Transport>,
     pub(crate) frame_duration: RwSignal<Option<u64>>,
@@ -28,11 +39,20 @@ impl Studio {
     pub(crate) fn new() -> Self {
         Self {
             zoom: RwSignal::new(100),
+            zoom_tool: RwSignal::new(false),
+            focus_mode: RwSignal::new(false),
+            guides: RwSignal::new(true),
+            exclusion_mode: RwSignal::new(false),
+            loading_video: RwSignal::new(false),
+            extract_baseline: RwSignal::new(None),
+            extract_settings_baseline: RwSignal::new(None),
+            playback_rate: RwSignal::new(1.0),
             playing: RwSignal::new(false),
             initial: RwSignal::new(false),
             roi: RwSignal::new(None),
             roi_drag: RwSignal::new(None),
             shortcuts: RwSignal::new(false),
+            menu_open: RwSignal::new(None),
             close_open: RwSignal::new(false),
             transport: RwSignal::new(crate::transport::Transport::default()),
             frame_duration: RwSignal::new(None),
@@ -60,6 +80,60 @@ impl Studio {
 }
 
 impl Ui {
+    pub(crate) fn toggle_focus_mode(self) {
+        if self.closing.get_untracked() {
+            return;
+        }
+        let fullscreen = !self.studio.focus_mode.get_untracked();
+        if fullscreen {
+            self.route.set("Extract".into());
+            self.close_notifications(false);
+            self.studio.menu_open.set(None);
+        }
+        self.studio.focus_mode.set(fullscreen);
+        crate::menubar::focus("#main-content");
+        spawn_local(async move {
+            if let Err(error) =
+                ipc::call::<bool>("set_window_fullscreen", json!({"fullscreen": fullscreen})).await
+                && !self.error.is_disposed()
+            {
+                self.error.set(Some(error));
+            }
+        });
+    }
+
+    pub(crate) fn toggle_zoom_tool(self) {
+        self.studio.roi_drag.set(None);
+        self.studio.zoom_tool.update(|active| *active = !*active);
+    }
+
+    pub(crate) fn toggle_guides(self) {
+        self.studio.guides.update(|visible| *visible = !*visible);
+    }
+
+    pub(crate) fn toggle_exclusion_mode(self) {
+        self.studio.roi_drag.set(None);
+        self.studio
+            .exclusion_mode
+            .update(|active| *active = !*active);
+    }
+
+    pub(crate) fn set_playback_rate(self, rate: f64) {
+        if PLAYBACK_RATES.contains(&rate) {
+            self.studio.playback_rate.set(rate);
+        }
+    }
+
+    pub(crate) fn adjust_playback_rate(self, delta: i8) {
+        let current = self.studio.playback_rate.get_untracked();
+        if let Some(index) = PLAYBACK_RATES.iter().position(|rate| *rate == current) {
+            let next = index
+                .saturating_add_signed(isize::from(delta))
+                .min(PLAYBACK_RATES.len() - 1);
+            self.set_playback_rate(PLAYBACK_RATES[next]);
+        }
+    }
+
     pub(crate) fn open_project(self) {
         self.request::<Option<Project>>("pick_project", json!({}), move |project| {
             if let Some(project) = project {

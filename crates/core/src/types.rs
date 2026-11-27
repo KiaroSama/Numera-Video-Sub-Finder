@@ -61,7 +61,7 @@ impl Cue {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ExtractConfig {
     pub input: String,
     pub output: String,
@@ -106,7 +106,14 @@ impl Default for ExtractConfig {
 
 impl ExtractConfig {
     pub fn validate(&self) -> Result<()> {
-        if self.input.is_empty() || self.output.is_empty() || self.input == self.output {
+        self.validate_paths(true)
+    }
+
+    fn validate_paths(&self, require_output: bool) -> Result<()> {
+        if self.input.is_empty()
+            || (require_output && self.output.is_empty())
+            || self.input == self.output
+        {
             return Err(Error::Invalid(
                 "distinct input/output paths required".into(),
             ));
@@ -190,11 +197,19 @@ pub struct Project {
 }
 
 impl Project {
+    pub fn is_setup(&self) -> bool {
+        self.model_hash.is_empty()
+            && !self.completed
+            && self.processed_ms == 0
+            && self.cues.is_empty()
+            && self.active_appearances.is_empty()
+    }
+
     pub fn validate(&self) -> Result<()> {
         if self.schema != 1 || self.cues.len() > 100_000 {
             return Err(Error::Invalid("unsupported/oversized project".into()));
         }
-        self.config.validate()?;
+        self.config.validate_paths(!self.is_setup())?;
         let mut tracks = std::collections::HashSet::new();
         for cue in &self.active_appearances {
             cue.validate()?;

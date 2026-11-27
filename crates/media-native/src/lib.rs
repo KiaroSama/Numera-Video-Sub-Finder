@@ -1,7 +1,10 @@
 mod color;
 mod decoder;
 mod geometry;
+mod session;
 mod timeline;
+
+pub use session::{nvsf_media_session_close, nvsf_media_session_frame, nvsf_media_session_open};
 
 #[cfg(test)]
 mod color_tests;

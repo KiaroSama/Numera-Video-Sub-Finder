@@ -187,11 +187,11 @@ fn begin_request(app: &tauri::AppHandle, host: &Host, restart: bool) -> Result<(
         }
         if !app
             .dialog()
-            .message("Your review has unsaved changes. Return to save them, or discard and close?")
-            .title("Unsaved review changes")
+            .message("Your project has unsaved changes. Return to save them, or discard and close?")
+            .title("Unsaved project changes")
             .buttons(MessageDialogButtons::OkCancelCustom(
                 "Discard and close".into(),
-                "Return to review".into(),
+                "Return to project".into(),
             ))
             .blocking_show()
         {
@@ -226,6 +226,7 @@ pub async fn confirm_close(
     host: tauri::State<'_, Host>,
     action: String,
     project: Option<Project>,
+    source_token: Option<String>,
 ) -> Result<()> {
     let action = CloseAction::parse(&action)?;
     let host = host.inner().clone();
@@ -254,15 +255,36 @@ pub async fn confirm_close(
                     "Apply or discard the current cue draft before saving and exiting".into(),
                 );
             }
-            if let Some(project) = project {
+            let project_files = app.state::<files::ProjectFiles>();
+            let pending_setup = if let Some(project) = project {
                 let _operation = lock(&host.0.operation)?;
-                files::apply_project_edits(&host, project)?;
+                let rollback = if source_token.is_some() && project.is_setup() {
+                    Some(project_files.snapshot(&host)?)
+                } else {
+                    None
+                };
+                files::apply_project_edits(
+                    &host,
+                    &project_files,
+                    project,
+                    source_token.as_deref(),
+                )?;
                 host.0.unsaved.store(true, Ordering::Release);
-            } else if before.dirty {
-                return Err("Send the current review corrections before saving and exiting".into());
-            }
+                rollback
+            } else if before.dirty || host.0.unsaved.load(Ordering::Acquire) {
+                return Err("Send the current project changes before saving and exiting".into());
+            } else {
+                None
+            };
             let verify = || verify_snapshot(&window, &before);
-            if files::save_active_project(&app, &host, false, Some(&verify))?.is_none() {
+            let saved = files::save_active_project(&app, &host, false, Some(&verify));
+            if !matches!(saved, Ok(Some(_)))
+                && let Some(snapshot) = pending_setup
+            {
+                let _operation = lock(&host.0.operation)?;
+                project_files.restore(&host, snapshot)?;
+            }
+            if saved?.is_none() {
                 return Ok(());
             }
         }

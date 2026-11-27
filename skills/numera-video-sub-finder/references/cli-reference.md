@@ -2,7 +2,9 @@
 
 Exact command, flag, JSON output, and exit-code specification for `nvsf` (`crates/cli/`).
 
-CLI version: v0.6.0
+CLI version: v0.7.0
+
+The CLI skill is available for Claude Code, Codex, Cursor, Antigravity and Agent Plugins 1.0 hosts. See the [agent plugin installation guide](../../../docs/installation.md#agent-plugins). The skill uses the local `nvsf` executable and needs no MCP server.
 
 **Contents**
 
@@ -79,7 +81,7 @@ Checks CLI version, build commit SHA, OS/architecture, paths, native runtime dia
 Stdout JSON:
 ```json
 {
-  "version": "0.6.0",
+  "version": "0.7.0",
   "source_sha": "...",
   "os": "windows",
   "architecture": "x86_64",
@@ -297,6 +299,8 @@ Stdout JSON:
 ---
 
 ## Project inspection, search, editing, and review
+
+Project commands accept `.nvsf` files and existing `.nvsf.json` or `.json` files. Desktop **Save** and **Save As** can write a `.nvsf` with media and settings but no cues before extraction. CLI extraction and queue checkpoints still use `.nvsf.json`.
 
 ### `nvsf project inspect <PROJECT>`
 

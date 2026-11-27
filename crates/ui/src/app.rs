@@ -11,7 +11,7 @@ use crate::{
     update_banner::UpdateBanner,
     workspace::{History, Queue, Settings},
 };
-use leptos::prelude::*;
+use leptos::{ev, prelude::*};
 use serde_json::json;
 use wasm_bindgen::{JsCast, closure::Closure};
 use wasm_bindgen_futures::spawn_local;
@@ -39,6 +39,17 @@ pub fn mount() {
 }
 
 fn listen_native(ui: Ui, drop_ready: RwSignal<bool>, initial_theme: String) {
+    let dropped = |ui: Ui| {
+        Closure::<dyn FnMut(wasm_bindgen::JsValue)>::new(move |event| {
+            ui.dragging.set(false);
+            if let Some(token) = js_sys::Reflect::get(&event, &"payload".into())
+                .ok()
+                .and_then(|value| value.as_string())
+            {
+                ui.accept_drop(token);
+            }
+        })
+    };
     let callbacks = [
         (
             "nvsf://close-requested",
@@ -57,18 +68,8 @@ fn listen_native(ui: Ui, drop_ready: RwSignal<bool>, initial_theme: String) {
                 ui.dragging.set(active);
             }),
         ),
-        (
-            "nvsf://files-dropped",
-            Closure::<dyn FnMut(wasm_bindgen::JsValue)>::new(move |event| {
-                ui.dragging.set(false);
-                if let Some(token) = js_sys::Reflect::get(&event, &"payload".into())
-                    .ok()
-                    .and_then(|value| value.as_string())
-                {
-                    ui.accept_drop(token);
-                }
-            }),
-        ),
+        ("nvsf://files-dropped", dropped(ui)),
+        ("nvsf://drop-paths", dropped(ui)),
     ];
     let listeners = callbacks
         .iter()
@@ -134,9 +135,8 @@ fn listen_native(ui: Ui, drop_ready: RwSignal<bool>, initial_theme: String) {
                     .iter()
                     .any(|row| row.state != "verified")
                 {
-                    ui.notice.set(
-                        "A native dependency needs attention. Run resource checks in Settings."
-                            .into(),
+                    ui.push_notice(
+                        "A native dependency needs attention. Run resource checks in Settings.",
                     );
                 }
                 ui.diagnostics.set(Some(report));
@@ -179,7 +179,7 @@ fn App(initial_theme: String) -> impl IntoView {
                 ui.studio.roi_drag.set(None);
             }
             let state = json!({
-                "dirty": ui.dirty.get_untracked(),
+                "dirty": ui.dirty.get_untracked() || untrack(|| ui.extract_dirty()),
                 "draft": ui.draft_dirty.get_untracked(),
                 "revision": ui.revision.get_untracked(),
                 "busy": ui.busy.get_untracked(),
@@ -211,24 +211,33 @@ fn App(initial_theme: String) -> impl IntoView {
         }
     });
     let main = NodeRef::<leptos::html::Main>::new();
-    let routes = [
-        ("Extract", "M4 5h16v14H4z M10 9l6 3-6 3z"),
-        ("Queue", "M5 6h14 M5 12h14 M5 18h9"),
-        ("Review", "M4 5h16v14H4z M8 9h8 M8 13h5"),
-        ("Models", "M12 3l9 5-9 5-9-5z M3 12l9 5 9-5 M3 16l9 5 9-5"),
-        ("History", "M3 12a9 9 0 1 0 3-7 M3 3v5h5 M12 7v5l3 2"),
-        ("Settings", "M4 7h16 M4 17h16 M8 4v6 M16 14v6"),
+    let icons = [
+        "M4 5h16v14H4z M10 9l6 3-6 3z",
+        "M5 6h14 M5 12h14 M5 18h9",
+        "M4 5h16v14H4z M8 9h8 M8 13h5",
+        "M12 3l9 5-9 5-9-5z M3 12l9 5 9-5 M3 16l9 5 9-5",
+        "M3 12a9 9 0 1 0 3-7 M3 3v5h5 M12 7v5l3 2",
+        "M4 7h16 M4 17h16 M8 4v6 M16 14v6",
     ];
     Effect::new(move |_| {
-        let dirty = ui.dirty.get() || ui.draft_dirty.get();
+        let review_dirty = ui.dirty.get() || ui.draft_dirty.get();
+        let dirty = ui.extract_dirty() || review_dirty;
         wasm_bindgen_futures::spawn_local(async move {
-            if let Err(e) = ipc::call::<()>("set_unsaved", json!({"dirty":dirty})).await {
+            if let Err(e) = ipc::call::<()>(
+                "set_unsaved",
+                json!({"dirty": dirty, "reviewDirty": review_dirty}),
+            )
+            .await
+            {
                 ui.error.set(Some(e));
             }
         });
     });
     Effect::new(move |_| {
         let route = ui.route.get();
+        if route != "Extract" && ui.studio.focus_mode.get_untracked() {
+            ui.toggle_focus_mode();
+        }
         if let Some(window) = web_sys::window() {
             let _ = window.location().set_hash(&route.to_lowercase());
         }
@@ -279,16 +288,42 @@ fn App(initial_theme: String) -> impl IntoView {
     #[cfg(not(feature = "e2e"))]
     let fixture_controls = ().into_any();
     let about = RwSignal::new(false);
+    Effect::new(move |_| {
+        let focus = ui.studio.focus_mode.get();
+        if let Some(root) = document().document_element() {
+            let _ = if focus {
+                root.set_attribute("data-focus-mode", "true")
+            } else {
+                root.remove_attribute("data-focus-mode")
+            };
+        }
+    });
+    Effect::new(move |previous: Option<Option<String>>| {
+        let token = ui
+            .source
+            .with(|source| source.as_ref().map(|source| source.token.clone()));
+        if token.is_some() && previous.as_ref() != Some(&token) {
+            ui.capture_extract_baseline();
+        }
+        token
+    });
+    Effect::new(move |_| {
+        let pending = ui.busy.get() || ui.preview_busy.get() || ui.studio.initial.get();
+        if !pending && ui.studio.loading_video.get_untracked() {
+            ui.studio.loading_video.set(false);
+        }
+    });
     view! {
         <a class="skip-link" href="#main-content">"Skip to workspace"</a>
-        <div class="app-shell shell" data-native-drop-ready=move ||drop_ready.get().to_string()>
+        <div class="app-shell shell" class:focus-mode=move ||ui.studio.focus_mode.get()
+            data-native-drop-ready=move ||drop_ready.get().to_string()>
             <crate::menubar::MenuBar ui about/>
-            <aside class="sidebar">
+            <aside class="sidebar" id="workspace-sidebar">
                 <a class="brand" href="#extract" on:click=move |_|ui.route.set("Extract".into()) aria-label="Numera Video Sub Finder home">
                     <img src="logo.svg" width="32" height="32" alt=""/>
-                    <span><strong>"Numera"</strong><small>"Video Sub Finder"</small></span>
+                    <span><strong>"Numera"</strong><small>"Video Sub Finder"</small><small class="version mono">{concat!("(v", env!("CARGO_PKG_VERSION"), ")")}</small></span>
                 </a>
-                <nav aria-label="Workspace navigation">{routes.into_iter().map(|(route,path)|view!{
+                <nav aria-label="Workspace navigation">{helpers::ROUTES.into_iter().zip(icons).map(|(route,path)|view!{
                     <button class="nav-item" title=route class:active=move ||ui.route.get()==route aria-current=move ||if ui.route.get()==route{Some("page")}else{None}
                         on:click=move |_|ui.route.set(route.into())>
                         <svg viewBox="0 0 24 24" aria-hidden="true"><path d=path/></svg><span>{route}</span>
@@ -302,7 +337,6 @@ fn App(initial_theme: String) -> impl IntoView {
                 <main id="main-content" tabindex="-1" node_ref=main class:extract-workspace=move ||ui.route.get()=="Extract">
                     {fixture_controls}
                     <Show when=move ||ui.error.with(Option::is_some)><div class="message error" role="alert"><strong>"Action could not complete"</strong><p>{move ||ui.error.get().unwrap_or_default()}</p><button on:click=move |_|ui.error.set(None)>"Dismiss error"</button></div></Show>
-                    <Show when=move ||!ui.notice.get().is_empty()><div class="message notice" role="status"><span>{move ||ui.notice.get()}</span><button on:click=move |_|ui.notice.set(String::new())>"Dismiss"</button></div></Show>
                     <div class="extract-route" hidden=move ||ui.route.get()!="Extract"><Extract ui/></div>
                     <div hidden=move ||ui.route.get()!="Queue"><Queue ui/></div>
                     <div hidden=move ||ui.route.get()!="Review"><Review ui/></div>
@@ -312,6 +346,7 @@ fn App(initial_theme: String) -> impl IntoView {
                 </main>
                 <footer class="statusbar" role="status">{move ||if ui.busy.get(){"Native operation in progress"}else if ui.active(){"Extraction active"}else{"No active extraction"}}</footer>
             </div>
+            <Notices ui about/>
         </div>
         <crate::menubar::AboutModal visible=about/>
         <ShortcutsModal ui/>
@@ -324,5 +359,117 @@ fn App(initial_theme: String) -> impl IntoView {
                 </div>
             </div>
         </Show>
+    }
+}
+
+#[component]
+fn Notices(ui: Ui, about: RwSignal<bool>) -> impl IntoView {
+    let hovered = RwSignal::new(false);
+    let focused = RwSignal::new(false);
+    let showing = move || {
+        ui.toast_visible.get()
+            && !about.get()
+            && !ui.studio.shortcuts.get()
+            && !ui.studio.close_open.get()
+    };
+
+    Effect::new(move |_| {
+        let message = ui.notice.get();
+        // Other workspaces still use the original notice signal.
+        if !ui
+            .notifications
+            .with_untracked(|items| items.first().is_some_and(|item| item.message == message))
+        {
+            ui.record_notice(&message);
+        }
+    });
+    Effect::new(move |_| {
+        if !showing() {
+            hovered.set(false);
+            focused.set(false);
+        }
+    });
+    Effect::new(
+        move |previous: Option<Option<gloo_timers::callback::Timeout>>| {
+            drop(previous);
+            let _ = ui
+                .notifications
+                .with(|items| items.first().map(|item| item.id));
+            let paused = hovered.get() || focused.get();
+            (showing() && !paused).then(|| {
+                gloo_timers::callback::Timeout::new(5_000, move || {
+                    ui.toast_visible.set(false);
+                })
+            })
+        },
+    );
+    Effect::new(move |_| {
+        if ui.notifications_open.get() {
+            wasm_bindgen_futures::spawn_local(async move {
+                if ui.notifications_open.get_untracked() {
+                    crate::menubar::focus("#notifications-panel");
+                }
+            });
+        }
+    });
+    let outside = window_event_listener(ev::pointerdown, move |event| {
+        if ui.notifications_open.get_untracked()
+            && !event
+                .target()
+                .and_then(|node| node.dyn_into::<web_sys::Element>().ok())
+                .is_some_and(|node| {
+                    node.closest("#header-notifications, #notifications-panel")
+                        .ok()
+                        .flatten()
+                        .is_some()
+                })
+        {
+            ui.close_notifications(false);
+        }
+    });
+    on_cleanup(move || outside.remove());
+
+    view! {
+        <section id="notifications-panel" class="notifications-panel" aria-labelledby="notifications-title"
+            tabindex="-1" hidden=move || !ui.notifications_open.get() inert=move || !ui.notifications_open.get()>
+            <div class="panel-heading">
+                <h2 id="notifications-title">"Notifications"</h2>
+                <button type="button" class="ghost" on:click=move |_|ui.close_notifications(true)>"Close"</button>
+            </div>
+            <div class="button-row">
+                <button type="button" disabled=move ||!ui.notifications.with(|items|items.iter().any(|item|!item.read))
+                    on:click=move |_|{
+                        crate::menubar::focus("#notifications-panel");
+                        ui.notifications.update(|items|for item in items { item.read = true; });
+                    }>"Mark all read"</button>
+                <button type="button" disabled=move ||ui.notifications.with(Vec::is_empty)
+                    on:click=move |_|ui.clear_notifications()>"Clear all"</button>
+            </div>
+            <Show when=move ||ui.notifications.with(Vec::is_empty)>
+                <p class="hint">"No notifications yet."</p>
+            </Show>
+            <ul class="notifications-list">
+                <For each=move ||ui.notifications.get() key=|item|(item.id, item.read) children=move |item| view! {
+                    <li><p>{item.message}</p><small>{item.time}{if item.read { "" } else { " · Unread" }}</small></li>
+                }/>
+            </ul>
+        </section>
+        <div class="toast-stack" aria-label="Latest notification">
+            <div class="toast-item" class:notice=showing hidden=move ||!showing() inert=move ||!showing()
+                on:mouseenter=move |_|hovered.set(true) on:mouseleave=move |_|hovered.set(false)
+                on:focusin=move |_|focused.set(true) on:focusout=move |_|focused.set(false)>
+                <span role="status">{move ||if showing() { ui.notice.get() } else { String::new() }}</span>
+                <button type="button" on:click=move |_|{
+                    if focused.get_untracked() && !ui.studio.focus_mode.get_untracked() {
+                        crate::menubar::focus("#header-notifications");
+                    } else if focused.get_untracked() {
+                        crate::menubar::focus("#main-content");
+                    }
+                    hovered.set(false);
+                    focused.set(false);
+                    ui.toast_visible.set(false);
+                }>"Dismiss"</button>
+            </div>
+        </div>
     }
 }

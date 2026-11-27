@@ -373,7 +373,7 @@ pub(crate) fn regrant_queue_with(
     regrant: impl FnOnce(&Record) -> Result<Option<Grant>>,
 ) -> Result<Option<Vec<QueueEntry>>> {
     host.ensure_idle()?;
-    if host.0.unsaved.load(std::sync::atomic::Ordering::Acquire) {
+    if host.review_dirty() {
         return Err("Save current corrections before regranting/resuming a queue entry".into());
     }
     let record = {
@@ -413,7 +413,7 @@ pub async fn queue_start(host: tauri::State<'_, Host>, id: String) -> Result<Sta
     let host = host.inner().clone();
     blocking(move ||{
         let _operation=lock(&host.0.operation)?;host.ensure_idle()?;
-        if host.0.unsaved.load(std::sync::atomic::Ordering::Acquire) { return Err("Save current corrections before starting/resuming a queue entry".into()); }
+        if host.review_dirty() { return Err("Save current corrections before starting/resuming a queue entry".into()); }
         let (record,grant)={let store=lock(&host.0.queue)?;store.check()?;
             (store.file.records.iter().find(|r|r.id==id).cloned().ok_or_else(||"Queue record not found".to_string())?,
             store.grants.get(&id).cloned().ok_or_else(||"Regrant the source and output with native pickers before starting this restored job".to_string())?)};

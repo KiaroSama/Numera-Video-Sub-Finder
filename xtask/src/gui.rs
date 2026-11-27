@@ -96,7 +96,8 @@ impl Driver {
                             hitTag: hit?.localName ?? null, hitId: hit?.id ?? null,
                             hitButton: button.contains(hit)
                         } : null,
-                        noticePresent: !!document.querySelector('.notice'),
+                        noticePresent: !!document.querySelector('.toast-stack .toast-item.notice'),
+                        notificationsOpen: !!document.querySelector('#notifications-panel:not([hidden])'),
                         updateBannerPresent: !!document.querySelector('.update-banner')
                     };
                     "#,
@@ -331,6 +332,7 @@ pub fn smoke(gui: &Path, fixtures: &Path, data: &Path, output: &Path) -> Result<
             "return document.querySelector('h1')?.textContent === 'Models';",
             5,
         )?;
+        crate::gui_studio::verify_language_packs(&driver, output)?;
         driver.click("[data-testid=models-verify]")?;
         driver.wait("return document.querySelector('[data-testid=models-verify]')?.disabled===false && ['det','fa','en-ja','ja-specialist'].every(id=>{const row=document.querySelector(`[data-model-id='${id}']`);return row?.querySelector('h3')?.textContent===id && row.querySelector('[data-testid=model-install]') && row.querySelector('[data-testid=model-import]') && row.querySelector('[data-testid=model-export]');});", 30)?;
         driver.select("#language-pack", "rus")?;
@@ -433,7 +435,7 @@ pub fn smoke(gui: &Path, fixtures: &Path, data: &Path, output: &Path) -> Result<
         review_operation_guards(&driver, output)?;
         driver.wait("return document.querySelector('[data-testid=e2e-save-edits]')?.disabled===false && document.querySelector('.preview-shell')?.getAttribute('aria-busy')==='false';", 15)?;
         driver.click("[data-testid=e2e-save-edits]")?;
-        driver.wait("return Array.from(document.querySelectorAll('[role=status]')).some(e=>e.textContent.includes('Saved ui-en.srt'));", 15)?;
+        driver.wait("return document.querySelector('.toast-item.notice [role=status]')?.textContent.includes('Saved ui-en.srt');", 15)?;
         let exported = std::fs::read_to_string(fixtures.join("ui-en.srt"))?;
         let cues = nvsf_core::parse_srt(&exported)?;
         if !cues
@@ -529,7 +531,7 @@ pub fn smoke(gui: &Path, fixtures: &Path, data: &Path, output: &Path) -> Result<
     std::fs::write(
         output.join("gui-report.json"),
         serde_json::to_vec_pretty(
-            &json!({"schema":1,"source_sha":std::env::var("GITHUB_SHA")?,"target":std::env::var("NVSF_TARGET_ID")?,"passed":true,"tests":28,"failed":0,"skipped":0,"profile":"instrumented","proof":["native startup","fixed source admission and source frame","two persisted themes with measured contrast and circular logo","six workspace destinations","narrow and wide layout","programmatic control focus","zoom/pan/reset with normalized source ROI coordinates","default studio shell zero overflow and resizable inspector","interactive ROI live drag preview, 8 resize handles and 4 separating guides","extract undo/redo, source-PTS frame stepping and monotonic playback transport","header save/save-as and shortcuts dialog","content-verified original and selected-frame crop comparison","model catalog IDs and controls","full language catalog and nonpriority extraction choices","automatic update disable persisted through Settings","native diagnostics and unapproved repair guard","actual worker extraction","native close acknowledgement preserves draft/applied revision and blocks shortcuts","Unicode edit and exported bytes","undo without an open project preserves clean review state","native drop event bridge accepts one host grant and refuses replay","pending native recognition blocks draft/apply/undo mutations","later cue edits invalidate an earlier OCR proposal","language search preserves the committed native queue configuration","failed theme transitions retire their canvas and GPU resources","queued source replacement displays the admitted video pixels","delayed native source-A response cannot publish over source B","explicit busy and selected ARIA states follow native preview, ROI and cue changes"],"not_proved":["native Tab traversal","physical IME composition","external OS drag gesture","active-extraction review input interaction","production listener absence","real-language quality","positive signed repair/update lifecycle","platform installers"]}),
+            &json!({"schema":1,"source_sha":std::env::var("GITHUB_SHA")?,"target":std::env::var("NVSF_TARGET_ID")?,"passed":true,"tests":28,"failed":0,"skipped":0,"profile":"instrumented","proof":["native startup","fixed source admission and source frame","two persisted themes with measured contrast and circular logo","six workspace destinations","narrow and wide layout","programmatic control focus","zoom/pan/reset, marquee zoom and normalized source ROI coordinates","default studio shell zero overflow and resizable inspector","interactive ROI live drag preview, 8 resize handles and 4 separating guides","extract undo/redo, source-PTS frame stepping, monotonic transport and independent timeline playhead","pre-extraction save/save-as, shortcuts dialog, focus mode and bell dismissal","content-verified original and selected-frame crop comparison","model catalog IDs and controls","full language catalog, auto-loaded installed packs and nonpriority extraction choices","automatic update disable persisted through Settings","native diagnostics and unapproved repair guard","actual worker extraction","native close acknowledgement preserves draft/applied revision and blocks shortcuts","Unicode edit and exported bytes","undo without an open project preserves clean review state","native drop event bridge accepts one host grant and refuses replay","pending native recognition blocks draft/apply/undo mutations","later cue edits invalidate an earlier OCR proposal","language search preserves the committed native queue configuration","failed theme transitions retire their canvas and GPU resources","queued source replacement displays the admitted video pixels","delayed native source-A response cannot publish over source B","explicit busy and selected ARIA states follow native preview, ROI and cue changes"],"not_proved":["native Tab traversal","physical IME composition","external OS drag gesture","active-extraction review input interaction","production listener absence","real-language quality","positive signed repair/update lifecycle","platform installers"]}),
         )?,
     )?;
     Ok(())
@@ -557,7 +559,8 @@ fn drop_ingress(driver: &Driver, output: &Path) -> Result<()> {
     let token = emitted["token"]
         .as_str()
         .ok_or_else(|| format!("Native drop fixture failed: {emitted}"))?;
-    driver.wait("return document.querySelector('.source-frame')?.naturalWidth>0 && Array.from(document.querySelectorAll('[role=status]')).some(e=>e.textContent.includes('Loaded dropped video: en.mp4')) && document.querySelector('.preview-shell')?.getAttribute('aria-busy')==='false';", 30)?;
+    driver.wait("return document.querySelector('.toast-item.notice [role=status]')?.textContent.includes('Loaded dropped video: en.mp4');", 30)?;
+    driver.wait("return document.querySelector('.source-frame')?.naturalWidth>0 && document.querySelector('.preview-shell')?.getAttribute('aria-busy')==='false';", 30)?;
     let replay = driver.request(
         reqwest::Method::POST,
         "/execute/async",

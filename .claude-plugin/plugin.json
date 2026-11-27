@@ -1,0 +1,21 @@
+{
+  "name": "numera-video-sub-finder",
+  "version": "0.7.0",
+  "license": "GPL-3.0-or-later",
+  "description": "Extract burned-in subtitles locally, resume batches, and review or export subtitle projects with the nvsf CLI.",
+  "author": {
+    "name": "Kiaro Sama",
+    "email": "Kiaro.Sama.Dev@gmail.com"
+  },
+  "homepage": "https://github.com/KiaroSama/Numera-Video-Sub-Finder",
+  "repository": "https://github.com/KiaroSama/Numera-Video-Sub-Finder",
+  "skills": [
+    "./skills/numera-video-sub-finder"
+  ],
+  "commands": [
+    "./commands/nvsf-extract.md",
+    "./commands/nvsf-queue.md",
+    "./commands/nvsf-doctor.md",
+    "./commands/nvsf-project.md"
+  ]
+}

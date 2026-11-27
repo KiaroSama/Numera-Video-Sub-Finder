@@ -21,8 +21,8 @@ pub fn Models(ui: Ui) -> impl IntoView {
         spawn_local(async move {
             let result = ipc::call::<()>("install_models", json!({"selected":selected})).await;
             match result {
-                Ok(()) => ui.notice.set(
-                    "Model provisioning completed; verification below is authoritative.".into(),
+                Ok(()) => ui.push_notice(
+                    "Model installation finished. Check the verification status below.",
                 ),
                 Err(e) => ui.error.set(Some(e)),
             }
@@ -38,8 +38,7 @@ pub fn Models(ui: Ui) -> impl IntoView {
     let artifact = move |command: &'static str, id: String| {
         ui.request::<Option<String>>(command, json!({"id":id}), move |saved| {
             if let Some(name) = saved {
-                ui.notice
-                    .set(format!("Model artifact operation completed: {name}"));
+                ui.push_notice(format!("Model artifact operation completed: {name}"));
             }
             spawn_local(async move {
                 match ipc::call::<Vec<Model>>("model_catalog", json!({})).await {
@@ -64,7 +63,7 @@ pub fn Models(ui: Ui) -> impl IntoView {
         <div class="button-row"><button data-testid="models-install-defaults" class="primary" disabled=move ||ui.busy.get()||ui.active() on:click=move |_|install(None)>"Install default language models + verifier data"</button>
             <Show when=move ||installing.get()><button data-testid="models-cancel" class="danger" disabled=move ||cancelling.get() on:click=move |_|{
                 cancelling.set(true);spawn_local(async move{match ipc::call::<()>("cancel_model_install",json!({})).await{
-                    Ok(())=>ui.notice.set("Cancellation requested; waiting for the active transfer to stop safely.".into()),Err(e)=>{ui.error.set(Some(e));cancelling.set(false);}
+                    Ok(())=>ui.push_notice("Waiting for the download to stop safely."),Err(e)=>{ui.error.set(Some(e));cancelling.set(false);}
                 }});
             }>{move ||if cancelling.get(){"Stopping download…"}else{"Cancel download"}}</button></Show></div>
         <p class="hint">"Default provisioning includes primary models and verifier language files; the Japanese specialist requires explicit selected install. ONNX import/export moves only that checksummed model artifact, not a complete offline verifier-data archive. Existing export destinations are never overwritten."</p>

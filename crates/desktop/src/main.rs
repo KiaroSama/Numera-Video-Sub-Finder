@@ -29,11 +29,17 @@ use state::Host;
 use tauri::{Emitter, Manager};
 
 #[tauri::command]
-fn set_unsaved(host: tauri::State<'_, Host>, dirty: bool) -> state::Result<()> {
+fn set_unsaved(
+    host: tauri::State<'_, Host>,
+    dirty: bool,
+    review_dirty: Option<bool>,
+) -> state::Result<()> {
+    use std::sync::atomic::Ordering::Release;
     let host = host.inner();
     host.0
-        .unsaved
-        .store(dirty, std::sync::atomic::Ordering::Release);
+        .extract_only_dirty
+        .store(dirty && review_dirty == Some(false), Release);
+    host.0.unsaved.store(dirty, Release);
     Ok(())
 }
 
@@ -70,18 +76,7 @@ fn ui_ready(
     host.0
         .log
         .event("INFO", "DESKTOP", "phase=ui-ready-received");
-    let theme = match theme.as_str() {
-        "dark" => Some(tauri::Theme::Dark),
-        "light" => Some(tauri::Theme::Light),
-        "system" => None,
-        _ => return Err("Unknown theme; choose dark, light or system".into()),
-    };
-    window.set_theme(theme).map_err(|e| {
-        host.0
-            .log
-            .event("ERROR", "DESKTOP", "phase=theme-apply-failed");
-        e.to_string()
-    })?;
+    apply_window_theme(&window, host, &theme)?;
     window.show().map_err(|e| {
         host.0
             .log
@@ -94,6 +89,134 @@ fn ui_ready(
     let app = window.app_handle().clone();
     tauri::async_runtime::spawn_blocking(move || updates::schedule(&app));
     Ok(())
+}
+
+fn apply_window_theme(
+    window: &tauri::WebviewWindow,
+    host: &Host,
+    theme: &str,
+) -> state::Result<()> {
+    let theme = match theme {
+        "dark" => Some(tauri::Theme::Dark),
+        "light" => Some(tauri::Theme::Light),
+        "system" => None,
+        _ => return Err("Unknown theme; choose dark, light or system".into()),
+    };
+    window.set_theme(theme).map_err(|error| {
+        host.0
+            .log
+            .event("ERROR", "DESKTOP", "phase=theme-apply-failed");
+        error.to_string()
+    })?;
+    #[cfg(windows)]
+    {
+        let native = window.clone();
+        let log = host.0.log.clone();
+        window
+            .run_on_main_thread(move || {
+                if let Err(error) = refresh_titlebar(&native, theme) {
+                    log.event("WARNING", "DESKTOP", &error);
+                }
+            })
+            .map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn refresh_titlebar(
+    window: &tauri::WebviewWindow,
+    theme: Option<tauri::Theme>,
+) -> state::Result<()> {
+    use std::{ffi::c_void, ptr};
+    #[link(name = "dwmapi")]
+    unsafe extern "system" {
+        fn DwmSetWindowAttribute(
+            hwnd: *mut c_void,
+            attribute: u32,
+            value: *const c_void,
+            len: u32,
+        ) -> i32;
+    }
+    #[link(name = "user32")]
+    unsafe extern "system" {
+        fn SetWindowPos(
+            hwnd: *mut c_void,
+            after: *mut c_void,
+            x: i32,
+            y: i32,
+            cx: i32,
+            cy: i32,
+            flags: u32,
+        ) -> i32;
+        fn RedrawWindow(
+            hwnd: *mut c_void,
+            rect: *const c_void,
+            region: *mut c_void,
+            flags: u32,
+        ) -> i32;
+    }
+    const DWMWA_USE_IMMERSIVE_DARK_MODE: u32 = 20;
+    const SWP_NOSIZE: u32 = 0x0001;
+    const SWP_NOMOVE: u32 = 0x0002;
+    const SWP_NOZORDER: u32 = 0x0004;
+    const SWP_NOACTIVATE: u32 = 0x0010;
+    const SWP_FRAMECHANGED: u32 = 0x0020;
+    const RDW_INVALIDATE: u32 = 0x0001;
+    const RDW_UPDATENOW: u32 = 0x0100;
+    const RDW_FRAME: u32 = 0x0400;
+    let hwnd = window.hwnd().map_err(|error| error.to_string())?.0;
+    let use_dark = i32::from(match theme {
+        Some(theme) => theme == tauri::Theme::Dark,
+        None => window.theme().map_err(|error| error.to_string())? == tauri::Theme::Dark,
+    });
+    // SAFETY: this is the live window on its event thread. The BOOL lives for the call;
+    // null optional pointers are valid, and no workspace lock is held during repaint.
+    let (applied, positioned, redrawn) = unsafe {
+        let applied = DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_USE_IMMERSIVE_DARK_MODE,
+            ptr::from_ref(&use_dark).cast(),
+            4,
+        );
+        let positioned = SetWindowPos(
+            hwnd,
+            ptr::null_mut(),
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED,
+        );
+        let redrawn = RedrawWindow(
+            hwnd,
+            ptr::null(),
+            ptr::null_mut(),
+            RDW_FRAME | RDW_INVALIDATE | RDW_UPDATENOW,
+        );
+        (applied, positioned, redrawn)
+    };
+    if applied < 0 || positioned == 0 || redrawn == 0 {
+        return Err("Windows could not refresh the native title bar theme".into());
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn set_window_theme(
+    window: tauri::WebviewWindow,
+    host: tauri::State<'_, Host>,
+    theme: String,
+) -> state::Result<()> {
+    apply_window_theme(&window, host.inner(), &theme)
+}
+
+#[tauri::command]
+fn set_window_fullscreen(window: tauri::WebviewWindow, fullscreen: bool) -> state::Result<bool> {
+    window
+        .set_fullscreen(fullscreen)
+        .map_err(|error| error.to_string())?;
+    Ok(window.is_fullscreen().unwrap_or(fullscreen))
 }
 
 const EMBEDDED_LOGO_SVG: &[u8] = include_bytes!("../../../assets/logo.svg");
@@ -155,6 +278,12 @@ fn main() {
                 std::process::id()
             );
             setup_log.event("INFO", "DESKTOP", "phase=host-managed");
+            if let Some(window) = app.get_webview_window("main") {
+                window.set_title(&format!(
+                    "Numera Video Sub Finder (v{})",
+                    env!("CARGO_PKG_VERSION")
+                ))?;
+            }
             Ok(())
         })
         .manage(close::CloseSession::default())
@@ -166,6 +295,9 @@ fn main() {
     macro_rules! commands {
         ($($extra:path),* $(,)?) => { tauri::generate_handler![
             ui_ready,
+            set_window_theme,
+            set_window_fullscreen,
+            files::bind_project_source,
             set_unsaved,
             restart_app,
             close::confirm_close,
@@ -233,10 +365,14 @@ fn main() {
     log.event("INFO", "DESKTOP", "phase=native-build-started");
     let context = tauri::generate_context!();
     log.event("INFO", "DESKTOP", "phase=native-context-ready");
-    let app = builder.build(context).unwrap_or_else(|error| {
-        log.event("ERROR", "DESKTOP", "phase=native-build-failed");
-        panic!("Native desktop initialization failed: {error}");
-    });
+    let app = match builder.build(context) {
+        Ok(app) => app,
+        Err(error) => {
+            log.event("ERROR", "DESKTOP", "phase=native-build-failed");
+            eprintln!("Native desktop initialization failed: {error}");
+            std::process::exit(1);
+        }
+    };
     log.event("INFO", "DESKTOP", "phase=native-build-returned");
     app.run(move |app, event| {
         // Tauri manages Host in setup during Ready, after Builder::build returns.

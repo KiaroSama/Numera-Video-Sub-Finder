@@ -172,7 +172,7 @@ pub(crate) fn list_history_value(projects_dir: &Path, limit: usize) -> Result<Va
     for entry in std::fs::read_dir(&root)?.take(2000) {
         let entry = entry?;
         let path = entry.path();
-        if !entry.file_type()?.is_file() || path.extension().is_none_or(|e| e != "json") {
+        if !entry.file_type()?.is_file() || !nvsf_app::storage::is_project_file(&path) {
             continue;
         }
         let canonical = path.canonicalize()?;

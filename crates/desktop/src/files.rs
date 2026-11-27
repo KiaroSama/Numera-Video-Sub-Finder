@@ -14,6 +14,10 @@ use std::{
 use tauri::Manager;
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
 
+#[path = "project_staging.rs"]
+mod project_staging;
+pub(crate) use project_staging::apply_project_edits;
+
 #[derive(Clone, Default)]
 pub(crate) struct ProjectFiles(Arc<Mutex<ProjectPaths>>);
 
@@ -116,6 +120,13 @@ pub(crate) fn grant_source_with(
         .source_cancel
         .store(false, std::sync::atomic::Ordering::Release);
     let media = probe(&path)?;
+    let mut preview = lock(&host.0.preview_daemon)?;
+    if preview
+        .as_ref()
+        .is_some_and(|daemon| !daemon.matches(&path))
+    {
+        preview.take();
+    }
     let token = host.token("source");
     let mut grants = lock(&host.0.sources)?;
     if grants.len() >= 1024 {
@@ -290,47 +301,54 @@ pub(crate) async fn with_source_preview<T: Send + 'static>(
 
 #[tauri::command]
 pub fn current_project(host: tauri::State<'_, Host>) -> Result<Option<Project>> {
-    Ok(lock(&host.inner().0.project)?.clone())
+    Ok(lock(&host.inner().0.project)?
+        .clone()
+        .map(project_staging::for_webview))
 }
 
 #[tauri::command]
-pub fn replace_project(host: tauri::State<'_, Host>, project: Project) -> Result<()> {
-    let host = host.inner();
-    let _operation = lock(&host.0.operation)?;
-    host.ensure_idle()?;
-    apply_project_edits(host, project)
+pub async fn replace_project(
+    host: tauri::State<'_, Host>,
+    files: tauri::State<'_, ProjectFiles>,
+    project: Project,
+    source_token: Option<String>,
+) -> Result<()> {
+    let host = host.inner().clone();
+    let files = files.inner().clone();
+    blocking(move || {
+        let _operation = lock(&host.0.operation)?;
+        host.ensure_idle()?;
+        apply_project_edits(&host, &files, project, source_token.as_deref())
+    })
+    .await
 }
 
-pub(crate) fn apply_project_edits(host: &Host, project: Project) -> Result<()> {
-    project.validate().map_err(|e| e.to_string())?;
-    if serde_json::to_vec(&project)
-        .map_err(|e| e.to_string())?
-        .len()
-        > 64 * 1024 * 1024
-    {
-        return Err("Project exceeds 64MiB workspace bound".into());
-    }
-    let mut current = lock(&host.0.project)?;
-    let old = current
-        .as_ref()
-        .ok_or_else(|| "No project is open".to_string())?;
-    if old.source_hash != project.source_hash
-        || old.config_hash != project.config_hash
-        || old.model_hash != project.model_hash
-        || serde_json::to_value(&old.config).map_err(|e| e.to_string())?
-            != serde_json::to_value(&project.config).map_err(|e| e.to_string())?
-    {
-        return Err("Only cue corrections may replace the current project; source/config/model identity must match".into());
-    }
-    if let Some(current) = current.as_mut() {
-        current.cues = project.cues;
-    }
-    Ok(())
+#[tauri::command]
+pub async fn bind_project_source(host: tauri::State<'_, Host>) -> Result<Option<Source>> {
+    let host = host.inner().clone();
+    blocking(move || {
+        let Some((path, fingerprint)) = lock(&host.0.project)?.as_ref().map(|project| {
+            (
+                PathBuf::from(&project.config.input),
+                project.source_hash.clone(),
+            )
+        }) else {
+            return Ok(None);
+        };
+        if !path.is_absolute() || !path.is_file() {
+            return Ok(None);
+        }
+        grant_source_with(&host, &path, Some(&fingerprint), |path| {
+            probe_source(&host, path)
+        })
+        .map(Some)
+    })
+    .await
 }
 
 fn confirm_replace(app: &tauri::AppHandle) -> bool {
     app.dialog()
-        .message("This destination already exists. Replace it with your current corrections?")
+        .message("This destination already exists. Replace the file?")
         .title("Confirm overwrite")
         .buttons(MessageDialogButtons::OkCancelCustom(
             "Replace".into(),
@@ -384,7 +402,7 @@ pub(crate) fn save_active_project(
             );
         }
         let project = lock(&host.0.project)?.clone().ok_or_else(|| {
-            "No active project to save yet. Extract subtitles or open a project first.".to_string()
+            "No active project to save yet. Choose a video or open a project first.".to_string()
         })?;
         let job = job_id(host)?;
         let paths = lock(&files.0)?;
@@ -413,8 +431,8 @@ pub(crate) fn save_active_project(
         let Some(file) = app
             .dialog()
             .file()
-            .set_title("Save review project as")
-            .add_filter("Numera project", &["nvsf.json", "json"])
+            .set_title("Save Numera project as")
+            .add_filter("Numera project", &["nvsf", "nvsf.json", "json"])
             .set_file_name(name)
             .blocking_save_file()
         else {
@@ -444,9 +462,9 @@ pub(crate) fn save_active_project(
             let active = lock(&host.0.project)?;
             if job_id(host)? != job
                 || paths.generation != generation
-                || active
-                    .as_ref()
-                    .is_none_or(|current| current.cues != project.cues)
+                || active.as_ref().is_none_or(|current| {
+                    current.cues != project.cues || current.config != project.config
+                })
             {
                 return Err(
                     "The workspace changed while choosing a project destination; save again".into(),
@@ -460,17 +478,19 @@ pub(crate) fn save_active_project(
             paths.generation = paths.generation.wrapping_add(1);
             paths.active = Some((job, path.clone()));
             host.0.unsaved.store(false, Ordering::Release);
+            host.0.extract_only_dirty.store(false, Ordering::Release);
             Ok(())
         },
     )
 }
 
-fn project_filename(name: &str) -> String {
+pub(crate) fn project_filename(name: &str) -> String {
     let name = name
         .strip_suffix(".nvsf.json")
+        .or_else(|| name.strip_suffix(".nvsf"))
         .or_else(|| name.strip_suffix(".json"))
         .unwrap_or(name);
-    format!("{name}.nvsf.json")
+    format!("{name}.nvsf")
 }
 
 #[tauri::command]
@@ -571,8 +591,8 @@ pub async fn pick_project(
         let Some(file) = app
             .dialog()
             .file()
-            .set_title("Open review project")
-            .add_filter("Numera project", &["json"])
+            .set_title("Open Numera project")
+            .add_filter("Numera project", &["nvsf", "nvsf.json", "json"])
             .blocking_pick_file()
         else {
             return Ok(None);
@@ -582,7 +602,7 @@ pub async fn pick_project(
         let _operation = lock(&host.0.operation)?;
         host.ensure_idle()?;
         bind_project(&host, &app.state::<ProjectFiles>(), path, &project)?;
-        Ok(Some(project))
+        Ok(Some(project_staging::for_webview(project)))
     })
     .await
 }
@@ -626,7 +646,7 @@ pub async fn list_history(
             let entry = entry.map_err(|e| e.to_string())?;
             let path = entry.path();
             if !entry.file_type().map_err(|e| e.to_string())?.is_file()
-                || path.extension().is_none_or(|e| e != "json")
+                || !nvsf_app::storage::is_project_file(&path)
             {
                 continue;
             }
@@ -638,7 +658,8 @@ pub async fn list_history(
         }
         let mut paths = lock(&files.0)?;
         for (path, fingerprint) in &paths.recent {
-            if std::fs::symlink_metadata(path).is_ok_and(|metadata| metadata.is_file())
+            if nvsf_app::storage::is_project_file(path)
+                && std::fs::symlink_metadata(path).is_ok_and(|metadata| metadata.is_file())
                 && !entries.iter().any(|(entry, _, _)| entry == path)
             {
                 entries.push((path.clone(), modified_at(path), Some(fingerprint.clone())));
@@ -704,7 +725,7 @@ pub async fn open_history(
         let _operation = lock(&host.0.operation)?;
         host.ensure_idle()?;
         bind_project(&host, &files, path, &project)?;
-        Ok(project)
+        Ok(project_staging::for_webview(project))
     })
     .await
 }

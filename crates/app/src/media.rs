@@ -10,6 +10,9 @@ use std::{
 
 #[path = "media_preview.rs"]
 mod preview;
+#[path = "media_session.rs"]
+mod session;
+pub(crate) use session::MediaSession;
 
 pub const NATIVE_LIBRARY_NAME: &str = if cfg!(windows) {
     "nvsf_media_native.dll"

@@ -86,6 +86,7 @@ fn run(cli: Cli) -> Result<i32> {
         return nvsf_app::native_request::run(request).map(|()| 0);
     }
     if let Commands::Worker {
+        command,
         request,
         control,
         provider_profile,
@@ -94,16 +95,22 @@ fn run(cli: Cli) -> Result<i32> {
         srt_crlf,
     } = &cli.command
     {
-        return worker_cmd::run_worker(
-            request,
-            control,
-            provider_profile.as_deref(),
-            resume_project.as_deref(),
-            nvsf_app::extraction::SrtOptions {
-                bom: *srt_bom,
-                crlf: *srt_crlf,
-            },
-        )
+        return match (command, request, control) {
+            (Some(crate::cli::WorkerCommand::PreviewDaemon { input }), None, None) => {
+                worker_cmd::run_preview_daemon(input, cli.data_root.as_deref())
+            }
+            (None, Some(request), Some(control)) => worker_cmd::run_worker(
+                request,
+                control,
+                provider_profile.as_deref(),
+                resume_project.as_deref(),
+                nvsf_app::extraction::SrtOptions {
+                    bom: *srt_bom,
+                    crlf: *srt_crlf,
+                },
+            ),
+            _ => Err(nvsf_app::fail("Invalid worker invocation")),
+        }
         .map(|()| 0);
     }
     preflight::validate(&cli)?;

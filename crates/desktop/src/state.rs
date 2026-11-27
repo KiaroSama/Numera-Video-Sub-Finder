@@ -68,6 +68,8 @@ pub struct Inner {
     pub operation: Mutex<()>,
     pub source_busy: std::sync::atomic::AtomicBool,
     pub source_cancel: std::sync::atomic::AtomicBool,
+    pub preview_daemon: Mutex<Option<nvsf_app::preview_daemon::PreviewDaemon>>,
+    pub extract_only_dirty: std::sync::atomic::AtomicBool,
     pub unsaved: std::sync::atomic::AtomicBool,
     pub closing: std::sync::atomic::AtomicBool,
     pub exit_approved: std::sync::atomic::AtomicBool,
@@ -105,6 +107,8 @@ impl Host {
             operation: Mutex::new(()),
             source_busy: std::sync::atomic::AtomicBool::new(false),
             source_cancel: std::sync::atomic::AtomicBool::new(false),
+            preview_daemon: Mutex::new(None),
+            extract_only_dirty: std::sync::atomic::AtomicBool::new(false),
             unsaved: std::sync::atomic::AtomicBool::new(false),
             closing: std::sync::atomic::AtomicBool::new(false),
             exit_approved: std::sync::atomic::AtomicBool::new(false),
@@ -144,6 +148,10 @@ impl Host {
         }
         Ok(path)
     }
+    pub fn review_dirty(&self) -> bool {
+        self.0.unsaved.load(Ordering::Acquire) && !self.0.extract_only_dirty.load(Ordering::Acquire)
+    }
+
     pub fn ensure_idle(&self) -> Result<()> {
         if self.0.closing.load(Ordering::Acquire)
             || self.0.source_busy.load(Ordering::Acquire)
@@ -224,6 +232,9 @@ impl Host {
                 .log
                 .event("INFO", "NATIVE", "Close waiting for native request cleanup");
             return false;
+        }
+        if let Ok(mut preview) = self.0.preview_daemon.lock() {
+            preview.take();
         }
         if self.0.model_busy.load(Ordering::Acquire) {
             self.0.model_cancel.store(true, Ordering::Release);

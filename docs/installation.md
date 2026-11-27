@@ -125,15 +125,29 @@ CLI extraction, benchmark, resume and batch return 2 when completed output conta
 
 SRT, VTT and ASS keep distinct tracks separate. For multiple tracks, the chosen output contains the lowest-numbered primary track, with `.track-<id>.<format>` files for every track; it does not silently combine bilingual tracks. JSON retains the complete project. ASS represents time in centiseconds, enclosing millisecond intervals with at most 9 ms expansion at each edge so a short cue is never silently erased.
 
-Use Zoom (100% to 400%), native scrollbars or the labeled pan buttons to inspect a frame; Reset view restores fit without changing source pixels or normalized regions. In Review, expand Compare original and selected-frame crops and load the content-verified original extraction crop. The candidate shows the unmasked track region at the current source time. A moved/missing cache is reported honestly; it is never replaced with a newly decoded image and labelled original.
+Press `Z` and drag a box to zoom into part of the frame. Use the zoom menu, native scrollbars or the labeled pan buttons to inspect it. **Reset view** (`Ctrl+0`) restores 100% fit without changing source pixels or normalized regions. In Review, expand Compare original and selected-frame crops and load the content-verified original extraction crop. The candidate shows the unmasked track region at the current source time. If the original crop is missing, the app reports it instead of labeling a new decode as original.
 
-Review source frames and uncertain cues before exporting. Save a review project before changing source, starting another job, repairing resources or installing an update. Checkpoints require matching source/configuration/selected-resource identities; installing unrelated language packs does not change that fingerprint. A checkpoint from an incompatible older fingerprint scheme is refused instead of silently resumed.
+Use **Save** or **Save As** after loading a video to store its setup as a `.nvsf` project, even before it has cues. Reopen it to restore the source and settings. The app still reads `.nvsf.json` and `.json` projects. Review source frames and uncertain cues before exporting. Extraction checkpoints require the same source, configuration and selected resources. Unrelated language packs do not change that fingerprint. The app refuses checkpoints from incompatible older fingerprint schemes.
+
+## Agent plugins
+
+Install `nvsf` v0.7.0 first and make it available on the agent host's `PATH`. These plugins share the same CLI skill; none needs an MCP server. Use a published tag or a checked-out source tree that contains the manifests.
+
+| Host | Installation |
+| --- | --- |
+| Claude Code | Run `/plugin marketplace add KiaroSama/Numera-Video-Sub-Finder` and `/plugin install numera-video-sub-finder@numera-video-sub-finder-marketplace`. To use a checkout, pass its path to `/plugin marketplace add` instead. |
+| Codex | Add the checkout to a [personal marketplace](https://developers.openai.com/plugins/build/plugins#marketplace-metadata) as a local plugin, then select it from `/plugins`. The Codex compatibility manifest is `.codex-plugin/plugin.json`. |
+| Cursor | Add the repository to a [Cursor team marketplace](https://cursor.com/docs/plugins#add-a-team-marketplace) and install from that marketplace. The Cursor catalog is `.cursor-plugin/marketplace.json`. |
+| Antigravity | Run `agy plugin install <checkout-path>` with the local repo path, quoted if it contains spaces. |
+| Agent Plugins 1.0 | Import the plugin directory in an [Agent Plugins 1.0](https://agent-plugins.org/specification) host. The portable entry point is the root `plugin.json`. |
+
+Claude Code and Cursor include the `nvsf-extract`, `nvsf-queue`, `nvsf-doctor` and `nvsf-project` command files. In hosts that load the skill alone, ask for the same workflow in plain language. If the desktop and CLI should share data, set `NVSF_DATA_ROOT` before starting either one.
 
 ## Updates, data and troubleshooting
 
 - Settings → Application updates controls automatic stable-release metadata checks, a persistent disable option and manual checks. Checks run at startup and at most daily while open; video/subtitles are not uploaded. Downloads and installation have separate explicit approvals bound to the offered version. Development prereleases are never served by the stable feed.
 - Automatic replacement is intended only for installed Windows and Linux AppImage. Portable archives/deb/rpm provide a verified saved download and require their normal installation procedure. Jobs, previews, resource operations, closing and unsaved edits block installation; do not terminate the app to force it through.
-- Writable models/projects/cache/logs use OS local application data under `Numera Video Sub Finder`. `--data-root` / `NVSF_DATA_ROOT` selects another location. A portable package's `portable.flag` uses sibling `data`. Preserve that data during an update; do not delete it to diagnose a runtime issue.
+- Writable models, projects, cache and logs default to OS local application data under `Numera Video Sub Finder`. Set `NVSF_DATA_ROOT` before launch to change the location for either program. An explicit CLI `--data-root` overrides it. With neither set, a portable package's `portable.flag` selects sibling `data`. Preserve the directory during updates and troubleshooting.
 - Run `doctor` or the resource checks for exact errors. Logs are UTF-8 under the selected data root's `logs` directory; redact private paths/context before voluntarily sharing a log. Missing hardware/quality evidence is not a runtime-install error. See [troubleshooting](troubleshooting.md), [models](models.md) and [validation](validation.md).
 
 ## Source builds

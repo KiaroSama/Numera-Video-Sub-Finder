@@ -41,6 +41,14 @@ pub fn write_atomic(path: &Path, bytes: &[u8], overwrite: bool) -> Result<()> {
     AtomicOutput::new(path, overwrite)?.write(bytes)
 }
 
+pub fn is_project_file(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| {
+            extension.eq_ignore_ascii_case("nvsf") || extension.eq_ignore_ascii_case("json")
+        })
+}
+
 pub fn save_project(project: &Project, path: &Path) -> Result<()> {
     project.validate()?;
     let output = AtomicOutput::new(path, true)?;

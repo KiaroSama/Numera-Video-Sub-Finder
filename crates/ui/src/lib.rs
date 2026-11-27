@@ -25,6 +25,8 @@ mod transport;
 mod undo;
 #[cfg(target_arch = "wasm32")]
 mod update_banner;
+#[cfg(any(target_arch = "wasm32", test))]
+mod zoom_tool;
 
 #[cfg(target_arch = "wasm32")]
 mod app;

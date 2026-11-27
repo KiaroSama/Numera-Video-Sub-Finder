@@ -436,6 +436,24 @@ mod tests {
     }
 
     #[test]
+    fn history_includes_current_and_legacy_project_extensions() {
+        let directory =
+            std::env::temp_dir().join(format!("nvsf-project-history-{}", std::process::id()));
+        std::fs::create_dir(&directory).unwrap();
+        for name in ["one.nvsf", "two.nvsf.json", "three.json", "ignored.srt"] {
+            std::fs::write(directory.join(name), b"{}").unwrap();
+        }
+        let result = project_ops::list_history_value(&directory, 10);
+        std::fs::remove_dir_all(directory).unwrap();
+        let result = result.unwrap();
+        assert_eq!(result["total"], 3);
+        let entries = result["entries"].as_array().unwrap();
+        for name in ["one.nvsf", "two.nvsf.json", "three.json"] {
+            assert!(entries.iter().any(|entry| entry["name"] == name));
+        }
+    }
+
+    #[test]
     fn cue_evidence_export_preserves_source_media_even_with_overwrite() {
         let dir =
             std::env::temp_dir().join(format!("nvsf-evidence-source-test-{}", std::process::id()));

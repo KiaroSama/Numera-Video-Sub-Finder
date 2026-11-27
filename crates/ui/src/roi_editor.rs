@@ -1,4 +1,4 @@
-use crate::{helpers, roi_geometry, state::Ui, undo::RegionId};
+use crate::{helpers, roi_geometry, state::Ui, undo::RegionId, zoom_tool};
 use leptos::{ev, prelude::*};
 use nvsf_core::Rect;
 use web_sys::MouseEvent;
@@ -53,7 +53,7 @@ fn begin_edit(
     id: RegionId,
     edges: (i8, i8),
 ) {
-    if e.button() != 0 || ui.closing.get_untracked() {
+    if e.button() != 0 || ui.closing.get_untracked() || ui.studio.zoom_tool.get_untracked() {
         return;
     }
     e.stop_propagation();
@@ -102,13 +102,19 @@ fn guide_style(rect: Rect, edges: (i8, i8)) -> String {
 }
 
 #[component]
-pub(crate) fn RoiCanvas(
-    ui: Ui,
-    editor: bool,
-    exclusion: RwSignal<bool>,
-    guides: RwSignal<bool>,
-) -> impl IntoView {
+pub(crate) fn RoiCanvas(ui: Ui, editor: bool, viewport: zoom_tool::Div) -> impl IntoView {
     let bounds = NodeRef::<leptos::html::Div>::new();
+    let (marquee_start, marquee) = zoom_tool::enable_marquee(ui, viewport, bounds);
+    let alt = RwSignal::new(false);
+    let key_down = window_event_listener(ev::keydown, move |e| alt.set(e.alt_key()));
+    let key_up = window_event_listener(ev::keyup, move |e| alt.set(e.alt_key()));
+    let reset_alt = window_event_listener(ev::blur, move |_| alt.set(false));
+    on_cleanup(move || {
+        key_down.remove();
+        key_up.remove();
+        reset_alt.remove();
+    });
+    let moved = RwSignal::new(false);
     if editor {
         let movement = window_event_listener(ev::mousemove, move |e| {
             if let Some(mut drag) = ui.studio.roi_drag.get_untracked()
@@ -132,11 +138,13 @@ pub(crate) fn RoiCanvas(
                     match drag.gesture {
                         Gesture::Draw(excluded) => {
                             if let Some(rect) = roi_geometry::draw(drag.start, drag.current) {
+                                moved.set(true);
                                 ui.add_region(excluded, rect);
                             }
                         }
                         Gesture::Edit(id, _, _) if drag.current != drag.start => {
                             if let Some(rect) = drag.rect() {
+                                moved.set(true);
                                 ui.update_region(id, rect);
                             }
                         }
@@ -171,7 +179,8 @@ pub(crate) fn RoiCanvas(
                 <div class="roi" class:excluded=excluded class:editable=editor
                     class:selected=move ||editor&&ui.studio.roi.get()==Some(id)
                     style=move ||helpers::region_style(if editor {displayed(ui,id,rect)} else {rect})
-                    on:mousedown=move |e|if editor {begin_edit(ui,bounds,&e,id,(0,0))}>
+                    on:mousedown=move |e|if editor {begin_edit(ui,bounds,&e,id,(0,0))}
+                    on:dblclick=move |e|if editor {e.stop_propagation();}>
                     {if editor {
                         let name = if excluded {format!("Select exclusion {}",index+1)} else {format!("Select region {}",index+1)};
                         view! {<button type="button" class="roi-pick" aria-label=name aria-pressed=move ||if ui.studio.roi.get()==Some(id){"true"}else{"false"}
@@ -187,18 +196,40 @@ pub(crate) fn RoiCanvas(
     };
     view! {
         <div class="frame" class:editable=editor node_ref=bounds
-            style=move ||ui.source.with(|s|s.as_ref().map(|s|format!("--frame-ratio:{};--zoom-width:{}%", f64::from(s.media.width.max(1))/f64::from(s.media.height.max(1)),ui.studio.zoom.get())).unwrap_or_default())
+            class:zoom-tool-active=move ||ui.studio.zoom_tool.get()
+            class:zoom-out=move ||ui.studio.zoom_tool.get() && alt.get()
+            style=move ||ui.source.with(|s|s.as_ref().map(|s|{
+                let zoom = ui.studio.zoom.get();
+                format!("--frame-ratio:{};--zoom-width:{zoom}%;--zoom-scale:{}",
+                    f64::from(s.media.width.max(1))/f64::from(s.media.height.max(1)), f64::from(zoom)/100.0)
+            }).unwrap_or_default())
             on:mousedown=move |e| {
-                if editor && e.button()==0 && !ui.closing.get_untracked() && let Some(point)=frame_point(bounds,&e) {
+                if e.button() != 0 || ui.closing.get_untracked() { return; }
+                if e.detail() < 2 { moved.set(false); }
+                if ui.studio.zoom_tool.get_untracked() {
+                    marquee_start(e);
+                } else if editor && e.detail() < 2 && let Some(point)=frame_point(bounds,&e) {
                     ui.studio.roi.set(None);
-                    ui.studio.roi_drag.set(Some(Drag {gesture:Gesture::Draw(exclusion.get_untracked()), start:point,current:point}));
+                    ui.studio.roi_drag.set(Some(Drag {gesture:Gesture::Draw(ui.studio.exclusion_mode.get_untracked()), start:point,current:point}));
+                }
+            }
+            on:dblclick=move |_| {
+                if !ui.studio.zoom_tool.get_untracked() && !moved.get_untracked()
+                    && ui.studio.roi_drag.get_untracked().is_none() && !ui.closing.get_untracked() {
+                    ui.toggle_focus_mode();
                 }
             }>
             <img class="source-frame" src=move ||ui.preview_url.get() alt="Original decoded source frame" draggable="false"/>
             {move ||regions(false)}{move ||regions(true)}
+            {move ||marquee().map(|([x,y,w,h],zoom)|view!{
+                <div class="zoom-marquee" aria-hidden="true"
+                    style=format!("left:{}%;top:{}%;width:{}%;height:{}%",x*100.0,y*100.0,w*100.0,h*100.0)>
+                    <span class="roi-label mono">{format!("{zoom}%")}</span>
+                </div>
+            })}
             {editor.then(||view! {
                 {move || {
-                    let id = ui.studio.roi.get().filter(|id| !id.excluded && guides.get())?;
+                    let id = ui.studio.roi.get().filter(|id| !id.excluded && ui.studio.guides.get())?;
                     let rect = ui.config.with(|c| id.list(c).get(id.index).copied())?;
                     Some(GUIDES.into_iter().map(|(name,edges)|view! {
                         <div class="roi-guide" class:vertical={edges.0 != 0} data-guide=name aria-hidden="true"

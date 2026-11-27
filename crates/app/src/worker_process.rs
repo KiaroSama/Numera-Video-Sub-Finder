@@ -74,6 +74,22 @@ impl Process {
         self.child.id()
     }
 
+    pub(crate) fn request_pipe(&mut self) -> Result<&mut ChildStdin> {
+        self._lease
+            .as_mut()
+            .ok_or_else(|| fail("Worker request pipe is closed"))
+    }
+
+    pub(crate) fn finish_preview(&mut self) -> Result<ExitStatus> {
+        self._lease.take();
+        // Give the worker a short chance to close its decoder before forcing cleanup.
+        let deadline = Instant::now() + Duration::from_millis(100);
+        while self.exited().is_ok_and(|exited| !exited) && Instant::now() < deadline {
+            std::thread::park_timeout(Duration::from_millis(5));
+        }
+        self.finish()
+    }
+
     pub(crate) fn stdout(&mut self) -> Result<ChildStdout> {
         self.child
             .stdout
@@ -161,10 +177,66 @@ impl Drop for Process {
 #[path = "worker_process_tests.rs"]
 mod tests;
 
+#[cfg(windows)]
+pub(crate) fn guard_parent_pipe(_requests: bool) -> Result<()> {
+    super::windows::await_start()
+}
+
+#[cfg(unix)]
+pub(crate) fn guard_parent_pipe(requests: bool) -> Result<()> {
+    let pid = std::process::id();
+    // SAFETY: getpgrp takes no arguments and returns this process's group.
+    if pid <= 1 || unsafe { getpgrp() } != pid as i32 {
+        return Err(fail("Worker requires its own isolated process group"));
+    }
+    // SAFETY: after fork the guardian uses only async-signal-safe C operations and stack data.
+    // Poll with no requested events: the kernel reports pipe hangup without consuming requests.
+    unsafe {
+        let guardian = fork();
+        if guardian < 0 {
+            return Err(std::io::Error::last_os_error().into());
+        }
+        if guardian == 0 {
+            close(1);
+            close(2);
+            if requests {
+                let mut pipe = PollFd {
+                    fd: 0,
+                    events: 0,
+                    revents: 0,
+                };
+                while poll(&mut pipe, 1, -1) < 0 && *errno() == 4 {}
+            } else {
+                let mut byte = 0u8;
+                while read(0, (&mut byte as *mut u8).cast(), 1) < 0 && *errno() == 4 {}
+            }
+            kill(-(pid as i32), 9);
+            _exit(70);
+        }
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+#[repr(C)]
+struct PollFd {
+    fd: i32,
+    events: i16,
+    revents: i16,
+}
+
 #[cfg(unix)]
 unsafe extern "C" {
     fn waitid(kind: u32, id: u32, info: *mut std::ffi::c_void, options: i32) -> i32;
     fn kill(pid: i32, signal: i32) -> i32;
+    fn getpgrp() -> i32;
+    fn fork() -> i32;
+    fn close(fd: i32) -> i32;
+    fn read(fd: i32, buffer: *mut std::ffi::c_void, size: usize) -> isize;
+    fn poll(fds: *mut PollFd, count: usize, timeout: i32) -> i32;
+    fn _exit(code: i32) -> !;
+    #[link_name = "__errno_location"]
+    fn errno() -> *mut i32;
 }
 
 pub(crate) fn executable() -> Result<std::path::PathBuf> {

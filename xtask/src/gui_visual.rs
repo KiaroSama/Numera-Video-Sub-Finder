@@ -54,8 +54,14 @@ pub fn theme(driver: &Driver, output: &Path, name: &str) -> Result<()> {
         || muted < 4.5
         || control < 3.0
         || [accent, hover, pressed].iter().any(|c| *c < 4.5)
+        || !observation["accentHover"]
+            .as_str()
+            .is_some_and(|color| color.eq_ignore_ascii_case("#CB4242"))
+        || !observation["accentPressed"]
+            .as_str()
+            .is_some_and(|color| color.eq_ignore_ascii_case("#AF3333"))
     {
-        return Err(format!("Rendered {name} contrast failed: text={text:.2} muted={muted:.2} control={control:.2} accent={accent:.2} hover={hover:.2} pressed={pressed:.2}").into());
+        return Err(format!("Rendered {name} contrast or accent token failed: text={text:.2} muted={muted:.2} control={control:.2} accent={accent:.2} hover={hover:.2} ({}) pressed={pressed:.2} ({})", observation["accentHover"], observation["accentPressed"]).into());
     }
     if observation["frameFilter"] != "none"
         || observation["frameOpacity"] != "1"
@@ -99,8 +105,13 @@ pub fn cue_selection(driver: &Driver, output: &Path) -> Result<()> {
 }
 
 pub fn preview_navigation(driver: &Driver, output: &Path) -> Result<()> {
+    let fitted_width = driver
+        .script("return document.querySelector('.frame')?.getBoundingClientRect().width;")?
+        .as_f64()
+        .filter(|width| *width > 0.0)
+        .ok_or("Missing fitted frame width")?;
     driver.select("select[aria-label='Preview zoom']", "400")?;
-    driver.wait("const v=document.querySelector('.preview-viewport'),f=document.querySelector('.frame');return v&&f&&f.getBoundingClientRect().width>v.clientWidth*3.95;", 5)?;
+    driver.wait(&format!("const f=document.querySelector('.frame');return Math.abs(f?.getBoundingClientRect().width/{fitted_width}-4)<0.05;"), 5)?;
     driver.click("button[aria-label='Pan preview right']")?;
     driver.click("button[aria-label='Pan preview down']")?;
     let observation = driver.script("const v=document.querySelector('.preview-viewport'),f=document.querySelector('.frame'),r=f.getBoundingClientRect();const before=document.querySelectorAll('.roi.excluded').length;const toggle=document.querySelector('.draw-mode input');toggle.click();const x=Math.round(r.left+r.width*.25),y=Math.round(r.top+r.height*.25),x2=Math.round(r.left+r.width*.5),y2=Math.round(r.top+r.height*.5);f.dispatchEvent(new MouseEvent('mousedown',{bubbles:true,button:0,clientX:x,clientY:y}));f.dispatchEvent(new MouseEvent('mouseup',{bubbles:true,button:0,clientX:x2,clientY:y2}));toggle.click();return {left:v.scrollLeft,top:v.scrollTop,before,width:r.width,height:r.height};")?;
@@ -130,7 +141,7 @@ pub fn preview_navigation(driver: &Driver, output: &Path) -> Result<()> {
     std::fs::write(
         output.join("preview-navigation.json"),
         serde_json::to_vec_pretty(
-            &json!({"observation":observation,"region_percent":region,"reset":true}),
+            &json!({"fit_width":fitted_width,"observation":observation,"region_percent":region,"reset":true}),
         )?,
     )?;
     Ok(())

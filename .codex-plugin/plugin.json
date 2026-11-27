@@ -1,0 +1,29 @@
+{
+  "name": "numera-video-sub-finder",
+  "version": "0.7.0",
+  "license": "GPL-3.0-or-later",
+  "description": "Extract burned-in subtitles locally, resume batches, and review or export subtitle projects with the nvsf CLI.",
+  "author": {
+    "name": "Kiaro Sama",
+    "email": "Kiaro.Sama.Dev@gmail.com"
+  },
+  "homepage": "https://github.com/KiaroSama/Numera-Video-Sub-Finder",
+  "repository": "https://github.com/KiaroSama/Numera-Video-Sub-Finder",
+  "keywords": ["subtitles", "ocr", "video", "srt", "ffmpeg"],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Numera Video Sub Finder",
+    "shortDescription": "Extract burned-in subtitles locally",
+    "longDescription": "Check local OCR resources, extract subtitles from one video or a queue, and edit saved cues before exporting.",
+    "developerName": "Kiaro Sama",
+    "category": "Productivity",
+    "capabilities": ["Read", "Write", "Interactive"],
+    "websiteURL": "https://github.com/KiaroSama/Numera-Video-Sub-Finder",
+    "defaultPrompt": [
+      "Extract the burned-in subtitles from this video into an SRT file.",
+      "Check whether my local OCR setup is ready for this language.",
+      "List cues that need review in this .nvsf project."
+    ],
+    "brandColor": "#C63D3D"
+  }
+}

@@ -1,4 +1,4 @@
-fn main() {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("cargo:rerun-if-changed=capabilities-e2e");
     let attributes = tauri_build::Attributes::new().windows_attributes(
         tauri_build::WindowsAttributes::new().window_icon_path("icons/icon.ico"),
@@ -8,6 +8,9 @@ fn main() {
     tauri_build::try_build(
         attributes.app_manifest(tauri_build::AppManifest::new().commands(&[
             "ui_ready",
+            "set_window_theme",
+            "set_window_fullscreen",
+            "bind_project_source",
             "set_unsaved",
             "save_project_as",
             "restart_app",
@@ -72,5 +75,7 @@ fn main() {
             "e2e_request_close",
         ])),
     )
-    .expect("Native desktop resources and command permissions must be valid");
+    .map_err(|error| {
+        format!("Native desktop resources or command permissions are invalid: {error}").into()
+    })
 }

@@ -17,6 +17,8 @@ enum MenuAction {
     Delete,
     Zoom(i8),
     Theme,
+    FocusMode,
+    ZoomTool,
     Route(&'static str),
     RunDoctor,
     Updates,
@@ -43,13 +45,15 @@ const MENUS: [&[(&str, &str, MenuAction)]; 5] = [
         ("Zoom to fit", "Ctrl+0", Zoom(0)),
         ("Zoom in", "Ctrl++", Zoom(1)),
         ("Zoom out", "Ctrl+-", Zoom(-1)),
-        ("Toggle Dark / Light theme", "", Theme),
-        ("Extract", "", Route("Extract")),
-        ("Review", "", Route("Review")),
-        ("Queue", "", Route("Queue")),
-        ("Models", "", Route("Models")),
-        ("History", "", Route("History")),
-        ("Settings", "", Route("Settings")),
+        ("Toggle Dark / Light theme", "Ctrl+Shift+T", Theme),
+        ("Extract", "Ctrl+1", Route("Extract")),
+        ("Review", "Ctrl+3", Route("Review")),
+        ("Queue", "Ctrl+2", Route("Queue")),
+        ("Models", "Ctrl+4", Route("Models")),
+        ("History", "Ctrl+5", Route("History")),
+        ("Settings", "Ctrl+6", Route("Settings")),
+        ("Focus mode", "`", FocusMode),
+        ("Zoom tool", "Z", ZoomTool),
     ],
     &[
         ("Run diagnostics", "", RunDoctor),
@@ -68,7 +72,7 @@ impl MenuAction {
         ui.closing.get()
             || match self {
                 Open | RunDoctor | Updates => ui.busy.get(),
-                Save(_) => !ui.can_save(),
+                Save(_) => !ui.can_save_project(),
                 Export => ui.project.with(Option::is_none),
                 Undo => !ui.can_undo(),
                 Redo => !ui.can_redo(),
@@ -99,7 +103,7 @@ impl MenuAction {
                             })
                         })
                 }
-                Zoom(_) => {
+                Zoom(_) | ZoomTool => {
                     ui.source.with(Option::is_none)
                         || !matches!(ui.route.get().as_str(), "Extract" | "Review")
                 }
@@ -127,6 +131,8 @@ impl MenuAction {
             }
             Zoom(delta) => ui.change_zoom(delta),
             Theme => ui.toggle_theme(),
+            FocusMode => ui.toggle_focus_mode(),
+            ZoomTool => ui.toggle_zoom_tool(),
             Route(route) => ui.route.set(route.into()),
             RunDoctor => {
                 ui.route.set("Settings".into());
@@ -144,7 +150,7 @@ impl MenuAction {
     }
 }
 
-fn focus(selector: &str) {
+pub(crate) fn focus(selector: &str) {
     if let Some(node) = document()
         .query_selector(selector)
         .ok()
@@ -191,9 +197,16 @@ fn move_item(menu: usize, key: &str) {
     let _ = items[next].focus();
 }
 
+pub(crate) fn dismiss_menu(ui: Ui) {
+    if let Some(index) = ui.studio.menu_open.get_untracked() {
+        ui.studio.menu_open.set(None);
+        focus_trigger(index);
+    }
+}
+
 #[component]
 pub(crate) fn MenuBar(ui: Ui, about: RwSignal<bool>) -> impl IntoView {
-    let open = RwSignal::new(None::<usize>);
+    let open = ui.studio.menu_open;
     let active = RwSignal::new(0_usize);
     let pointer = window_event_listener(ev::pointerdown, move |event| {
         if !event
@@ -259,7 +272,7 @@ pub(crate) fn MenuBar(ui: Ui, about: RwSignal<bool>) -> impl IntoView {
                         {TITLES[index]}
                     </button>
                     <div class="app-menu" role="menu" aria-labelledby=format!("menu-trigger-{id}") style=format!("--menu-left: {}px", 6 + 48 * index)
-                        hidden=move || open.get() != Some(index)>
+                        hidden=move || open.get() != Some(index) inert=move || open.get() != Some(index)>
                         {MENUS[index].iter().copied().enumerate().map(|(item, (label, shortcut, action))| view! {
                             <button type="button" id=format!("menu-item-{id}-{item}") role="menuitem" tabindex="-1" disabled=move || action.disabled(ui)
                                 on:click=move |_| {

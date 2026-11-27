@@ -7,7 +7,7 @@ commands.allow = [
   "queue_list", "queue_add", "queue_remove", "queue_regrant", "queue_start", "pick_checkpoint",
   "job_status", "control_job", "current_project", "replace_project",
   "save_project", "save_project_as", "export_project", "pick_project", "list_history",
-  "restart_app", "preview_initial_frame", "confirm_close",
+  "restart_app", "preview_initial_frame", "confirm_close", "set_window_theme", "set_window_fullscreen", "bind_project_source",
   "language_catalog", "install_language", "import_language", "export_language",
   "open_history", "model_catalog", "install_models", "cancel_model_install", "import_model", "export_model", "doctor", "suggest_regions", "recognize_cue", "cue_evidence", "install_visual_retry", "cancel_visual_retry", "propose_visual_retry"
 ]

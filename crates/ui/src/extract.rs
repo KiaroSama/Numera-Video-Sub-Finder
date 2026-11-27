@@ -9,6 +9,7 @@ use leptos::ev;
 use leptos::prelude::*;
 use nvsf_core::Rect;
 use serde_json::json;
+use wasm_bindgen::JsCast;
 
 #[component]
 pub fn Extract(ui: Ui) -> impl IntoView {
@@ -37,27 +38,37 @@ pub fn Extract(ui: Ui) -> impl IntoView {
         }
     });
     let split = NodeRef::<leptos::html::Div>::new();
-    let width = RwSignal::new(320i32);
-    let drag = RwSignal::new(None::<(i32, i32)>);
-    let max_width = move || {
-        split
-            .get_untracked()
-            .map_or(620, |el| (el.client_width() - 486).clamp(260, 620))
-    };
-    let movement = window_event_listener(ev::mousemove, move |event| {
-        if let Some((x, initial)) = drag.get_untracked() {
-            width.set((initial + x - event.client_x()).clamp(260, max_width()));
+    let sidebar = RwSignal::new(None::<i32>);
+    let inspector = RwSignal::new(Some(320));
+    let viewport_width = RwSignal::new(window_width());
+    let resize = window_event_listener(ev::resize, move |_| viewport_width.set(window_width()));
+    on_cleanup(move || resize.remove());
+    let inspector_max = Signal::derive(move || {
+        (viewport_width.get() - sidebar.get().unwrap_or(168) - 346).clamp(240, 520)
+    });
+    let sidebar_max = Signal::derive(move || {
+        (viewport_width.get() - inspector.get().unwrap_or(320).min(inspector_max.get()) - 346)
+            .clamp(56, 260)
+    });
+    Effect::new(move |_| {
+        let width = sidebar.get();
+        if let Some(shell) = split
+            .get()
+            .and_then(|el| el.closest(".shell").ok().flatten())
+            .and_then(|el| el.dyn_into::<web_sys::HtmlElement>().ok())
+        {
+            if let Some(width) = width {
+                let _ = shell
+                    .style()
+                    .set_property("--sidebar-w", &format!("{width}px"));
+            } else {
+                let _ = shell.style().remove_property("--sidebar-w");
+            }
         }
     });
-    let release = window_event_listener(ev::mouseup, move |_| drag.set(None));
-    let blur = window_event_listener(ev::blur, move |_| drag.set(None));
-    on_cleanup(move || {
-        movement.remove();
-        release.remove();
-        blur.remove();
-    });
     view! {
-        <div class="extract-grid" node_ref=split style=move ||format!("--inspector-w:{}px",width.get())>
+        <div class="extract-grid" node_ref=split style=move ||format!("--inspector-w:{}px",inspector.get().unwrap_or(320).min(inspector_max.get()))>
+            <ResizeHandle edge=Edge::Left size=sidebar max=sidebar_max/>
             <section class="panel source-panel" aria-label="Video stage">
                 <div class="source-line">
                     <strong dir="auto" title=move ||ui.source.with(|s|s.as_ref().map(|s|s.name.clone()).unwrap_or_default())>{move ||ui.source.with(|s|s.as_ref().map(|s|s.name.clone()).unwrap_or_else(||"No video selected".into()))}</strong>
@@ -65,17 +76,7 @@ pub fn Extract(ui: Ui) -> impl IntoView {
                 </div>
                 <Preview ui editor=true/>
             </section>
-            <div id="inspector-splitter" class="inspector-splitter" role="separator" aria-label="Resize inspector" tabindex="0"
-                aria-orientation="vertical" aria-controls="extract-inspector" aria-valuemin="260" aria-valuemax="620"
-                aria-valuenow=move ||width.get().to_string()
-                on:mousedown=move |event|if event.button()==0 {event.prevent_default();drag.set(Some((event.client_x(),width.get_untracked().min(max_width()))));}
-                on:keydown=move |event| {
-                    let next=match event.key().as_str() {
-                        "ArrowLeft"=>width.get_untracked()+24,"ArrowRight"=>width.get_untracked()-24,
-                        "Home"=>260,"End"=>max_width(),_=>return,
-                    };
-                    event.prevent_default();width.set(next.clamp(260,max_width()));
-                }></div>
+            <ResizeHandle edge=Edge::Right size=inspector max=inspector_max/>
             <section id="extract-inspector" class="panel settings-panel" aria-label="Extraction inspector">
                 <div class="panel-heading"><h2>"Recognition"</h2></div>
                 <div class="inspector-section">
@@ -208,12 +209,174 @@ pub fn Extract(ui: Ui) -> impl IntoView {
                 <button class="wide" disabled=move || ui.busy.get() on:click={move |_|ui.request::<Option<crate::ipc::Destination>>("choose_output",json!({}),move |d|if let Some(d)=d{ui.output.set(Some(d));})}>"Choose SRT destination"</button>
                 <p class="hint" dir="auto">{move ||ui.output.with(|d|d.as_ref().map(|d|d.name.clone()).unwrap_or_else(||"Choose where to save your subtitles.".into()))}</p>
                 <div class="action-stack">
-                    <button id="extract-start" class="primary wide" title="Extract subtitles (Ctrl+Enter)" disabled=move ||!ui.can_extract() on:click=move |_|ui.start_extraction()>"Extract subtitles"</button>
-                    <button id="extract-queue" class="wide" disabled=move ||ui.busy.get()||ui.source.with(Option::is_none)||ui.output.with(Option::is_none) on:click=move |_|{
-                        ui.add_queue();
-                    }>"Add to queue"</button>
+                    <button id="extract-start" class="primary wide" title="Extract subtitles (Ctrl+Enter)" disabled=move ||!ui.can_extract() on:click=move |_|ui.start_extraction()>"Extract subtitles "<span class="hotkey-hint">"(Ctrl+Enter)"</span></button>
+                    <button id="extract-queue" class="wide" title="Add to queue (Ctrl+Q)" disabled=move ||ui.busy.get()||ui.source.with(Option::is_none)||ui.output.with(Option::is_none) on:click=move |_|ui.add_queue()>"Add to queue "<span class="hotkey-hint">"(Ctrl+Q)"</span></button>
                 </div>
             </section>
         </div>
+    }
+}
+
+fn window_width() -> i32 {
+    document()
+        .document_element()
+        .map_or(1280, |root| root.client_width())
+}
+
+#[derive(Clone, Copy)]
+enum Edge {
+    Left,
+    Right,
+    Top,
+    Bottom,
+}
+
+#[component]
+fn ResizeHandle(
+    edge: Edge,
+    size: RwSignal<Option<i32>>,
+    max: Signal<i32>,
+    #[prop(optional)] stage: Option<NodeRef<leptos::html::Div>>,
+) -> impl IntoView {
+    let (class, label, controls, min, default, horizontal, direction) = match edge {
+        Edge::Left => (
+            "stage-resizer-left",
+            "Resize sidebar width",
+            "workspace-sidebar",
+            56,
+            Some(168),
+            false,
+            1,
+        ),
+        Edge::Right => (
+            "inspector-splitter",
+            "Resize inspector",
+            "extract-inspector",
+            240,
+            Some(320),
+            false,
+            -1,
+        ),
+        Edge::Top => (
+            "stage-resizer-top",
+            "Resize video stage top edge",
+            "extract-video-stage",
+            0,
+            Some(0),
+            true,
+            1,
+        ),
+        Edge::Bottom => (
+            "stage-resizer-bottom",
+            "Resize video stage bottom edge",
+            "extract-video-stage",
+            180,
+            None,
+            true,
+            1,
+        ),
+    };
+    let value = move || {
+        size.get()
+            .unwrap_or_else(|| {
+                stage
+                    .and_then(|node| node.get())
+                    .map_or(min, |node| node.client_height())
+            })
+            .clamp(min, max.get())
+    };
+    let drag = RwSignal::new(None::<(i32, i32, i32)>);
+    let position = move |e: &web_sys::PointerEvent| {
+        if horizontal {
+            e.client_y()
+        } else {
+            e.client_x()
+        }
+    };
+    view! {
+        <div id={matches!(edge, Edge::Right).then_some("inspector-splitter")} class=class role="separator"
+            aria-label=label aria-controls=controls tabindex="0"
+            aria-orientation={if horizontal {"horizontal"} else {"vertical"}}
+            aria-valuemin=min.to_string() aria-valuemax=move ||max.get().to_string()
+            aria-valuenow=move ||value().to_string()
+            on:pointerdown=move |e| {
+                if e.button()!=0 {return;}
+                if let Some(el)=e.current_target().and_then(|el|el.dyn_into::<web_sys::HtmlElement>().ok()) {
+                    e.prevent_default();
+                    let _=el.focus();
+                    if el.set_pointer_capture(e.pointer_id()).is_ok() {
+                        drag.set(Some((e.pointer_id(),position(&e),untrack(value))));
+                    }
+                }
+            }
+            on:pointermove=move |e| {
+                if let Some((_,start,width))=drag.get_untracked().filter(|(id,_,_)|*id==e.pointer_id()) {
+                    size.set(Some((width+direction*(position(&e)-start)).clamp(min,max.get_untracked())));
+                }
+            }
+            on:lostpointercapture=move |_|drag.set(None)
+            on:dblclick=move |_| size.set(default)
+            on:keydown=move |e| {
+                let value=untrack(value);
+                let next=match e.key().as_str() {
+                    "ArrowLeft" if !horizontal=>Some(value-16*direction),
+                    "ArrowRight" if !horizontal=>Some(value+16*direction),
+                    "ArrowUp" if horizontal=>Some(value-16),
+                    "ArrowDown" if horizontal=>Some(value+16),
+                    "Home"=>Some(min), "End"=>Some(max.get_untracked()),
+                    "Enter"|" "=>default, _=>return,
+                };
+                e.prevent_default();
+                size.set(next.map(|value|value.clamp(min,max.get_untracked())));
+            }
+        ></div>
+    }
+}
+
+#[component]
+pub(crate) fn VideoStage(children: Children) -> impl IntoView {
+    let stage = NodeRef::<leptos::html::Div>::new();
+    let top = RwSignal::new(Some(0));
+    let height = RwSignal::new(None);
+    let max_height = RwSignal::new(stage_height_limit());
+    let resize = window_event_listener(ev::resize, move |_| max_height.set(stage_height_limit()));
+    on_cleanup(move || resize.remove());
+    view! {
+        <div id="extract-video-stage" class="stage-frame" node_ref=stage
+            style=move || {
+                let top=top.get().unwrap_or_default();
+                height.get().map_or_else(||format!("--stage-top-pad:{top}px"),
+                    |height:i32|format!("--stage-top-pad:{top}px;--stage-height:{}px",height.min(max_height.get())))
+            }>
+            <ResizeHandle edge=Edge::Top size=top max=Signal::derive(||160)/>
+            {children()}
+            <ResizeHandle edge=Edge::Bottom size=height max=Signal::derive(move ||max_height.get()) stage=stage/>
+        </div>
+    }
+}
+
+fn stage_height_limit() -> i32 {
+    document().document_element().map_or(600, |root| {
+        (f64::from(root.client_height()) * 0.82).max(180.0) as i32
+    })
+}
+
+#[component]
+pub(crate) fn FocusHud(ui: Ui) -> impl IntoView {
+    view! {
+        <Show when=move ||ui.studio.focus_mode.get()>
+            <div class="focus-hud" role="group" aria-label="Focus mode controls">
+                <button type="button" disabled=move ||!ui.preview_controls_available() || ui.duration().is_none_or(|d|d<2)
+                    on:click=move |_|ui.toggle_play()>{move ||if ui.studio.playing.get(){"Pause"}else{"Play"}}
+                    " "<span class="hotkey-hint">"(Space)"</span></button>
+                <button type="button" disabled=move ||!ui.preview_controls_available() on:click=move |_|ui.step_frame(-1)>"Prev "<span class="hotkey-hint">"(←)"</span></button>
+                <button type="button" disabled=move ||!ui.preview_controls_available() on:click=move |_|ui.step_frame(1)>"Next "<span class="hotkey-hint">"(→)"</span></button>
+                <button type="button" aria-pressed=move ||ui.studio.zoom_tool.get().to_string() on:click=move |_|ui.toggle_zoom_tool()>"Zoom tool "<span class="hotkey-hint">"(Z)"</span></button>
+                <button type="button" aria-pressed=move ||ui.studio.exclusion_mode.get().to_string() on:click=move |_|ui.toggle_exclusion_mode()>"Exclude "<span class="hotkey-hint">"(E)"</span></button>
+                <button type="button" aria-pressed=move ||ui.studio.guides.get().to_string() on:click=move |_|ui.toggle_guides()>"Guides "<span class="hotkey-hint">"(G)"</span></button>
+                <button type="button" disabled=move ||!ui.can_undo() on:click=move |_|ui.undo()>"Undo "<span class="hotkey-hint">"(Ctrl+Z)"</span></button>
+                <button type="button" on:click=move |_|ui.toggle_focus_mode()>"Exit Focus "<span class="hotkey-hint">"(`)"</span></button>
+            </div>
+        </Show>
     }
 }

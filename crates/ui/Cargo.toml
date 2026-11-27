@@ -23,7 +23,7 @@ gloo-timers = { version = "=0.4.1", features = ["futures"] }
 web-sys = { version = "=0.3.106", features = [
   "Window", "Document", "Element", "HtmlElement", "HtmlCanvasElement", "HtmlInputElement",
   "HtmlTextAreaElement", "CssStyleDeclaration", "Performance", "Storage", "Location",
-  "MediaQueryList", "Blob", "BlobPropertyBag", "Url", "KeyboardEvent", "MouseEvent",
+  "MediaQueryList", "Blob", "BlobPropertyBag", "Url", "KeyboardEvent", "MouseEvent", "PointerEvent", "WheelEvent",
   "Event", "EventTarget", "DomRect", "HtmlDialogElement", "HtmlImageElement", "WebGlRenderingContext",
   "WebGlProgram", "WebGlShader", "WebGlBuffer", "WebGlUniformLocation", "WebGlContextAttributes"
 ] }

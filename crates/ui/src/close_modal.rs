@@ -54,17 +54,27 @@ pub(crate) fn CloseModal(ui: Ui) -> impl IntoView {
             ));
             return;
         }
-        let project = if action == "save" {
-            ui.project.get_untracked()
+        if action == "save" && ui.dirty.get_untracked() && untrack(|| ui.extract_dirty()) {
+            error.set(Some(
+                "Cancel and save the review and video setup separately before closing.".into(),
+            ));
+            return;
+        }
+        let (project, source_token) = if action == "save" {
+            let Some((project, source_token)) = ui.workspace_project() else {
+                error.set(Some("No project or video is open to save.".into()));
+                return;
+            };
+            (Some(project), source_token)
         } else {
-            None
+            (None, None)
         };
         pending.set(true);
         error.set(None);
         spawn_local(async move {
             let result = ipc::call::<()>(
                 "confirm_close",
-                json!({"action": action, "project": project}),
+                json!({"action": action, "project": project, "sourceToken": source_token}),
             )
             .await;
             if pending.is_disposed() {
@@ -84,16 +94,16 @@ pub(crate) fn CloseModal(ui: Ui) -> impl IntoView {
     view! {
         <StudioDialog id="close-modal" label="close-title" description="close-description" role="alertdialog"
             visible=ui.studio.close_open on_cancel=move ||respond("cancel")>
-            <h2 id="close-title">"Unsaved changes"</h2>
-            <p id="close-description">"Save your review edits before closing, or exit without saving."</p>
+            <h2 id="close-title">"Unsaved project changes"</h2>
+            <p id="close-description">"Save your .nvsf project before closing, discard changes, or cancel."</p>
             <Show when=move ||ui.draft_dirty.get()>
                 <p class="hint">"To save an unapplied cue correction, cancel and apply it first."</p>
             </Show>
             <Show when=move ||error.with(Option::is_some)><p class="dialog-error" role="alert">{move ||error.get().unwrap_or_default()}</p></Show>
             <div class="dialog-actions">
                 <button id="close-cancel" autofocus disabled=move ||pending.get() on:click=move |_|respond("cancel")>"Cancel"</button>
-                <button id="close-discard" class="danger" disabled=move ||pending.get() on:click=move |_|respond("discard")>"Exit without saving"</button>
-                <button id="close-save" class="primary" disabled=move ||pending.get() on:click=move |_|respond("save")>"Save & Exit"</button>
+                <button id="close-discard" class="danger" disabled=move ||pending.get() on:click=move |_|respond("discard")>"Discard changes"</button>
+                <button id="close-save" class="primary" disabled=move ||pending.get() on:click=move |_|respond("save")>"Save and close"</button>
             </div>
         </StudioDialog>
     }

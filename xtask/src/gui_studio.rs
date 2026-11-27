@@ -7,16 +7,17 @@ use std::path::Path;
 /// - live ROI drag preview (`.roi-draft`), 8 resize handles, 4 VideoSubFinder separating guides
 /// - Extract Undo/Redo toolbar controls revert and restore ROI changes
 /// - playback transport bar (`#preview-play`, `#preview-stop`, `#preview-timeline`, `#set-start`, `#set-end`)
-/// - header Save / Save As and F1 Shortcuts modal open and dismiss cleanly
+/// - pre-extraction Save / Save As, notifications, Focus Mode, marquee zoom and Shortcuts
 pub fn verify(driver: &Driver, output: &Path) -> Result<()> {
-    verify_menubar(driver, output)?;
-    // 1. Default studio geometry: no outer vertical overflow and no preview inner scrollbars at Fit (100%).
+    // 1. Default studio geometry and Save controls before any extraction or edits.
     let geom = driver.script(
         "const doc=document.documentElement,vp=document.querySelector('.preview-viewport');\
          return {outerScrollH:doc.scrollHeight,innerH:window.innerHeight,outerScrollW:doc.scrollWidth,innerW:window.innerWidth,\
          vpScrollH:vp?vp.scrollHeight:-1,vpClientH:vp?vp.clientHeight:-1,vpScrollW:vp?vp.scrollWidth:-1,vpClientW:vp?vp.clientWidth:-1,\
          hasSplitter:!!document.querySelector('#inspector-splitter'),\
          hasSave:!!document.querySelector('#header-save'),hasSaveAs:!!document.querySelector('#header-save-as'),\
+         saveEnabled:document.querySelector('#header-save')?.disabled===false,\
+         saveAsEnabled:document.querySelector('#header-save-as')?.disabled===false,\
          hasPlay:!!document.querySelector('#preview-play'),hasStop:!!document.querySelector('#preview-stop'),\
          hasTimeline:!!document.querySelector('#preview-timeline'),hasSetStart:!!document.querySelector('#set-start'),\
          hasSetEnd:!!document.querySelector('#set-end')};",
@@ -30,8 +31,8 @@ pub fn verify(driver: &Driver, output: &Path) -> Result<()> {
     if !outer_ok
         || !vp_ok
         || geom["hasSplitter"] != true
-        || geom["hasSave"] != true
-        || geom["hasSaveAs"] != true
+        || geom["saveEnabled"] != true
+        || geom["saveAsEnabled"] != true
         || geom["hasPlay"] != true
         || geom["hasStop"] != true
         || geom["hasTimeline"] != true
@@ -41,6 +42,7 @@ pub fn verify(driver: &Driver, output: &Path) -> Result<()> {
         return Err(format!("Studio shell geometry or controls failed: {geom}").into());
     }
 
+    verify_menubar(driver, output)?;
     // 2. ROI live drag preview (.roi-draft), 8 resize handles, 4 separating guides, and Extract Undo/Redo.
     let drag_start = driver.script(
         "const f=document.querySelector('.frame');if(!f)return {err:'missing frame'};\
@@ -113,6 +115,7 @@ pub fn verify(driver: &Driver, output: &Path) -> Result<()> {
 
     // 3. Actual source PTS, compressed keyframe stepping and elapsed-time playback.
     let transport = transport(driver)?;
+    let studio_v2 = verify_studio_v2(driver)?;
 
     // 4. Shortcuts modal opens via header button and closes cleanly.
     driver.click("#header-shortcuts")?;
@@ -138,8 +141,115 @@ pub fn verify(driver: &Driver, output: &Path) -> Result<()> {
             "undo_redo_verified": true,
             "transport_verified": true,
             "transport": transport,
+            "studio_v2": studio_v2,
             "shortcuts_modal_verified": true
         }))?,
+    )?;
+    Ok(())
+}
+
+fn verify_studio_v2(driver: &Driver) -> Result<serde_json::Value> {
+    driver.click("#header-notifications")?;
+    driver.wait("const p=document.querySelector('#notifications-panel'),b=document.querySelector('#header-notifications');return !!p?.getClientRects().length&&!p.hidden&&p.contains(document.activeElement)&&b?.getAttribute('aria-expanded')==='true';", 5)?;
+    let bell_escape = menu_key(driver, "Escape", false)?;
+    driver.wait("const p=document.querySelector('#notifications-panel'),b=document.querySelector('#header-notifications');return (!p||p.hidden||p.getClientRects().length===0)&&document.activeElement===b&&b?.getAttribute('aria-expanded')==='false';", 5)?;
+
+    let focused = "return document.documentElement.dataset.focusMode==='true'&&!!document.querySelector('.shell.focus-mode .focus-hud')?.getClientRects().length&&document.querySelector('#header-notifications')?.getClientRects().length===0;";
+    let normal = "return document.documentElement.dataset.focusMode!=='true'&&!document.querySelector('.shell.focus-mode')&&!!document.querySelector('#header-notifications')?.getClientRects().length;";
+    let focus_enter = menu_key(driver, "`", false)?;
+    driver.wait(focused, 5)?;
+    let focus_exit = menu_key(driver, "`", false)?;
+    driver.wait(normal, 5)?;
+    driver.click("#focus-mode-toggle")?;
+    driver.wait(focused, 5)?;
+    let focus_escape = menu_key(driver, "Escape", false)?;
+    driver.wait(normal, 5)?;
+
+    driver.script("document.querySelector('#zoom-tool-toggle').focus();return true;")?;
+    let zoom_key = menu_key(driver, "z", false)?;
+    driver.wait("return !!document.querySelector('.frame.zoom-tool-active')&&document.querySelector('#zoom-tool-toggle')?.getAttribute('aria-pressed')==='true';", 5)?;
+    let drag = driver.script(r#"
+        const frame=document.querySelector('.frame'), r=frame.getBoundingClientRect();
+        const point=(x,y)=>({bubbles:true,cancelable:true,button:0,buttons:1,clientX:r.left+r.width*x,clientY:r.top+r.height*y});
+        const before=frame.getBoundingClientRect().width, count=document.querySelectorAll('.roi').length;
+        frame.dispatchEvent(new MouseEvent('mousedown',point(.2,.2)));
+        frame.dispatchEvent(new MouseEvent('mousemove',point(.55,.55)));
+        return {before,count,end:point(.55,.55)};
+    "#)?;
+    driver.wait("return !!document.querySelector('.zoom-marquee');", 5)?;
+    driver.script(&format!(
+        "const frame=document.querySelector('.frame');frame.dispatchEvent(new MouseEvent('mouseup',{{...{},buttons:0}}));return true;",
+        drag["end"]
+    ))?;
+    let zoom_state = "const v=document.querySelector('.preview-viewport'),f=document.querySelector('.frame');return {percent:parseFloat(f.style.getPropertyValue('--zoom-width')),width:f.getBoundingClientRect().width,scroll:[v.scrollLeft,v.scrollTop],count:document.querySelectorAll('.roi').length};";
+    driver.wait("const f=document.querySelector('.frame');return parseFloat(f?.style.getPropertyValue('--zoom-width'))>100&&!document.querySelector('.zoom-marquee');", 5)?;
+    let zoomed = driver.script(zoom_state)?;
+    let enlarged = zoomed["width"]
+        .as_f64()
+        .zip(drag["before"].as_f64())
+        .is_some_and(|(after, before)| after > before && before > 0.0);
+    if zoomed["count"] != drag["count"] || !enlarged {
+        return Err(format!(
+            "Marquee zoom did not enlarge the frame without altering ROIs: {drag} {zoomed}"
+        )
+        .into());
+    }
+    driver.click("button[title='Reset zoom (Ctrl+0)']")?;
+    driver.wait("const v=document.querySelector('.preview-viewport'),f=document.querySelector('.frame');return parseFloat(f?.style.getPropertyValue('--zoom-width'))===100&&v?.scrollLeft===0&&v?.scrollTop===0;", 5)?;
+    let reset = driver.script(zoom_state)?;
+    if driver.script("return !!document.querySelector('.frame.zoom-tool-active');")? == true {
+        driver.click("#zoom-tool-toggle")?;
+    }
+    driver.wait("return !document.querySelector('.frame.zoom-tool-active')&&document.querySelector('#zoom-tool-toggle')?.getAttribute('aria-pressed')==='false';", 5)?;
+
+    let timeline_state = "const t=document.querySelector('#preview-timeline');return Object.fromEntries(['--playhead','--range-in','--range-out'].map(k=>[k,t.style.getPropertyValue(k).trim()]));";
+    let start = driver.script(timeline_state)?;
+    seek(driver, 1000)?;
+    let later = driver.script(timeline_state)?;
+    let percent = |value: &serde_json::Value| {
+        value
+            .as_str()?
+            .strip_suffix('%')?
+            .parse::<f64>()
+            .ok()
+            .filter(|n| (0.0..=100.0).contains(n))
+    };
+    if percent(&start["--playhead"]) != Some(0.0)
+        || !percent(&later["--playhead"]).is_some_and(|n| n > 0.0)
+        || percent(&start["--range-in"]).is_none()
+        || percent(&start["--range-out"]).is_none()
+        || start["--range-in"] != later["--range-in"]
+        || start["--range-out"] != later["--range-out"]
+    {
+        return Err(format!(
+            "Moving the timeline playhead changed or omitted its range: {start} {later}"
+        )
+        .into());
+    }
+    seek(driver, 0)?;
+    Ok(json!({
+        "method":"WebDriver clicks with synthetic keydown and mouse drag events; physical input unverified",
+        "bell_escape":bell_escape,"bell_focus_restored":true,
+        "focus_entry_and_exit":[focus_enter,focus_exit,focus_escape],
+        "zoom_key":zoom_key,"marquee_visible":true,"zoomed":zoomed,"reset":reset,"timeline":[start,later]
+    }))
+}
+
+pub(super) fn verify_language_packs(driver: &Driver, output: &Path) -> Result<()> {
+    driver.wait(r#"
+        const list=document.querySelector('.language-packs-panel [data-testid=installed-languages-list]');
+        return !!list?.getClientRects().length && list.querySelector('h3')?.textContent.trim()==='Installed language packs'
+            && /^Installed: \d+ of \d+ packs$/.test(list.querySelector('[role=status]')?.textContent.trim());
+    "#, 10)?;
+    let packs = driver.script("const list=document.querySelector('[data-testid=installed-languages-list]');return {heading:list.closest('.language-packs-panel').querySelector('h2').textContent.trim(),summary:list.querySelector('[role=status]').textContent.trim(),autoLoaded:true};")?;
+    if packs["heading"] != "Additional language packs" {
+        return Err(
+            format!("Installed packs list rendered outside the expected section: {packs}").into(),
+        );
+    }
+    std::fs::write(
+        output.join("installed-languages-list.json"),
+        serde_json::to_vec_pretty(&packs)?,
     )?;
     Ok(())
 }

@@ -55,6 +55,25 @@ pub type DecodeFn = unsafe extern "C" fn(
     Option<JsonCallback>,
     *mut c_void,
 ) -> i32;
+pub type SessionOpenFn = unsafe extern "C" fn(
+    *const u8,
+    usize,
+    *mut *mut c_void,
+    Option<JsonCallback>,
+    *mut c_void,
+) -> i32;
+pub type SessionFrameFn = unsafe extern "C" fn(
+    *mut c_void,
+    u64,
+    i8,
+    u32,
+    Option<FrameCallback>,
+    *mut c_void,
+    Option<JsonCallback>,
+    *mut c_void,
+) -> i32;
+pub type SessionCloseFn = unsafe extern "C" fn(*mut c_void);
+
 pub type HealthFn = unsafe extern "C" fn(
     Option<JsonCallback>,
     *mut c_void,

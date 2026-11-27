@@ -242,50 +242,5 @@ fn supervise_inner(
 
 /// Arm before native work. EOF survives a forcibly killed supervisor, unlike Rust Drop.
 pub fn guard_parent_lifetime() -> Result<()> {
-    #[cfg(windows)]
-    windows::await_start()?;
-    #[cfg(unix)]
-    {
-        let pid = std::process::id();
-        // SAFETY: getpgrp has no arguments and returns this process's group.
-        if pid <= 1 || unsafe { getpgrp() } != pid as i32 {
-            return Err(fail("Worker requires its own isolated process group"));
-        }
-        // SAFETY: the child below calls only async-signal-safe libc operations, never Rust
-        // allocation, locks, stdio, logging, destructors or native frameworks after fork.
-        let guardian = unsafe { fork() };
-        if guardian < 0 {
-            return Err(std::io::Error::last_os_error().into());
-        }
-        if guardian == 0 {
-            unsafe {
-                close(1);
-                close(2);
-                let mut byte = 0u8;
-                loop {
-                    if read(0, (&mut byte as *mut u8).cast(), 1) < 0 && *errno() == 4 {
-                        continue;
-                    }
-                    break;
-                }
-                // This separate group member survives root exit; owner EOF kills it too.
-                kill(-(pid as i32), 9);
-                _exit(70);
-            }
-        }
-    }
-    Ok(())
-}
-
-#[cfg(unix)]
-unsafe extern "C" {
-    fn getpgrp() -> i32;
-    fn kill(pid: i32, signal: i32) -> i32;
-    fn fork() -> i32;
-    fn close(fd: i32) -> i32;
-    fn read(fd: i32, buffer: *mut std::ffi::c_void, size: usize) -> isize;
-    fn _exit(code: i32) -> !;
-    #[cfg(target_os = "linux")]
-    #[link_name = "__errno_location"]
-    fn errno() -> *mut i32;
+    process::guard_parent_pipe(false)
 }

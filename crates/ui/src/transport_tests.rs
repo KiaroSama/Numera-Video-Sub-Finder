@@ -5,29 +5,87 @@ fn finish(transport: &mut Transport, request: &PreviewRequest, at: u64) -> bool 
 }
 
 #[test]
+fn playback_uses_sequential_motion_requests_but_ends_on_a_still() {
+    let mut transport = Transport::default();
+    transport.play(0, 0, 0, 1000);
+    transport.tick(250, 1000, 1.0);
+    let motion = transport.take_request("source").unwrap();
+    assert_eq!((motion.at_ms, motion.step), (250, 2));
+    transport.tick(1000, 1000, 1.0);
+    assert!(!finish(&mut transport, &motion, 240));
+    let still = transport.take_request("source").unwrap();
+    assert_eq!((still.at_ms, still.step), (1000, 0));
+    assert!(finish(&mut transport, &still, 960));
+}
+
+#[test]
+fn a_forward_frame_drops_pending_requests_covered_by_its_pts() {
+    let mut transport = Transport::default();
+    transport.play(0, 0, 0, 1000);
+    transport.tick(10, 1000, 1.0);
+    let motion = transport.take_request("source").unwrap();
+    transport.tick(20, 1000, 1.0);
+    assert!(finish(&mut transport, &motion, 40));
+    transport.tick(40, 1000, 1.0);
+    assert!(transport.take_request("source").is_none());
+    transport.tick(41, 1000, 1.0);
+    assert_eq!(transport.take_request("source").unwrap().at_ms, 41);
+}
+
+#[test]
+fn playback_rate_scales_elapsed_time_without_replaying_previous_ticks() {
+    let mut transport = Transport::default();
+    transport.play(1000, 4000, 0, 10_000);
+    assert_eq!(transport.tick(1201, 10_000, 0.5), Some((4100, false)));
+    assert_eq!(transport.tick(1202, 10_000, 0.5), Some((4101, false)));
+    assert_eq!(transport.tick(1402, 10_000, 2.0), Some((4501, false)));
+    assert_eq!(transport.tick(1200, 10_000, 0.5), Some((4501, false)));
+    assert_eq!(transport.tick(1502, 10_000, 4.0), Some((4701, false)));
+    assert_eq!(transport.tick(1602, 10_000, 0.0), Some((4751, false)));
+}
+
+#[test]
+fn preview_packet_accepts_jpeg_only_with_its_matching_magic() {
+    let mut packet = [
+        b"NVSFPRV2".as_slice(),
+        &33_u64.to_le_bytes(),
+        &167_u64.to_le_bytes(),
+        b"\xff\xd8\xffsample",
+    ]
+    .concat();
+    let frame = parse_preview_packet(&packet).unwrap();
+    assert_eq!((frame.time_ms, frame.duration_ms), (33, 167));
+    assert_eq!(frame.mime, "image/jpeg");
+    assert_eq!(frame.bytes, &packet[24..]);
+    assert!(parse_preview_packet(&packet[..26]).is_err());
+    packet[7] = b'1';
+    assert!(parse_preview_packet(&packet).is_err());
+}
+
+#[test]
 fn playback_uses_elapsed_time_while_slow_previews_coalesce() {
     let mut transport = Transport::default();
     transport.play(10_000, 0, 0, 10_000);
-    assert_eq!(transport.tick(10_250, 10_000), Some((250, false)));
+    assert_eq!(transport.tick(10_250, 10_000, 1.0), Some((250, false)));
     let first = transport.take_request("source").unwrap();
-    assert_eq!((first.at_ms, first.step), (250, 0));
-    assert_eq!(transport.tick(10_500, 10_000), Some((500, false)));
+    assert_eq!((first.at_ms, first.step, first.fast()), (250, 2, true));
+    assert_eq!(transport.tick(10_500, 10_000, 1.0), Some((500, false)));
     assert!(transport.take_request("source").is_none());
-    assert_eq!(transport.tick(10_750, 10_000), Some((750, false)));
+    assert_eq!(transport.tick(10_750, 10_000, 1.0), Some((750, false)));
     assert!(finish(&mut transport, &first, 240));
     assert_eq!(transport.displayed(), Some(240));
     let latest = transport.take_request("source").unwrap();
-    assert_eq!((latest.at_ms, latest.step), (750, 0));
+    assert_eq!((latest.at_ms, latest.step), (750, 2));
     assert!(finish(&mut transport, &latest, 733));
     assert_eq!(transport.displayed(), Some(733));
-    assert_eq!(transport.tick(11_500, 10_000), Some((1500, false)));
+    assert_eq!(transport.tick(11_500, 10_000, 1.0), Some((1500, false)));
 }
 
 #[test]
 fn continuous_slow_playback_publishes_frames_and_surfaces_current_failures() {
     let mut transport = Transport::default();
     transport.play(0, 0, 0, 10_000);
-    transport.tick(250, 10_000);
+    transport.tick(250, 10_000, 1.0);
     let mut request = transport.take_request("source").unwrap();
     let mut shown = Vec::new();
     for (ticks, completed_pts, latest) in [
@@ -38,7 +96,7 @@ fn continuous_slow_playback_publishes_frames_and_surfaces_current_failures() {
     ] {
         // Every request takes 400 ms, spanning one or two 250 ms clock ticks.
         for tick in ticks {
-            assert_eq!(transport.tick(tick, 10_000), Some((tick, false)));
+            assert_eq!(transport.tick(tick, 10_000, 1.0), Some((tick, false)));
             assert!(transport.take_request("source").is_none());
         }
         assert!(finish(&mut transport, &request, completed_pts));
@@ -47,12 +105,12 @@ fn continuous_slow_playback_publishes_frames_and_surfaces_current_failures() {
         assert_eq!(request.at_ms, latest);
     }
     assert_eq!(shown, [240, 480, 960, 1240]);
-    assert_eq!(transport.tick(2000, 10_000), Some((2000, false)));
+    assert_eq!(transport.tick(2000, 10_000, 1.0), Some((2000, false)));
     let failed = transport.finish(&request, Some("source"), None);
     assert!(failed.released && failed.current && !failed.publish);
     assert!(!transport.has_pending());
     assert!(transport.take_request("source").is_none());
-    assert_eq!(transport.tick(2250, 10_000), None);
+    assert_eq!(transport.tick(2250, 10_000, 1.0), None);
     assert_eq!(transport.displayed(), Some(1240));
 }
 
@@ -60,32 +118,32 @@ fn continuous_slow_playback_publishes_frames_and_surfaces_current_failures() {
 fn pause_resume_and_manual_seek_reanchor_without_counting_paused_time() {
     let mut transport = Transport::default();
     transport.play(1000, 4000, 0, 20_000);
-    assert_eq!(transport.pause(1450, 20_000), Some(4450));
-    assert_eq!(transport.tick(9000, 20_000), None);
+    assert_eq!(transport.pause(1450, 20_000, 1.0), Some(4450));
+    assert_eq!(transport.tick(9000, 20_000, 1.0), None);
     let paused = transport.take_request("source").unwrap();
     assert_eq!(paused.at_ms, 4450);
     assert!(finish(&mut transport, &paused, 4440));
     transport.play(9000, 4440, 0, 20_000);
     assert_eq!(transport.position(), 4440);
-    assert_eq!(transport.tick(9250, 20_000), Some((4690, false)));
+    assert_eq!(transport.tick(9250, 20_000, 1.0), Some((4690, false)));
     transport.seek(8000);
-    assert_eq!(transport.tick(10_000, 20_000), None);
+    assert_eq!(transport.tick(10_000, 20_000, 1.0), None);
     let sought = transport.take_request("source").unwrap();
     assert_eq!(sought.at_ms, 8000);
     assert!(finish(&mut transport, &sought, 7991));
     transport.play(12_000, 7991, 0, 20_000);
     assert_eq!(transport.position(), 7991);
-    assert_eq!(transport.tick(12_250, 20_000), Some((8241, false)));
+    assert_eq!(transport.tick(12_250, 20_000, 1.0), Some((8241, false)));
 }
 
 #[test]
 fn playback_clamps_at_the_end_and_does_not_move_back_on_a_clock_regression() {
     let mut transport = Transport::default();
     transport.play(1000, 9000, 0, 9999);
-    assert_eq!(transport.tick(1250, 9999), Some((9250, false)));
-    assert_eq!(transport.tick(1200, 9999), Some((9250, false)));
-    assert_eq!(transport.tick(3000, 9999), Some((9999, true)));
-    assert_eq!(transport.tick(4000, 9999), None);
+    assert_eq!(transport.tick(1250, 9999, 1.0), Some((9250, false)));
+    assert_eq!(transport.tick(1200, 9999, 1.0), Some((9250, false)));
+    assert_eq!(transport.tick(3000, 9999, 1.0), Some((9999, true)));
+    assert_eq!(transport.tick(4000, 9999, 1.0), None);
     assert_eq!(transport.take_request("source").unwrap().at_ms, 9999);
 }
 
@@ -93,7 +151,7 @@ fn playback_clamps_at_the_end_and_does_not_move_back_on_a_clock_regression() {
 fn natural_end_restarts_after_the_last_frame_pts_is_published() {
     let mut transport = Transport::default();
     transport.play(1000, 5000, 2000, 5999);
-    assert_eq!(transport.tick(2000, 5999), Some((5999, true)));
+    assert_eq!(transport.tick(2000, 5999, 1.0), Some((5999, true)));
     let last = transport.take_request("source").unwrap();
     assert!(finish(&mut transport, &last, 5900));
     assert_eq!(transport.displayed(), Some(5900));
@@ -101,10 +159,10 @@ fn natural_end_restarts_after_the_last_frame_pts_is_published() {
     let restarted = transport.take_request("source").unwrap();
     assert_eq!((restarted.at_ms, restarted.step), (2000, 0));
     assert!(finish(&mut transport, &restarted, 2000));
-    assert_eq!(transport.tick(3250, 5999), Some((2250, false)));
+    assert_eq!(transport.tick(3250, 5999, 1.0), Some((2250, false)));
     transport.seek(5900);
     assert_eq!(transport.play(4000, 5900, 2000, 5999), 5900);
-    assert_eq!(transport.tick(4050, 5999), Some((5950, false)));
+    assert_eq!(transport.tick(4050, 5999, 1.0), Some((5950, false)));
 }
 
 #[test]
@@ -150,15 +208,15 @@ fn a_frame_step_during_playback_uses_the_displayed_frame_and_drops_clock_work() 
     let initial = transport.take_request("source").unwrap();
     assert!(finish(&mut transport, &initial, 100));
     transport.play(1000, 100, 0, 10_000);
-    transport.tick(1250, 10_000);
+    transport.tick(1250, 10_000, 1.0);
     let playing = transport.take_request("source").unwrap();
-    transport.tick(1500, 10_000);
+    transport.tick(1500, 10_000, 1.0);
     transport.step(1);
     assert!(!finish(&mut transport, &playing, 333));
     let step = transport.take_request("source").unwrap();
     assert_eq!((step.at_ms, step.step), (100, 1));
     assert!(finish(&mut transport, &step, 133));
-    assert_eq!(transport.tick(2000, 10_000), None);
+    assert_eq!(transport.tick(2000, 10_000, 1.0), None);
     assert!(!transport.has_pending());
 }
 
@@ -171,13 +229,13 @@ fn play_waits_for_an_inflight_frame_step_before_anchoring_to_its_pts() {
     transport.step(1);
     let next = transport.take_request("source").unwrap();
     transport.play(1000, 33, 0, 10_000);
-    assert_eq!(transport.tick(1250, 10_000), None);
+    assert_eq!(transport.tick(1250, 10_000, 1.0), None);
     assert!(transport.take_request("source").is_none());
     assert!(finish(&mut transport, &next, 5000));
     assert_eq!(transport.displayed(), Some(5000));
-    assert_eq!(transport.tick(1500, 10_000), Some((5500, false)));
+    assert_eq!(transport.tick(1500, 10_000, 1.0), Some((5500, false)));
     let playing = transport.take_request("source").unwrap();
-    assert_eq!((playing.at_ms, playing.step), (5500, 0));
+    assert_eq!((playing.at_ms, playing.step), (5500, 2));
 }
 
 #[test]
@@ -187,21 +245,21 @@ fn play_preserves_a_queued_frame_action_and_pause_can_cancel_its_anchor() {
     let initial = transport.take_request("source").unwrap();
     assert!(finish(&mut transport, &initial, 100));
     transport.play(0, 100, 0, 10_000);
-    transport.tick(250, 10_000);
+    transport.tick(250, 10_000, 1.0);
     let old = transport.take_request("source").unwrap();
-    transport.tick(500, 10_000);
+    transport.tick(500, 10_000, 1.0);
     transport.step(1);
     transport.play(600, 600, 0, 10_000);
-    assert_eq!(transport.tick(850, 10_000), None);
+    assert_eq!(transport.tick(850, 10_000, 1.0), None);
     assert!(!finish(&mut transport, &old, 333));
     let next = transport.take_request("source").unwrap();
     assert_eq!((next.at_ms, next.step), (100, 1));
-    assert_eq!(transport.pause(900, 10_000), Some(100));
+    assert_eq!(transport.pause(900, 10_000, 1.0), Some(100));
     assert!(!finish(&mut transport, &next, 5000));
     let paused = transport.take_request("source").unwrap();
     assert_eq!((paused.at_ms, paused.step), (100, 0));
     assert!(finish(&mut transport, &paused, 100));
-    assert_eq!(transport.tick(2000, 10_000), None);
+    assert_eq!(transport.tick(2000, 10_000, 1.0), None);
 }
 
 #[test]
@@ -217,13 +275,13 @@ fn play_waits_for_both_active_and_queued_steps_before_using_the_final_pts() {
     assert!(finish(&mut transport, &first, 5000));
     let second = transport.take_request("source").unwrap();
     assert_eq!((second.at_ms, second.step), (5000, 1));
-    assert_eq!(transport.tick(1250, 20_000), None);
+    assert_eq!(transport.tick(1250, 20_000, 1.0), None);
     assert!(transport.take_request("source").is_none());
     assert!(finish(&mut transport, &second, 9000));
     assert_eq!(transport.displayed(), Some(9000));
-    assert_eq!(transport.tick(1500, 20_000), Some((9500, false)));
+    assert_eq!(transport.tick(1500, 20_000, 1.0), Some((9500, false)));
     let playing = transport.take_request("source").unwrap();
-    assert_eq!((playing.at_ms, playing.step), (9500, 0));
+    assert_eq!((playing.at_ms, playing.step), (9500, 2));
 }
 
 #[test]
@@ -235,7 +293,7 @@ fn source_reset_rejects_old_success_and_keeps_one_in_flight_owner() {
     transport.step(1);
     transport.reset_source();
     assert_eq!(transport.displayed(), None);
-    assert_eq!(transport.tick(2000, 9000), None);
+    assert_eq!(transport.tick(2000, 9000, 1.0), None);
     transport.seek(0);
     assert!(transport.take_request("replacement").is_none());
     let stale = transport.finish(&old, Some("replacement"), Some(5000));
@@ -283,9 +341,10 @@ fn preview_packet_preserves_actual_timestamp_and_bounded_binary_pixels() {
         b"\x89PNG\r\n\x1a\nfixture",
     ]
     .concat();
-    let frame = parse_packet(&packet).unwrap();
+    let frame = parse_preview_packet(&packet).unwrap();
     assert_eq!((frame.time_ms, frame.duration_ms), (33, 167));
-    assert_eq!(frame.png, b"\x89PNG\r\n\x1a\nfixture");
+    assert_eq!(frame.mime, "image/png");
+    assert_eq!(frame.bytes, b"\x89PNG\r\n\x1a\nfixture");
     for invalid in [
         packet[..23].to_vec(),
         [&b"OTHER123"[..], &packet[8..]].concat(),
@@ -294,7 +353,7 @@ fn preview_packet_preserves_actual_timestamp_and_bounded_binary_pixels() {
         [&packet[..24], b"not a PNG"].concat(),
         vec![0; 8 * 1024 * 1024 + 25],
     ] {
-        assert!(parse_packet(&invalid).is_err());
+        assert!(parse_preview_packet(&invalid).is_err());
     }
 }
 
@@ -340,7 +399,7 @@ fn manual_seek_to_the_endpoint_restarts_on_the_first_play() {
     let restarted = transport.take_request("source").unwrap();
     assert_eq!((restarted.at_ms, restarted.step), (2000, 0));
     assert!(finish(&mut transport, &restarted, 2000));
-    assert_eq!(transport.tick(1250, 5999), Some((2250, false)));
+    assert_eq!(transport.tick(1250, 5999, 1.0), Some((2250, false)));
 }
 
 #[test]
@@ -355,7 +414,7 @@ fn restart_preserves_in_range_start_and_rejects_start_from_a_longer_source() {
     ] {
         let mut transport = Transport::default();
         transport.play(0, 5500, start, 5999);
-        assert_eq!(transport.tick(1000, 5999), Some((5999, true)));
+        assert_eq!(transport.tick(1000, 5999, 1.0), Some((5999, true)));
         let last = transport.take_request("source").unwrap();
         assert!(finish(&mut transport, &last, 5900));
         assert_eq!(transport.play(2000, 5900, start, 5999), expected);
@@ -364,7 +423,7 @@ fn restart_preserves_in_range_start_and_rejects_start_from_a_longer_source() {
         assert!(restarted.at_ms <= 5999);
         assert!(finish(&mut transport, &restarted, expected));
         if start > 5999 {
-            assert_eq!(transport.tick(2250, 5999), Some((250, false)));
+            assert_eq!(transport.tick(2250, 5999, 1.0), Some((250, false)));
         }
     }
 }
@@ -379,11 +438,11 @@ fn endpoint_restart_does_not_cancel_a_queued_or_active_backward_step() {
         transport.step(-1);
         let pending = active.then(|| transport.take_request("source").unwrap());
         assert_eq!(transport.play(1000, 5900, 0, 5999), 5900);
-        assert_eq!(transport.tick(1025, 5999), None);
+        assert_eq!(transport.tick(1025, 5999, 1.0), None);
         let step = pending.unwrap_or_else(|| transport.take_request("source").unwrap());
         assert_eq!((step.at_ms, step.step), (5900, -1));
         assert!(finish(&mut transport, &step, 5800));
         assert_eq!(transport.position(), 5800);
-        assert_eq!(transport.tick(1050, 5999), Some((5850, false)));
+        assert_eq!(transport.tick(1050, 5999, 1.0), Some((5850, false)));
     }
 }

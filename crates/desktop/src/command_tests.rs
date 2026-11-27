@@ -51,6 +51,9 @@ fn project() -> Project {
     }
 }
 
+#[path = "project_setup_tests.rs"]
+mod project_setup_tests;
+
 #[test]
 fn desktop_workflow_commands_are_registered_in_both_manifests() {
     for command in [
@@ -59,6 +62,9 @@ fn desktop_workflow_commands_are_registered_in_both_manifests() {
         "preview_initial_frame",
         "preview_transport",
         "confirm_close",
+        "bind_project_source",
+        "set_window_theme",
+        "set_window_fullscreen",
     ] {
         let entry = format!("\"{command}\"");
         assert!(include_str!("../build.rs").contains(&entry), "{command}");
@@ -75,14 +81,22 @@ fn cue_corrections_cannot_change_project_identity_or_extraction_state() {
     let host = app.state::<Host>();
     let initial = project();
     assert!(files::current_project(host.clone()).unwrap().is_none());
-    assert!(files::replace_project(host.clone(), initial.clone()).is_err());
+    let replace = |project| {
+        tauri::async_runtime::block_on(files::replace_project(
+            host.clone(),
+            app.state(),
+            project,
+            None,
+        ))
+    };
+    assert!(replace(initial.clone()).is_err());
     *lock(&host.inner().0.project).unwrap() = Some(initial.clone());
     let mut corrected = initial.clone();
     corrected.cues[0].text = "Corrected فارسی 日本".into();
     corrected.cues[0].edited = true;
     corrected.processed_ms = 9000;
     corrected.completed = true;
-    files::replace_project(host.clone(), corrected).unwrap();
+    replace(corrected).unwrap();
     let current = files::current_project(host.clone()).unwrap().unwrap();
     assert_eq!(current.cues[0].text, "Corrected فارسی 日本");
     assert!(current.cues[0].edited);
@@ -98,7 +112,7 @@ fn cue_corrections_cannot_change_project_identity_or_extraction_state() {
             "settings" => invalid.config.language = "fa".into(),
             _ => invalid.cues[0].end_ms = 0,
         }
-        assert!(files::replace_project(host.clone(), invalid).is_err());
+        assert!(replace(invalid).is_err());
         assert_eq!(
             serde_json::to_vec(&files::current_project(host.clone()).unwrap().unwrap()).unwrap(),
             before
@@ -355,9 +369,9 @@ fn review_commands_reject_invalid_identity_without_loading_native_resources() {
         .unwrap()
     };
     assert_eq!(recognize(1, 0), "No review project is open");
-    let saved = project();
-    let before = serde_json::to_vec(&saved).unwrap();
-    *lock(&host.inner().0.project).unwrap() = Some(saved);
+    *lock(&host.inner().0.project).unwrap() = Some(project());
+    let before =
+        serde_json::to_vec(&files::current_project(host.clone()).unwrap().unwrap()).unwrap();
     assert_eq!(recognize(0, 0), "Invalid cue or preview timestamp");
     assert_eq!(
         recognize(1, 360_000_000_000),
@@ -742,8 +756,12 @@ fn denied_resource_commands_do_not_start_network_or_native_inference() {
     let preferences = nvsf_app::updates::preferences(&host.inner().0.paths).unwrap();
     assert!(!preferences.enabled);
     updates::cancel_update(host.clone());
-    crate::set_unsaved(host.clone(), true).unwrap();
+    crate::set_unsaved(host.clone(), true, None).unwrap();
     assert!(host.inner().0.unsaved.load(Ordering::Acquire));
-    crate::set_unsaved(host.clone(), false).unwrap();
+    assert!(host.review_dirty());
+    crate::set_unsaved(host.clone(), true, Some(false)).unwrap();
+    assert!(host.inner().0.unsaved.load(Ordering::Acquire));
+    assert!(!host.review_dirty());
+    crate::set_unsaved(host.clone(), false, None).unwrap();
     assert!(!host.inner().0.unsaved.load(Ordering::Acquire));
 }

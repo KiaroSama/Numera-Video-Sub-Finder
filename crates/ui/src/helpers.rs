@@ -78,6 +78,10 @@ pub fn frame_point(x: f64, y: f64, bounds: [f64; 4]) -> Option<(f64, f64)> {
     ))
 }
 
+pub const ROUTES: [&str; 6] = [
+    "Extract", "Queue", "Review", "Models", "History", "Settings",
+];
+
 pub fn route_value(value: &str) -> Option<&'static str> {
     match value.trim_start_matches('#') {
         "extract" => Some("Extract"),

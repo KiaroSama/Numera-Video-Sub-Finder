@@ -134,7 +134,7 @@ pub async fn pick_checkpoint(
     let host = host.inner().clone();
     blocking(move || {
         host.ensure_idle()?;
-        if host.0.unsaved.load(std::sync::atomic::Ordering::Acquire) {
+        if host.review_dirty() {
             return Err("Save current review corrections before opening a checkpoint".into());
         }
         let Some(file) = app

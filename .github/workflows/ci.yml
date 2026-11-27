@@ -38,6 +38,27 @@ jobs:
       run:
         shell: pwsh
     steps:
+      - name: Preflight signing context
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          NVSF_WINDOWS_CODESIGN_PFX: ${{ matrix.os == 'windows' && secrets.NVSF_WINDOWS_CODESIGN_PFX || '' }}
+          NVSF_WINDOWS_CODESIGN_PASSWORD: ${{ matrix.os == 'windows' && secrets.NVSF_WINDOWS_CODESIGN_PASSWORD || '' }}
+        run: |
+          $stamp = [DateTime]::UtcNow.ToString('yyyy-MM-dd HH:mm:ss', [Globalization.CultureInfo]::InvariantCulture)
+          if ($env:GITHUB_REF -cne 'refs/heads/main') {
+            Write-Host "[$stamp UTC] [ERROR] [SIGNING] The numera-signing environment is available only on refs/heads/main. Run verification on main."
+            exit 1
+          }
+          $required = @('TAURI_SIGNING_PRIVATE_KEY')
+          if ($env:RUNNER_OS -eq 'Windows') {
+            $required += @('NVSF_WINDOWS_CODESIGN_PFX', 'NVSF_WINDOWS_CODESIGN_PASSWORD')
+          }
+          $missing = $required | Where-Object { [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($_)) }
+          if ($missing) {
+            Write-Host "[$stamp UTC] [ERROR] [SIGNING] Missing required numera-signing environment inputs: $($missing -join ', '). Configure them and rerun on refs/heads/main."
+            exit 1
+          }
+          Write-Host "[$stamp UTC] [INFO] [SIGNING] Required signing inputs are present for refs/heads/main."
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable action source
         with:

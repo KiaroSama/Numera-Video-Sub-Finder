@@ -14,7 +14,7 @@ pub async fn start_job(
     blocking(move || {
         let _operation = lock(&host.0.operation)?;
         host.ensure_idle()?;
-        if host.0.unsaved.load(Ordering::Acquire) {
+        if host.review_dirty() {
             return Err("Save current review corrections before starting a new extraction".into());
         }
         let (queue_id, config) =
@@ -26,7 +26,7 @@ pub async fn start_job(
 
 // Caller owns the operation lock; every entry point shares one job owner.
 pub fn launch(host: &Host, config: ExtractConfig, queue_id: Option<String>) -> Result<String> {
-    if host.0.unsaved.load(Ordering::Acquire) {
+    if host.review_dirty() {
         return Err("Save current review corrections before starting/resuming a job".into());
     }
     if host.0.model_busy.load(Ordering::Acquire) {
@@ -48,6 +48,7 @@ pub fn launch(host: &Host, config: ExtractConfig, queue_id: Option<String>) -> R
             })?;
         }
     }
+    lock(&host.0.preview_daemon)?.take();
     let id = host.token("job");
     let status = Arc::new(Mutex::new(JobStatus {
         id: id.clone(),
@@ -73,7 +74,7 @@ pub fn launch(host: &Host, config: ExtractConfig, queue_id: Option<String>) -> R
         if let Ok(mut snapshot) = worker_status.lock() {
             match result {
                 Ok(Ok(project)) => {
-                    let history_path = host_clone.0.paths.projects.join(format!("{}.nvsf.json", snapshot.id));
+                    let history_path = host_clone.0.paths.projects.join(format!("{}.nvsf", snapshot.id));
                     let saved = nvsf_app::storage::save_project(&project, &history_path);
                     match host_clone.0.project.lock() {
                         Ok(mut active) => {

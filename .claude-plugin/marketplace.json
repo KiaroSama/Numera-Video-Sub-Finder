@@ -1,0 +1,24 @@
+{
+  "$schema": "https://code.claude.com/schemas/marketplace.json",
+  "name": "numera-video-sub-finder-marketplace",
+  "description": "Local subtitle extraction and project tools for the nvsf CLI.",
+  "owner": {
+    "name": "Kiaro Sama",
+    "email": "Kiaro.Sama.Dev@gmail.com"
+  },
+  "plugins": [
+    {
+      "name": "numera-video-sub-finder",
+      "version": "0.7.0",
+      "license": "GPL-3.0-or-later",
+      "description": "Extract burned-in subtitles locally, resume batches, and review or export subtitle projects with the nvsf CLI.",
+      "author": {
+        "name": "Kiaro Sama",
+        "email": "Kiaro.Sama.Dev@gmail.com"
+      },
+      "homepage": "https://github.com/KiaroSama/Numera-Video-Sub-Finder",
+      "repository": "https://github.com/KiaroSama/Numera-Video-Sub-Finder",
+      "source": "./"
+    }
+  ]
+}

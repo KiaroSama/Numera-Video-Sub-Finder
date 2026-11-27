@@ -3,6 +3,10 @@ use nvsf_app::{Control, Result, worker};
 use nvsf_core::ExtractConfig;
 use std::{io::Write, path::Path, sync::atomic::Ordering};
 
+pub(crate) fn run_preview_daemon(input: &Path, data_root: Option<&Path>) -> Result<()> {
+    nvsf_app::preview_daemon::run(input, data_root)
+}
+
 pub(crate) fn run_worker(
     request: &Path,
     control_dir: &Path,

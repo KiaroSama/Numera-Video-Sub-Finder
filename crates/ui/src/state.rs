@@ -1,3 +1,5 @@
+#[cfg(target_arch = "wasm32")]
+use crate::undo::ExtractEdit;
 use crate::{
     helpers,
     ipc::{self, Destination, Doctor, HistoryEntry, JobStatus, Model, QueueEntry, Source, Started},
@@ -13,6 +15,15 @@ pub struct Queued {
     pub source: Source,
     pub output: Destination,
     pub config: ExtractConfig,
+}
+
+#[cfg(target_arch = "wasm32")]
+#[derive(Clone)]
+pub struct NotificationItem {
+    pub id: u64,
+    pub time: String,
+    pub message: String,
+    pub read: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -34,6 +45,14 @@ pub struct Ui {
     pub pending_project: RwSignal<Option<Project>>,
     pub error: RwSignal<Option<String>>,
     pub notice: RwSignal<String>,
+    #[cfg(target_arch = "wasm32")]
+    pub notifications: RwSignal<Vec<NotificationItem>>,
+    #[cfg(target_arch = "wasm32")]
+    pub notifications_open: RwSignal<bool>,
+    #[cfg(target_arch = "wasm32")]
+    pub toast_visible: RwSignal<bool>,
+    #[cfg(target_arch = "wasm32")]
+    notification_id: RwSignal<u64>,
     pub status: RwSignal<JobStatus>,
     pub queue: RwSignal<Vec<QueueEntry>>,
     pub models: RwSignal<Vec<Model>>,
@@ -70,6 +89,14 @@ impl Ui {
             pending_project: RwSignal::new(None),
             error: RwSignal::new(None),
             notice: RwSignal::new(String::new()),
+            #[cfg(target_arch = "wasm32")]
+            notifications: RwSignal::new(Vec::new()),
+            #[cfg(target_arch = "wasm32")]
+            notifications_open: RwSignal::new(false),
+            #[cfg(target_arch = "wasm32")]
+            toast_visible: RwSignal::new(false),
+            #[cfg(target_arch = "wasm32")]
+            notification_id: RwSignal::new(0),
             status: RwSignal::new(JobStatus {
                 state: "idle".into(),
                 ..JobStatus::default()
@@ -87,6 +114,62 @@ impl Ui {
             dragging: RwSignal::new(false),
             #[cfg(target_arch = "wasm32")]
             studio: crate::studio_state::Studio::new(),
+        }
+    }
+    pub fn push_notice(self, message: impl Into<String>) {
+        let message = message.into();
+        #[cfg(target_arch = "wasm32")]
+        self.record_notice(&message);
+        self.notice.set(message);
+    }
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn record_notice(self, message: &str) {
+        if message.is_empty() {
+            return;
+        }
+        let id = self.notification_id.get_untracked().saturating_add(1);
+        self.notification_id.set(id);
+        let now = js_sys::Date::new_0();
+        let time = format!(
+            "{:02}:{:02}:{:02}",
+            now.get_hours(),
+            now.get_minutes(),
+            now.get_seconds()
+        );
+        self.notifications.update(|items| {
+            items.insert(
+                0,
+                NotificationItem {
+                    id,
+                    time,
+                    message: message.into(),
+                    read: false,
+                },
+            );
+            items.truncate(40);
+        });
+        self.toast_visible.set(true);
+    }
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn clear_notifications(self) {
+        self.notice.set(String::new());
+        self.toast_visible.set(false);
+        self.notifications.set(Vec::new());
+        crate::menubar::focus("#notifications-panel");
+    }
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn close_notifications(self, restore_focus: bool) {
+        self.notifications_open.set(false);
+        if restore_focus {
+            crate::menubar::focus("#header-notifications");
+        }
+    }
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn toggle_notifications(self) {
+        if self.notifications_open.get_untracked() {
+            self.close_notifications(true);
+        } else {
+            self.notifications_open.set(true);
         }
     }
     pub fn active(self) -> bool {
@@ -125,6 +208,16 @@ impl Ui {
             ));
             return false;
         }
+        #[cfg(target_arch = "wasm32")]
+        if matches!(command, "pick_source" | "pick_project" | "open_history")
+            && untrack(|| self.extract_dirty())
+        {
+            self.error.set(Some(
+                "Save the current video setup before opening another file, or undo its changes."
+                    .into(),
+            ));
+            return false;
+        }
         if replaces_review && (self.dirty.get_untracked() || self.draft_dirty.get_untracked()) {
             self.error.set(Some(
                 "Save your current review project before replacing it or starting another job"
@@ -146,11 +239,15 @@ impl Ui {
         self.busy.set(true);
         self.error.set(None);
         spawn_local(async move {
-            match ipc::call::<T>(command, args).await {
+            let result = ipc::call::<T>(command, args).await;
+            if self.busy.is_disposed() {
+                return;
+            }
+            self.busy.set(false);
+            match result {
                 Ok(value) => success(value),
                 Err(e) => self.error.set(Some(e)),
             }
-            self.busy.set(false);
         });
     }
     pub fn load(self, project: Project) {
@@ -158,33 +255,90 @@ impl Ui {
             self.pending_project.set(Some(project));
             return;
         }
-        if !self.source.with_untracked(|s| {
+        let linked = self.source.with_untracked(|s| {
             s.as_ref()
                 .is_some_and(|s| s.fingerprint == project.source_hash)
-        }) {
+        });
+        if !linked {
             self.replace_source(None);
         }
         #[cfg(target_arch = "wasm32")]
         self.studio.reset_extract();
         self.config.set(project.config.clone());
         self.selected.set(project.cues.first().map(|c| c.id));
+        let route = if project.cues.is_empty() {
+            "Extract"
+        } else {
+            "Review"
+        };
         self.project.set(Some(project));
         self.history.set_value(EditHistory::default());
         self.dirty.set(false);
         self.draft_dirty.set(false);
         self.revision.update(|v| *v += 1);
-        self.route.set("Review".into());
+        self.route.set(route.into());
         #[cfg(target_arch = "wasm32")]
-        if self.review_source_linked()
-            && self.preview_url.get_untracked().is_empty()
-            && !self.studio.initial.get_untracked()
         {
-            let time = self.selected_cue().map_or_else(
-                || self.config.with_untracked(|config| config.start_ms),
-                |cue| cue.start_ms,
-            );
-            self.seek(time);
+            self.capture_extract_baseline();
+            if !linked {
+                self.bind_project_source();
+            } else if self.preview_url.get_untracked().is_empty()
+                && !self.studio.initial.get_untracked()
+            {
+                self.seek_project_frame();
+            }
         }
+    }
+    #[cfg(target_arch = "wasm32")]
+    fn bind_project_source(self) {
+        let revision = self.revision.get_untracked();
+        let generation = self.preview_generation.get_untracked();
+        self.studio.loading_video.set(true);
+        self.busy.set(true);
+        spawn_local(async move {
+            let result = ipc::call::<Option<Source>>("bind_project_source", json!({})).await;
+            if self.revision.is_disposed() {
+                return;
+            }
+            self.busy.set(false);
+            if self.revision.get_untracked() != revision
+                || self.preview_generation.get_untracked() != generation
+                || self.closing.get_untracked()
+            {
+                self.studio.loading_video.set(false);
+                return;
+            }
+            match result {
+                Ok(Some(source))
+                    if self.project.with_untracked(|p| {
+                        p.as_ref()
+                            .is_some_and(|p| p.source_hash == source.fingerprint)
+                    }) =>
+                {
+                    self.replace_source(Some(source));
+                    self.seek_project_frame();
+                }
+                Ok(_) => self.studio.loading_video.set(false),
+                Err(error) => {
+                    self.studio.loading_video.set(false);
+                    self.error.set(Some(error));
+                }
+            }
+        });
+    }
+    #[cfg(target_arch = "wasm32")]
+    fn seek_project_frame(self) {
+        self.seek(self.selected_cue().map_or_else(
+            || self.config.with_untracked(|config| config.start_ms),
+            |cue| cue.start_ms,
+        ));
+    }
+    #[cfg(target_arch = "wasm32")]
+    fn admit_source(self, source: Source) {
+        self.studio.reset_extract();
+        self.capture_extract_baseline();
+        self.studio.loading_video.set(true);
+        self.admit_video(source, true);
     }
     #[cfg(target_arch = "wasm32")]
     pub fn pick_source(self) {
@@ -198,18 +352,51 @@ impl Ui {
                     .with_untracked(|p| p.as_ref().map(|p| p.source_hash.clone()))
             })
             .flatten();
-        self.request::<Option<Source>>(
+        self.request_video::<Option<Source>>(
             "pick_source",
             json!({"expectedHash": expected_hash}),
             move |source| {
-                if let Some(source) = source {
-                    if !link_to_review {
-                        self.route.set("Extract".into());
-                    }
-                    self.admit_video(source, true);
+                let Some(source) = source else {
+                    return false;
+                };
+                if !link_to_review {
+                    self.route.set("Extract".into());
                 }
+                self.admit_source(source);
+                true
             },
         );
+    }
+    #[cfg(target_arch = "wasm32")]
+    fn request_video<T: DeserializeOwned + 'static>(
+        self,
+        command: &'static str,
+        args: Value,
+        accept: impl FnOnce(T) -> bool + 'static,
+    ) {
+        if !self.request_allowed(command) {
+            return;
+        }
+        self.studio.loading_video.set(true);
+        self.busy.set(true);
+        self.error.set(None);
+        spawn_local(async move {
+            let result = ipc::call::<T>(command, args).await;
+            if self.busy.is_disposed() {
+                return;
+            }
+            self.busy.set(false);
+            let admitted = match result {
+                Ok(response) => accept(response),
+                Err(error) => {
+                    self.error.set(Some(error));
+                    false
+                }
+            };
+            if !admitted {
+                self.studio.loading_video.set(false);
+            }
+        });
     }
     #[cfg(target_arch = "wasm32")]
     pub fn accept_drop(self, token: String) {
@@ -217,16 +404,20 @@ impl Ui {
             return;
         }
         let config = self.config.get_untracked();
-        self.request::<crate::ipc::DropOutcome>(
+        self.request_video::<crate::ipc::DropOutcome>(
             "accept_dropped_paths",
             json!({"token": token, "config": config}),
             move |outcome| {
                 if outcome.kind == "single"
                     && let Some(source) = outcome.source
                 {
+                    if untrack(|| self.extract_dirty()) {
+                        self.error.set(Some("Save the current video setup before opening a dropped video, or undo its changes.".into()));
+                        return false;
+                    }
                     let name = source.name.clone();
-                    self.admit_video(source, true);
                     self.route.set("Extract".into());
+                    self.admit_source(source);
                     let suffix = if outcome.truncated {
                         " Some dropped items exceeded the intake limit; drop smaller batches."
                     } else {
@@ -236,8 +427,8 @@ impl Ui {
                     if let Some(error) = outcome.errors.first() {
                         note.push_str(&format!(" {} drop issue(s): {error}", outcome.errors.len()));
                     }
-                    self.notice.set(note);
-                    return;
+                    self.push_notice(note);
+                    return true;
                 }
                 self.queue.set(outcome.queued);
                 self.route.set("Queue".into());
@@ -257,7 +448,8 @@ impl Ui {
                 if let Some(error) = outcome.errors.first() {
                     note.push_str(&format!(" {} drop issue(s): {error}", outcome.errors.len()));
                 }
-                self.notice.set(note);
+                self.push_notice(note);
+                false
             },
         );
     }
@@ -337,7 +529,7 @@ impl Ui {
     pub fn add_queue(self) {
         if let Some(q) = self.current_queue() {
             self.request::<Vec<QueueEntry>>("queue_add",json!({"sourceToken":q.source.token,"outputToken":q.output.token,"config":q.config}),move |entries|{
-                self.queue.set(entries);self.notice.set("Saved to the durable queue. Restored entries require source/output regrant; nothing starts automatically.".into());
+                self.queue.set(entries);self.push_notice("Saved to the durable queue. Restored entries require source/output regrant; nothing starts automatically.");
             });
         }
     }
@@ -349,7 +541,7 @@ impl Ui {
     }
     pub fn resume_picker(self) {
         self.request::<Option<Vec<QueueEntry>>>("pick_checkpoint",json!({}),move |entries|if let Some(entries)=entries{
-            self.queue.set(entries);self.route.set("Queue".into());self.notice.set("Checkpoint registered with fresh native grants. Review its configuration/preservation warning, then explicitly resume the queue entry.".into());
+            self.queue.set(entries);self.route.set("Queue".into());self.push_notice("Checkpoint registered with fresh native grants. Review its configuration warning, then resume the queue entry.");
         });
     }
     pub fn current_queue(self) -> Option<Queued> {
@@ -360,12 +552,88 @@ impl Ui {
         })
     }
     #[cfg(target_arch = "wasm32")]
+    pub(crate) fn capture_extract_baseline(self) {
+        self.studio
+            .extract_baseline
+            .set(Some(self.config.with_untracked(ExtractEdit::snapshot)));
+        self.studio
+            .extract_settings_baseline
+            .set(Some(self.config.with_untracked(extract_settings)));
+    }
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn extract_dirty(self) -> bool {
+        self.source.with(Option::is_some)
+            && self.studio.extract_baseline.with(|baseline| {
+                baseline.as_ref().is_some_and(|baseline| {
+                    self.config.with(|config| {
+                        *baseline != ExtractEdit::snapshot(config)
+                            || self.studio.extract_settings_baseline.with(|saved| {
+                                saved
+                                    .as_ref()
+                                    .is_some_and(|saved| *saved != extract_settings(config))
+                            })
+                    })
+                })
+            })
+    }
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn can_save_project(self) -> bool {
+        !self.closing.get()
+            && !self.busy.get()
+            && (self.project.with(Option::is_some) || self.source.with(Option::is_some))
+    }
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn workspace_project(self) -> Option<(Project, Option<String>)> {
+        let source = self.source.get_untracked();
+        if let Some(project) = self.project.get_untracked()
+            && (source.is_none()
+                || self.dirty.get_untracked()
+                || (!untrack(|| self.extract_dirty())
+                    && source
+                        .as_ref()
+                        .is_some_and(|s| s.fingerprint == project.source_hash)
+                    && (project.completed || !project.cues.is_empty())))
+        {
+            let token = source
+                .filter(|s| s.fingerprint == project.source_hash)
+                .map(|s| s.token);
+            return Some((project, token));
+        }
+        let source = source?;
+        let config = ExtractConfig {
+            input: source.name,
+            ..self.config.get_untracked()
+        };
+        Some((
+            Project {
+                schema: 1,
+                source_hash: source.fingerprint,
+                config_hash: String::new(),
+                model_hash: String::new(),
+                config,
+                media: source.media,
+                cues: Vec::new(),
+                processed_ms: 0,
+                active_appearances: Vec::new(),
+                completed: false,
+                warnings: Vec::new(),
+            },
+            Some(source.token),
+        ))
+    }
+    #[cfg(target_arch = "wasm32")]
     pub(crate) fn can_save(self) -> bool {
         self.review_editable() && !self.preview_busy.get() && !self.draft_dirty.get()
     }
     #[cfg(target_arch = "wasm32")]
     pub(crate) fn save(self, as_new: bool) {
-        self.persist_project(None, as_new);
+        self.save_workspace(as_new);
+    }
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn save_workspace(self, as_new: bool) {
+        if self.can_save_project() && !self.active() && !self.review_loading.get_untracked() {
+            self.persist_project(None, as_new);
+        }
     }
     #[cfg(target_arch = "wasm32")]
     pub fn persist(self, format: Option<String>, bom: bool, crlf: bool) {
@@ -373,12 +641,17 @@ impl Ui {
     }
     #[cfg(target_arch = "wasm32")]
     fn persist_project(self, export: Option<(String, bool, bool)>, as_new: bool) {
-        let Some(project) = self.project.get_untracked() else {
+        let save = export.is_none();
+        let Some((project, source_token)) = (if save {
+            self.workspace_project()
+        } else {
+            if !self.review_editable() || self.preview_busy.get_untracked() {
+                return;
+            }
+            self.project.get_untracked().map(|p| (p, None))
+        }) else {
             return;
         };
-        if !self.review_editable() || self.preview_busy.get_untracked() {
-            return;
-        }
         if self.draft_dirty.get_untracked() {
             self.error.set(Some(
                 "Apply the current cue correction before saving or exporting".into(),
@@ -386,12 +659,27 @@ impl Ui {
             return;
         }
         let revision = self.revision.get_untracked();
-        let save = export.is_none();
+        let draft = (save && source_token.is_some() && project.is_setup()).then(|| project.clone());
+        let saved_extract = draft.as_ref().map(|draft| {
+            (
+                ExtractEdit::snapshot(&draft.config),
+                extract_settings(&draft.config),
+            )
+        });
         self.busy.set(true);
         self.error.set(None);
         spawn_local(async move {
             let result = async {
-                ipc::call::<()>("replace_project", json!({"project": project})).await?;
+                ipc::call::<()>(
+                    "replace_project",
+                    json!({"project": project, "sourceToken": source_token}),
+                )
+                .await?;
+                if let Some(draft) = draft {
+                    self.project.set(Some(draft));
+                    self.selected.set(None);
+                    self.history.set_value(EditHistory::default());
+                }
                 if let Some((format, bom, crlf)) = export {
                     ipc::call::<Option<String>>(
                         "export_project",
@@ -410,9 +698,23 @@ impl Ui {
             .await;
             match result {
                 Ok(Some(name)) => {
-                    self.notice.set(format!("Saved {name}"));
+                    self.push_notice(format!("Saved {name}"));
                     if save && self.revision.get_untracked() == revision {
                         self.dirty.set(false);
+                        if let Some((baseline, settings)) = saved_extract {
+                            self.studio.extract_baseline.set(Some(baseline));
+                            self.studio.extract_settings_baseline.set(Some(settings));
+                        }
+                        if let Err(error) = ipc::call::<()>(
+                            "set_unsaved",
+                            json!({
+                                "dirty": untrack(|| self.extract_dirty()), "reviewDirty": false,
+                            }),
+                        )
+                        .await
+                        {
+                            self.error.set(Some(error));
+                        }
                     }
                     if save
                         && let Ok(entries) =
@@ -450,11 +752,26 @@ impl Ui {
         }
         self.theme.set(value.clone());
         #[cfg(target_arch = "wasm32")]
-        crate::glimm::sweep_theme(&previous, &value);
         spawn_local(async move {
-            if let Err(e) = ipc::call::<()>("ui_ready", json!({"theme": value})).await {
-                self.error.set(Some(e));
+            let result = ipc::call::<()>("set_window_theme", json!({"theme": value})).await;
+            if !self.theme.is_disposed() && self.theme.get_untracked() == value {
+                let rendered = document()
+                    .document_element()
+                    .and_then(|root| root.get_attribute("data-theme"));
+                crate::glimm::sweep_theme(rendered.as_deref().unwrap_or(&previous), &value);
+                if let Err(error) = result {
+                    self.error.set(Some(error));
+                }
             }
         });
     }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn extract_settings(config: &ExtractConfig) -> (String, String, String) {
+    (
+        config.language.clone(),
+        config.device.clone(),
+        config.quality.clone(),
+    )
 }

@@ -36,7 +36,16 @@ The four native 64-bit targets are Windows x64, Windows ARM64, Linux x64 and Lin
 
 ## Releases and Tags
 
-The 0.x series increments the minor version: `v0.2.0`, `v0.3.0`, `v0.4.0`, `v0.5.0`, then `v0.6.0`. The badges above update from [GitHub Tags](https://github.com/KiaroSama/Numera-Video-Sub-Finder/tags) and [GitHub Releases](https://github.com/KiaroSama/Numera-Video-Sub-Finder/releases) as tags and releases are published.
+The 0.x series increments the minor version. The badges above update from [GitHub Tags](https://github.com/KiaroSama/Numera-Video-Sub-Finder/tags) and [GitHub Releases](https://github.com/KiaroSama/Numera-Video-Sub-Finder/releases) as tags and releases are published.
+
+### What's new in v0.7.0
+
+- A persistent FFmpeg preview process keeps the source open during playback, so the app no longer starts a process for each frame.
+- Graphite Studio v2 rounds panels and controls, keeps the timeline playhead separate from the extraction range, and respects reduced-motion settings for its transitions.
+- Resize the viewport from all four sides. Press the backtick key for Focus Mode, or `Z` to use Photoshop-style marquee zoom. Drag a box around part of the frame, then use `Ctrl+0` to reset the view.
+- Save a `.nvsf` project as soon as a video is loaded. The app asks what to do with unsaved changes when you close it.
+- The bell on the right keeps notifications out of the workspace layout. **Additional language packs** lists installed packs when the page opens.
+- The [agent plugins](docs/installation.md#agent-plugins) cover Claude Code, Codex, Cursor, Antigravity and Agent Plugins 1.0 hosts. They use the local CLI without an MCP server.
 
 GitHub Actions signs Windows binaries and updater artifacts only in the protected `numera-signing` deployment environment. The release workflow publishes artifacts from the exact verified commit.
 
@@ -55,7 +64,7 @@ The Graphite Studio desktop workspace has a menu bar in the top left: **File**, 
 3. Pick the subtitle language using the searchable **Subtitle language** box: type any part of the English name, native name (`فارسی`, `日本語`), or language code (`fa`, `ja`, `chi_sim`, `fra`) to filter all 126 languages live, press `Enter` or click a match, then set quality and device policy. Compatible admitted Paddle recognizers are used where available; other languages require their selected Tesseract pack. English, Persian and Japanese keep their original qualification targets; catalog availability does not certify accuracy. Automatic region detection gives editable suggestions; scene signs are not accepted as dialogue on their own.
 4. Start extraction (`Ctrl+Enter`). Pause and cancel controls keep compatible checkpoints; missing models return an actionable error instead of downloading during inference.
 5. Review original frames, edit text and times, split or merge cues, undo or redo changes (`Ctrl+Z` / `Ctrl+Y` in both **Extract** and **Review**), and explicitly accept re-recognition proposals.
-6. Use **Save** (`Ctrl+S`), **Save As** (`Ctrl+Shift+S`), or export SRT, WebVTT, basic ASS, or JSON evidence. Closing with unsaved edits prompts you to save and exit, exit without saving, or cancel. Press `F1` at any time to view all keyboard shortcuts.
+6. Use **Save** (`Ctrl+S`) or **Save As** (`Ctrl+Shift+S`) to store a `.nvsf` project before or after extraction. Export reviewed cues to SRT, WebVTT, basic ASS or JSON. Closing with unsaved edits prompts you to save and exit, exit without saving, or cancel. Press `F1` to view keyboard shortcuts.
 
 Monochrome Dark and Light themes run locally: Dark is the initial default, and your explicit theme choice is saved. The single-click toggle plays a native Rust/WASM WebGL1 brushed-silver sweep (`glimm`) and honors `prefers-reduced-motion`. There are no remote fonts, cloud transcription or authored JavaScript application components. Generated Tauri/WASM glue is required by the frameworks.
 
@@ -109,11 +118,17 @@ nvsf preview frame --input "video.mp4" --at-ms 12000 --output "check.png" --grid
 nvsf bulk --input-dir "./videos" --output-dir "./subtitles" --language en --concurrency 2
 ```
 
-An installable AI Agent Skill covering every CLI subcommand, exit code, and JSON workflow lives in [skills/numera-video-sub-finder/SKILL.md](skills/numera-video-sub-finder/SKILL.md) with a full flag reference in [skills/numera-video-sub-finder/references/cli-reference.md](skills/numera-video-sub-finder/references/cli-reference.md). Run any subcommand with `--help` for exact options. Benchmark elapsed time measures that run only, not universal speed or quality.
+The [agent skill](skills/numera-video-sub-finder/SKILL.md) and its [CLI reference](skills/numera-video-sub-finder/references/cli-reference.md) cover flags, JSON output and exit codes. In Claude Code, install it with:
+
+```text
+/plugin install numera-video-sub-finder --marketplace KiaroSama/Numera-Video-Sub-Finder
+```
+
+See [agent plugin installation](docs/installation.md#agent-plugins) for the other hosts. Run a subcommand with `--help` for its exact options. Benchmark elapsed time measures the current run only.
 
 ## Data and privacy
 
-Writable models, projects, logs and cache use the OS's local application-data directory under `Numera Video Sub Finder`. `--data-root` or `NVSF_DATA_ROOT` selects an explicit location. Placing `portable.flag` next to the executable switches storage to its sibling `data` directory. `NVSF_RUNTIME_ROOT` overrides native runtime discovery; ordinary packages load their bundled runtimes.
+Writable models, projects, logs and cache use the OS's local application-data directory under `Numera Video Sub Finder`. Set `NVSF_DATA_ROOT` before launching either program to select a shared location. The CLI-only `--data-root` flag overrides that variable. With neither set, `portable.flag` next to the executable selects its sibling `data` directory. `NVSF_RUNTIME_ROOT` overrides native runtime discovery; ordinary packages load their bundled runtimes.
 
 Video and subtitle text stay local during inference. The desktop checks signed official stable-release metadata at startup and at most daily while open; disable automatic checks in Settings or check manually. No update payload downloads or installs without separate approval. Explicit model or language provisioning and approved dependency repair also use the network. Model bytes are checked against pinned hashes; managed runtime packs and update metadata require signatures. No stable release or feed is claimed before publication.
 

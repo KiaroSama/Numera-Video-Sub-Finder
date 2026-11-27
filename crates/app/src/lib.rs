@@ -12,6 +12,7 @@ pub mod models;
 pub mod native_request;
 pub mod paths;
 mod preprocessing;
+pub mod preview_daemon;
 pub mod providers;
 pub mod regions;
 mod runtime_health;
