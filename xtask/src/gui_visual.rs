@@ -149,11 +149,11 @@ pub fn preview_navigation(driver: &Driver, output: &Path) -> Result<()> {
 
 pub fn layout(driver: &Driver, output: &Path) -> Result<()> {
     let original = driver.request(reqwest::Method::GET, "/window/rect", json!({}))?;
+    let orig_inner = driver.script("return {w:innerWidth,h:innerHeight};")?;
+    let orig_w = orig_inner["w"].as_f64().ok_or("Missing viewport width")?;
+    let orig_h = orig_inner["h"].as_f64().ok_or("Missing viewport height")?;
     let result = (|| -> Result<()> {
-        let mut prior_width = driver
-            .script("return innerWidth;")?
-            .as_f64()
-            .ok_or("Missing viewport width")?;
+        let mut prior_width = orig_w;
         for (width, height) in [(960, 640), (1280, 860)] {
             driver.request(
                 reqwest::Method::POST,
@@ -222,6 +222,10 @@ pub fn layout(driver: &Driver, output: &Path) -> Result<()> {
     let restored = driver.request(reqwest::Method::POST, "/window/rect", original);
     result?;
     restored?;
+    driver.wait(
+        &format!("return Math.abs(innerWidth-{orig_w})<5 && Math.abs(innerHeight-{orig_h})<5;"),
+        5,
+    )?;
     Ok(())
 }
 

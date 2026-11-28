@@ -20,30 +20,12 @@ pub async fn preview_transport(
     .await
 }
 
-fn extraction_active(host: &Host) -> Result<bool> {
-    let jobs = lock(&host.0.job)?;
-    let Some(job) = jobs.as_ref() else {
-        return Ok(false);
-    };
-    let state = lock(&job.status)?.state.clone();
-    Ok(
-        matches!(state.as_str(), "running" | "paused" | "cancelling")
-            && job
-                .thread
-                .as_ref()
-                .is_some_and(|thread| !thread.is_finished()),
-    )
-}
-
 fn frame(host: &Host, path: &Path, time_ms: u64, step: i8, fast: bool) -> Result<Packet> {
     if !matches!(step, -1..=2) {
         return Err("Preview step must be -1, 0, 1 or 2".into());
     }
     if time_ms > 359_999_999_999 {
         return Err("Invalid preview timestamp".into());
-    }
-    if extraction_active(host)? {
-        return Err("Wait for extraction to finish before previewing".into());
     }
     let mut pool = lock(&host.0.preview_daemon)?;
     let cancel = &host.0.source_cancel;
@@ -100,46 +82,4 @@ fn frame(host: &Host, path: &Path, time_ms: u64, step: i8, fast: bool) -> Result
         return Err("Native source preview returned a different response".into());
     };
     Ok(Packet::new(time_ms, estimated_duration_ms, false, png))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::extraction_active;
-    use crate::state::{Host, Job, JobStatus, lock};
-    use std::sync::{Arc, Mutex, mpsc};
-
-    #[test]
-    fn preview_allows_completed_jobs_before_thread_teardown() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let paths = nvsf_app::Paths::new(Some(dir.path())).expect("paths");
-        let log = nvsf_app::logging::Log::new(&paths, "nvsf-desktop");
-        let host = Host::new(paths, log);
-        let (tx, rx) = mpsc::channel();
-        let (done_tx, done_rx) = mpsc::channel();
-        let handle = std::thread::spawn(move || {
-            let _ = rx.recv();
-            let _ = done_tx.send(());
-        });
-        let status = Arc::new(Mutex::new(JobStatus {
-            id: "j1".into(),
-            state: "running".into(),
-            ..JobStatus::default()
-        }));
-        *lock(&host.0.job).expect("job lock") = Some(Job {
-            id: "j1".into(),
-            control: nvsf_app::Control::default(),
-            status: status.clone(),
-            done: done_rx,
-            thread: Some(handle),
-        });
-        assert!(extraction_active(&host).expect("active"));
-        status.lock().expect("status lock").state = "completed".into();
-        assert!(!extraction_active(&host).expect("completed"));
-        let _ = tx.send(());
-        if let Some(mut job) = lock(&host.0.job).expect("job lock").take()
-            && let Some(t) = job.thread.take()
-        {
-            let _ = t.join();
-        }
-    }
 }
