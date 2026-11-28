@@ -41,6 +41,7 @@ pub fn verify(driver: &Driver, output: &Path) -> Result<()> {
         }
         receipts.push(checkpoint(driver, "filtered-query", "fa")?);
 
+        driver.script("if(document.documentElement.scrollHeight<=innerHeight&&scrollY!==0)window.scrollTo(0,0);return true;")?;
         query(driver, "a")?;
         let before_scroll = driver.script("return {page:scrollY,inspector:document.querySelector('#extract-inspector').scrollTop};")?;
         for _ in 0..8 {

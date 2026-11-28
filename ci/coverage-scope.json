@@ -4,45 +4,45 @@
   "exclusions": [
     {
       "path": "crates/desktop/src/files.rs",
-      "start": 40,
-      "end": 50,
-      "source_sha256": "758abcff7aed11d2849aa19b9301ba1633a4d312fc42f9b85e166127048ab00c",
+      "start": 44,
+      "end": 54,
+      "source_sha256": "1bb583804cbef86558f4d0f4ebeff62b269e68fdb1d7177b63a0bbaa9e4097a3",
       "category": "native-dialog",
       "reason": "Native source picker invocation; cancellation and grants remain measured.",
       "acceptance": "OPEN: native source selection/cancellation on all desktops, unchanged grants after cancellation."
     },
     {
       "path": "crates/desktop/src/files.rs",
-      "start": 70,
-      "end": 76,
-      "source_sha256": "758abcff7aed11d2849aa19b9301ba1633a4d312fc42f9b85e166127048ab00c",
+      "start": 74,
+      "end": 80,
+      "source_sha256": "1bb583804cbef86558f4d0f4ebeff62b269e68fdb1d7177b63a0bbaa9e4097a3",
       "category": "native-dialog",
       "reason": "Native output picker invocation only.",
       "acceptance": "OPEN: native output selection/cancellation and preservation of existing files."
     },
     {
       "path": "crates/desktop/src/files.rs",
-      "start": 413,
-      "end": 419,
-      "source_sha256": "758abcff7aed11d2849aa19b9301ba1633a4d312fc42f9b85e166127048ab00c",
+      "start": 431,
+      "end": 437,
+      "source_sha256": "1bb583804cbef86558f4d0f4ebeff62b269e68fdb1d7177b63a0bbaa9e4097a3",
       "category": "native-dialog",
       "reason": "Native project save picker invocation only.",
       "acceptance": "OPEN: native project save selection/cancellation, retained overwrite consent and corrections."
     },
     {
       "path": "crates/desktop/src/files.rs",
-      "start": 492,
-      "end": 498,
-      "source_sha256": "758abcff7aed11d2849aa19b9301ba1633a4d312fc42f9b85e166127048ab00c",
+      "start": 512,
+      "end": 518,
+      "source_sha256": "1bb583804cbef86558f4d0f4ebeff62b269e68fdb1d7177b63a0bbaa9e4097a3",
       "category": "native-dialog",
       "reason": "Native subtitle export picker invocation only.",
       "acceptance": "OPEN: native export selection/cancellation and no unapproved replacement."
     },
     {
       "path": "crates/desktop/src/files.rs",
-      "start": 571,
-      "end": 576,
-      "source_sha256": "758abcff7aed11d2849aa19b9301ba1633a4d312fc42f9b85e166127048ab00c",
+      "start": 591,
+      "end": 596,
+      "source_sha256": "1bb583804cbef86558f4d0f4ebeff62b269e68fdb1d7177b63a0bbaa9e4097a3",
       "category": "native-dialog",
       "reason": "Native project open picker invocation only.",
       "acceptance": "OPEN: native project selection/cancellation, original workspace retained on cancellation."
@@ -51,7 +51,7 @@
       "path": "crates/desktop/src/resume.rs",
       "start": 40,
       "end": 43,
-      "source_sha256": "6fd41897866d15ad432af829c7cc637221957a2bd1c8652318024554890796ef",
+      "source_sha256": "712207899c86964f7ea98b4d0e704021f0da653bd9852e0b81daa1c2adcbdc86",
       "category": "native-dialog",
       "reason": "Native source regrant picker invocation only.",
       "acceptance": "OPEN: native source regrant/cancellation with exact original fingerprint and state preservation."
@@ -60,7 +60,7 @@
       "path": "crates/desktop/src/resume.rs",
       "start": 48,
       "end": 53,
-      "source_sha256": "6fd41897866d15ad432af829c7cc637221957a2bd1c8652318024554890796ef",
+      "source_sha256": "712207899c86964f7ea98b4d0e704021f0da653bd9852e0b81daa1c2adcbdc86",
       "category": "native-dialog",
       "reason": "Native output regrant picker invocation only.",
       "acceptance": "OPEN: native output regrant/cancellation, reject incompatible destination without mutation."

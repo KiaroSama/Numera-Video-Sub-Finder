@@ -65,7 +65,7 @@
 }
 * { box-sizing: border-box; }
 [hidden]:not(.app-menu, #notifications-panel, .toast-item) { display: none !important; }
-html, body, .shell { height: 100vh; overflow: clip; }
+html, body, .shell { height: 100vh; overflow: hidden; }
 body { margin: 0; font-size: .875rem; line-height: 1.4; }
 button, select, input, textarea { font: inherit; }
 button, select, input:not([type="checkbox"]):not([type="range"]) { min-height: 44px; }
@@ -281,7 +281,7 @@ dd { margin: 0; color: var(--muted); overflow-wrap: anywhere; }
 .language-search-row input { padding-inline-end: 48px; }
 .clear-search { position: absolute; inset-inline-end: 0; min-width: 44px; border: 0; background: transparent; }
 .language-matches { display: flex; flex-direction: column; gap: 2px; max-height: 160px; overflow: auto; padding: 4px; border: 1px solid var(--border); border-radius: var(--radius); }
-.language-option { justify-content: flex-start; text-align: start; width: 100%; border-color: transparent; }
+.language-option { justify-content: flex-start; text-align: start; width: 100%; border-color: transparent; transition: none; }
 .language-option.active { background: var(--accent-soft); }
 .language-empty { padding: 8px; }
 .drop-overlay { position: fixed; inset: 0; z-index: 4; display: grid; place-items: center; background: #0009; pointer-events: none; }
