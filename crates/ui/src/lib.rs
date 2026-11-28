@@ -11,6 +11,8 @@ mod close_modal;
 mod hotkeys;
 #[cfg(target_arch = "wasm32")]
 mod player;
+#[cfg(any(target_arch = "wasm32", test))]
+mod project_save;
 #[cfg(target_arch = "wasm32")]
 mod roi_editor;
 #[cfg(any(target_arch = "wasm32", test))]

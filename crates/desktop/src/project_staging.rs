@@ -60,17 +60,51 @@ pub(super) fn for_webview(mut project: Project) -> Project {
 pub(crate) fn apply_project_edits(
     host: &Host,
     files: &ProjectFiles,
-    mut project: Project,
+    project: Project,
     source_token: Option<&str>,
 ) -> Result<()> {
+    let previous = lock(&host.0.project)?.clone();
+    let original = identity(&previous)?;
+    let setup = source_token.is_some() && project.is_setup();
+    let project = prepare_project(host, previous.as_ref(), project, source_token)?;
+    let mut paths = lock(&files.0)?;
+    let mut current = lock(&host.0.project)?;
+    if identity(&current)? != original {
+        return Err("The workspace changed while preparing project changes; try again".into());
+    }
+    if setup {
+        if !retains_setup_path(previous.as_ref(), &project) {
+            paths.active = None;
+        }
+        paths.generation = paths.generation.wrapping_add(1);
+        if !host.review_dirty() {
+            host.0.extract_only_dirty.store(true, Ordering::Release);
+        }
+        host.0.unsaved.store(true, Ordering::Release);
+    }
+    *current = Some(project);
+    Ok(())
+}
+
+pub(super) fn identity(project: &Option<Project>) -> Result<Vec<u8>> {
+    serde_json::to_vec(project).map_err(|error| error.to_string())
+}
+
+pub(super) fn retains_setup_path(previous: Option<&Project>, project: &Project) -> bool {
+    previous.is_some_and(|old| old.is_setup() && old.source_hash == project.source_hash)
+}
+
+// Prepare native paths and validated contents without publishing any workspace state.
+pub(super) fn prepare_project(
+    host: &Host,
+    previous: Option<&Project>,
+    mut project: Project,
+    source_token: Option<&str>,
+) -> Result<Project> {
     if let Some(token) = source_token
         && project.is_setup()
     {
-        if host.review_dirty()
-            && lock(&host.0.project)?
-                .as_ref()
-                .is_some_and(|old| !old.is_setup())
-        {
+        if host.review_dirty() && previous.is_some_and(|old| !old.is_setup()) {
             return Err("Save the current review corrections before replacing the review".into());
         }
         let source = host.source(token)?;
@@ -85,26 +119,10 @@ pub(crate) fn apply_project_edits(
         project.config.data_root = None;
         project.config_hash.clear();
         validate(&project)?;
-        let mut paths = lock(&files.0)?;
-        let mut current = lock(&host.0.project)?;
-        if current
-            .as_ref()
-            .is_none_or(|old| !old.is_setup() || old.source_hash != project.source_hash)
-        {
-            paths.active = None;
-        }
-        paths.generation = paths.generation.wrapping_add(1);
-        *current = Some(project);
-        if !host.review_dirty() {
-            host.0.extract_only_dirty.store(true, Ordering::Release);
-        }
-        host.0.unsaved.store(true, Ordering::Release);
-        return Ok(());
+        return Ok(project);
     }
 
-    let mut current = lock(&host.0.project)?;
-    let old = current
-        .as_mut()
+    let old = previous
         .ok_or_else(|| "Choose a source video or open a project before saving".to_string())?;
     // The WebView may return display names, but cannot change Review's native paths.
     if project.config.input == display_name(Path::new(&old.config.input)) {
@@ -140,8 +158,9 @@ pub(crate) fn apply_project_edits(
             .and_then(|name| crops.get(&display_name(Path::new(name))))
             .map(|path| (*path).clone());
     }
-    old.cues = project.cues;
-    Ok(())
+    let mut prepared = old.clone();
+    prepared.cues = project.cues;
+    Ok(prepared)
 }
 
 fn validate(project: &Project) -> Result<()> {

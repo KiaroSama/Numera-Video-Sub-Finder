@@ -1,5 +1,5 @@
 //! Validates tracked source publication boundaries, strict UTF-8, Rust 800-line ceiling,
-//! heuristic secret absence, and CI workflow claims for every Cargo manifest.
+//! heuristic secret absence, Codex catalog policies, and CI claims for every Cargo manifest.
 
 use std::{collections::HashSet, error::Error, path::Path, process::Command};
 
@@ -33,7 +33,8 @@ const TEXT_EXTS: &[&str] = &[
 
 const TEXT_NAMES: &[&str] = &["LICENSE", ".gitignore", ".graphifyignore", ".gitattributes"];
 
-const ALLOWED_TRACKED_EXCEPTIONS: &[&str] = &[".agents/plugins/marketplace.json"];
+const CODEX_MARKETPLACE: &str = ".agents/plugins/marketplace.json";
+const ALLOWED_TRACKED_EXCEPTIONS: &[&str] = &[CODEX_MARKETPLACE];
 
 fn is_excluded_path(file: &str) -> bool {
     if ALLOWED_TRACKED_EXCEPTIONS.contains(&file) {
@@ -116,6 +117,47 @@ fn extract_job_body<'a>(workflow: &'a str, job_name: &str) -> Option<&'a str> {
     Some(&tail[..byte_end])
 }
 
+fn validate_codex_marketplace_policies(text: &str) -> Result<(), Box<dyn Error>> {
+    let catalog: serde_json::Value =
+        serde_json::from_str(text).map_err(|_| "Codex marketplace is not valid JSON")?;
+    let plugins = catalog
+        .get("plugins")
+        .and_then(serde_json::Value::as_array)
+        .ok_or("Codex marketplace must contain a plugins array")?;
+    // These local-catalog enums match Codex rust-v0.172.0 marketplace.rs.
+    // MCP authentication and remote availability use different fields and values.
+    let accepted: [(&str, &[&str]); 2] = [
+        (
+            "installation",
+            &["NOT_AVAILABLE", "AVAILABLE", "INSTALLED_BY_DEFAULT"],
+        ),
+        ("authentication", &["ON_INSTALL", "ON_USE"]),
+    ];
+    for (index, plugin) in plugins.iter().enumerate() {
+        let plugin = plugin
+            .as_object()
+            .ok_or_else(|| format!("Codex marketplace plugin {index} must be an object"))?;
+        // Omitted policy fields use Codex's defaults; explicit null is invalid.
+        let Some(policy) = plugin.get("policy") else {
+            continue;
+        };
+        let policy = policy
+            .as_object()
+            .ok_or_else(|| format!("Codex marketplace plugin {index} policy must be an object"))?;
+        for (field, values) in accepted {
+            if let Some(value) = policy.get(field)
+                && !value.as_str().is_some_and(|value| values.contains(&value))
+            {
+                return Err(format!(
+                    "Codex marketplace plugin {index} has an invalid {field} policy"
+                )
+                .into());
+            }
+        }
+    }
+    Ok(())
+}
+
 pub fn verify() -> Result<(), Box<dyn Error>> {
     let out = Command::new("git").arg("ls-files").output()?;
     if !out.status.success() {
@@ -127,6 +169,9 @@ pub fn verify() -> Result<(), Box<dyn Error>> {
         return Err("No tracked source inventory".into());
     }
     let file_set: HashSet<&str> = files.iter().copied().collect();
+    if !file_set.contains(CODEX_MARKETPLACE) {
+        return Err("The published Codex marketplace is missing from tracked source".into());
+    }
 
     let vendored = ["patches/glib-0.18.5"];
     for root in vendored {
@@ -153,6 +198,9 @@ pub fn verify() -> Result<(), Box<dyn Error>> {
             }
             if has_secret_pattern(text) {
                 return Err("Potential real secret in tracked content; publication stops".into());
+            }
+            if file == CODEX_MARKETPLACE {
+                validate_codex_marketplace_policies(text)?;
             }
         }
     }
@@ -208,7 +256,7 @@ pub fn verify() -> Result<(), Box<dyn Error>> {
     }
 
     println!(
-        "Tracked text/publication boundaries, workflow policy lint, and package CI inventory validated; heuristic secret check is not an exhaustive credential scan."
+        "Tracked text/publication boundaries, Codex catalog policies, workflow policy lint, and package CI inventory validated; heuristic secret check is not an exhaustive credential scan."
     );
     Ok(())
 }
@@ -258,6 +306,71 @@ fn validate_workflow_policy(path: &str, text: &str) -> Result<(), Box<dyn Error>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn codex_catalog_accepts_documented_policies_and_omitted_defaults() {
+        for installation in ["AVAILABLE", "NOT_AVAILABLE", "INSTALLED_BY_DEFAULT"] {
+            for authentication in ["ON_INSTALL", "ON_USE"] {
+                let catalog = serde_json::json!({
+                    "plugins": [{"policy": {"installation": installation, "authentication": authentication}}]
+                });
+                assert!(validate_codex_marketplace_policies(&catalog.to_string()).is_ok());
+            }
+        }
+        for catalog in [
+            r#"{"plugins":[{}]}"#,
+            r#"{"plugins":[{"policy":{}}]}"#,
+            r#"{"plugins":[{"policy":{"authentication":"ON_USE"}}]}"#,
+        ] {
+            assert!(validate_codex_marketplace_policies(catalog).is_ok());
+        }
+        assert!(
+            validate_codex_marketplace_policies(include_str!(
+                "../../.agents/plugins/marketplace.json"
+            ))
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn codex_catalog_rejects_unsupported_policy_values_and_wrong_types() {
+        for invalid in [
+            serde_json::json!("NONE"),
+            serde_json::json!("on_install"),
+            serde_json::json!(null),
+            serde_json::json!(true),
+            serde_json::json!(["ON_USE"]),
+        ] {
+            let catalog = serde_json::json!({"plugins": [
+                {"policy": {"authentication": "ON_INSTALL"}},
+                {"policy": {"authentication": invalid}}
+            ]});
+            let error = validate_codex_marketplace_policies(&catalog.to_string())
+                .unwrap_err()
+                .to_string();
+            assert_eq!(
+                error,
+                "Codex marketplace plugin 1 has an invalid authentication policy"
+            );
+        }
+        let error = validate_codex_marketplace_policies(
+            r#"{"plugins":[{"policy":{"installation":"ENABLED"}}]}"#,
+        )
+        .unwrap_err()
+        .to_string();
+        assert_eq!(
+            error,
+            "Codex marketplace plugin 0 has an invalid installation policy"
+        );
+        for malformed in [
+            "not JSON",
+            r#"{"plugins":{}}"#,
+            r#"{"plugins":[null]}"#,
+            r#"{"plugins":[{"policy":null}]}"#,
+        ] {
+            assert!(validate_codex_marketplace_policies(malformed).is_err());
+        }
+    }
 
     #[test]
     fn detects_forbidden_paths_and_extracts_workflow_jobs() {

@@ -1,5 +1,3 @@
-#[cfg(target_arch = "wasm32")]
-use crate::undo::ExtractEdit;
 use crate::{
     helpers,
     ipc::{self, Destination, Doctor, HistoryEntry, JobStatus, Model, QueueEntry, Source, Started},
@@ -192,6 +190,29 @@ impl Ui {
         }
         self.draft_dirty.set(true);
         true
+    }
+    pub(crate) fn close_snapshot(self, requested: bool) -> Value {
+        let busy = self.busy.get_untracked();
+        // Native close rejects busy acknowledgements; keep an in-flight save publishable.
+        if !requested || !busy {
+            self.closing.set(requested);
+            #[cfg(target_arch = "wasm32")]
+            if requested {
+                self.studio.playing.set(false);
+                self.studio.roi_drag.set(None);
+            } else {
+                self.studio.close_open.set(false);
+            }
+        }
+        let dirty = self.dirty.get_untracked();
+        #[cfg(target_arch = "wasm32")]
+        let dirty = dirty || untrack(|| self.extract_dirty());
+        json!({
+            "dirty": dirty,
+            "draft": self.draft_dirty.get_untracked(),
+            "revision": self.revision.get_untracked(),
+            "busy": busy,
+        })
     }
     pub(crate) fn request_allowed(self, command: &str) -> bool {
         if self.closing.get_untracked() || self.busy.get_untracked() {
@@ -551,184 +572,6 @@ impl Ui {
             config: self.config.get_untracked(),
         })
     }
-    #[cfg(target_arch = "wasm32")]
-    pub(crate) fn capture_extract_baseline(self) {
-        self.studio
-            .extract_baseline
-            .set(Some(self.config.with_untracked(ExtractEdit::snapshot)));
-        self.studio
-            .extract_settings_baseline
-            .set(Some(self.config.with_untracked(extract_settings)));
-    }
-    #[cfg(target_arch = "wasm32")]
-    pub(crate) fn extract_dirty(self) -> bool {
-        self.source.with(Option::is_some)
-            && self.studio.extract_baseline.with(|baseline| {
-                baseline.as_ref().is_some_and(|baseline| {
-                    self.config.with(|config| {
-                        *baseline != ExtractEdit::snapshot(config)
-                            || self.studio.extract_settings_baseline.with(|saved| {
-                                saved
-                                    .as_ref()
-                                    .is_some_and(|saved| *saved != extract_settings(config))
-                            })
-                    })
-                })
-            })
-    }
-    #[cfg(target_arch = "wasm32")]
-    pub(crate) fn can_save_project(self) -> bool {
-        !self.closing.get()
-            && !self.busy.get()
-            && (self.project.with(Option::is_some) || self.source.with(Option::is_some))
-    }
-    #[cfg(target_arch = "wasm32")]
-    pub(crate) fn workspace_project(self) -> Option<(Project, Option<String>)> {
-        let source = self.source.get_untracked();
-        if let Some(project) = self.project.get_untracked()
-            && (source.is_none()
-                || self.dirty.get_untracked()
-                || (!untrack(|| self.extract_dirty())
-                    && source
-                        .as_ref()
-                        .is_some_and(|s| s.fingerprint == project.source_hash)
-                    && (project.completed || !project.cues.is_empty())))
-        {
-            let token = source
-                .filter(|s| s.fingerprint == project.source_hash)
-                .map(|s| s.token);
-            return Some((project, token));
-        }
-        let source = source?;
-        let config = ExtractConfig {
-            input: source.name,
-            ..self.config.get_untracked()
-        };
-        Some((
-            Project {
-                schema: 1,
-                source_hash: source.fingerprint,
-                config_hash: String::new(),
-                model_hash: String::new(),
-                config,
-                media: source.media,
-                cues: Vec::new(),
-                processed_ms: 0,
-                active_appearances: Vec::new(),
-                completed: false,
-                warnings: Vec::new(),
-            },
-            Some(source.token),
-        ))
-    }
-    #[cfg(target_arch = "wasm32")]
-    pub(crate) fn can_save(self) -> bool {
-        self.review_editable() && !self.preview_busy.get() && !self.draft_dirty.get()
-    }
-    #[cfg(target_arch = "wasm32")]
-    pub(crate) fn save(self, as_new: bool) {
-        self.save_workspace(as_new);
-    }
-    #[cfg(target_arch = "wasm32")]
-    pub(crate) fn save_workspace(self, as_new: bool) {
-        if self.can_save_project() && !self.active() && !self.review_loading.get_untracked() {
-            self.persist_project(None, as_new);
-        }
-    }
-    #[cfg(target_arch = "wasm32")]
-    pub fn persist(self, format: Option<String>, bom: bool, crlf: bool) {
-        self.persist_project(format.map(|format| (format, bom, crlf)), false);
-    }
-    #[cfg(target_arch = "wasm32")]
-    fn persist_project(self, export: Option<(String, bool, bool)>, as_new: bool) {
-        let save = export.is_none();
-        let Some((project, source_token)) = (if save {
-            self.workspace_project()
-        } else {
-            if !self.review_editable() || self.preview_busy.get_untracked() {
-                return;
-            }
-            self.project.get_untracked().map(|p| (p, None))
-        }) else {
-            return;
-        };
-        if self.draft_dirty.get_untracked() {
-            self.error.set(Some(
-                "Apply the current cue correction before saving or exporting".into(),
-            ));
-            return;
-        }
-        let revision = self.revision.get_untracked();
-        let draft = (save && source_token.is_some() && project.is_setup()).then(|| project.clone());
-        let saved_extract = draft.as_ref().map(|draft| {
-            (
-                ExtractEdit::snapshot(&draft.config),
-                extract_settings(&draft.config),
-            )
-        });
-        self.busy.set(true);
-        self.error.set(None);
-        spawn_local(async move {
-            let result = async {
-                ipc::call::<()>(
-                    "replace_project",
-                    json!({"project": project, "sourceToken": source_token}),
-                )
-                .await?;
-                if let Some(draft) = draft {
-                    self.project.set(Some(draft));
-                    self.selected.set(None);
-                    self.history.set_value(EditHistory::default());
-                }
-                if let Some((format, bom, crlf)) = export {
-                    ipc::call::<Option<String>>(
-                        "export_project",
-                        json!({"format": format, "bom": bom, "crlf": crlf}),
-                    )
-                    .await
-                } else {
-                    let command = if as_new {
-                        "save_project_as"
-                    } else {
-                        "save_project"
-                    };
-                    ipc::call::<Option<String>>(command, json!({})).await
-                }
-            }
-            .await;
-            match result {
-                Ok(Some(name)) => {
-                    self.push_notice(format!("Saved {name}"));
-                    if save && self.revision.get_untracked() == revision {
-                        self.dirty.set(false);
-                        if let Some((baseline, settings)) = saved_extract {
-                            self.studio.extract_baseline.set(Some(baseline));
-                            self.studio.extract_settings_baseline.set(Some(settings));
-                        }
-                        if let Err(error) = ipc::call::<()>(
-                            "set_unsaved",
-                            json!({
-                                "dirty": untrack(|| self.extract_dirty()), "reviewDirty": false,
-                            }),
-                        )
-                        .await
-                        {
-                            self.error.set(Some(error));
-                        }
-                    }
-                    if save
-                        && let Ok(entries) =
-                            ipc::call::<Vec<HistoryEntry>>("list_history", json!({})).await
-                    {
-                        self.recent.set(entries);
-                    }
-                }
-                Ok(None) => {}
-                Err(error) => self.error.set(Some(error)),
-            }
-            self.busy.set(false);
-        });
-    }
     pub fn toggle_theme(self) {
         let next = helpers::opposite_theme(&self.theme.get_untracked()).to_string();
         self.set_theme(next);
@@ -765,13 +608,4 @@ impl Ui {
             crate::glimm::sweep_theme(&previous, &value);
         }
     }
-}
-
-#[cfg(target_arch = "wasm32")]
-fn extract_settings(config: &ExtractConfig) -> (String, String, String) {
-    (
-        config.language.clone(),
-        config.device.clone(),
-        config.quality.clone(),
-    )
 }

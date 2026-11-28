@@ -14,6 +14,8 @@ use std::{
 use tauri::Manager;
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
 
+#[path = "project_save.rs"]
+mod project_save;
 #[path = "project_staging.rs"]
 mod project_staging;
 pub(crate) use project_staging::apply_project_edits;
@@ -361,24 +363,42 @@ fn confirm_replace(app: &tauri::AppHandle) -> bool {
 pub async fn save_project(
     app: tauri::AppHandle,
     host: tauri::State<'_, Host>,
+    project: Option<Project>,
+    source_token: Option<String>,
 ) -> Result<Option<String>> {
-    save_project_command(app, host.inner().clone(), false).await
+    save_project_command(app, host.inner().clone(), project, source_token, false).await
 }
 
 #[tauri::command]
 pub async fn save_project_as(
     app: tauri::AppHandle,
     host: tauri::State<'_, Host>,
+    project: Option<Project>,
+    source_token: Option<String>,
 ) -> Result<Option<String>> {
-    save_project_command(app, host.inner().clone(), true).await
+    save_project_command(app, host.inner().clone(), project, source_token, true).await
 }
 
 async fn save_project_command(
     app: tauri::AppHandle,
     host: Host,
+    project: Option<Project>,
+    source_token: Option<String>,
     save_as: bool,
 ) -> Result<Option<String>> {
-    blocking(move || save_active_project(&app, &host, save_as, None)).await
+    blocking(move || {
+        save_workspace_project(
+            &app,
+            &host,
+            project_save::SaveRequest {
+                project,
+                source_token,
+                as_new: save_as,
+            },
+            None,
+        )
+    })
+    .await
 }
 
 pub(crate) fn save_active_project(
@@ -387,100 +407,42 @@ pub(crate) fn save_active_project(
     save_as: bool,
     verify_close: Option<&dyn Fn() -> Result<()>>,
 ) -> Result<Option<String>> {
-    let files = app.state::<ProjectFiles>();
-    let (project, job, generation, active_path) = {
-        let _operation = lock(&host.0.operation)?;
-        if verify_close.is_none() {
-            host.ensure_idle()?;
-        } else if lock(&host.0.job)?.as_ref().is_some_and(|job| {
-            job.thread
-                .as_ref()
-                .is_some_and(|worker| !worker.is_finished())
-        }) {
-            return Err(
-                "Wait for the current extraction to finish before saving and exiting".into(),
-            );
-        }
-        let project = lock(&host.0.project)?.clone().ok_or_else(|| {
-            "No active project to save yet. Choose a video or open a project first.".to_string()
-        })?;
-        let job = job_id(host)?;
-        let paths = lock(&files.0)?;
-        let active_path = paths
-            .active
-            .as_ref()
-            .filter(|(id, _)| id == &job)
-            .map(|(_, path)| path.clone());
-        (project, job, paths.generation, active_path)
-    };
-    let active_path = active_path.as_ref();
-    let path = if let Some(path) = active_path.filter(|_| !save_as) {
-        path.clone()
-    } else {
-        let name = active_path
-            .and_then(|path| path.file_name().and_then(|name| name.to_str()))
-            .map(project_filename)
-            .unwrap_or_else(|| {
-                project_filename(
-                    Path::new(&project.config.input)
-                        .file_stem()
-                        .and_then(|name| name.to_str())
-                        .unwrap_or("subtitles"),
-                )
-            });
-        let Some(file) = app
-            .dialog()
-            .file()
-            .set_title("Save Numera project as")
-            .add_filter("Numera project", &["nvsf", "nvsf.json", "json"])
-            .set_file_name(name)
-            .blocking_save_file()
-        else {
-            return Ok(None);
-        };
-        file.into_path().map_err(|e| e.to_string())?
-    };
-    state::path_text(&path)?;
-    if !path.is_absolute() {
-        return Err("Choose an absolute destination for the review project".into());
-    }
-    let prepared = AtomicOutput::for_confirmation(&path).map_err(|e| e.to_string())?;
-    save_prepared_project(
-        &project,
-        &path,
-        prepared,
-        || Ok(confirm_replace(app)),
-        |output, bytes| {
-            if let Some(verify) = verify_close {
-                verify()?;
-            }
-            let _operation = lock(&host.0.operation)?;
-            if verify_close.is_none() {
-                host.ensure_idle()?;
-            }
-            let mut paths = lock(&files.0)?;
-            let active = lock(&host.0.project)?;
-            if job_id(host)? != job
-                || paths.generation != generation
-                || active.as_ref().is_none_or(|current| {
-                    current.cues != project.cues || current.config != project.config
-                })
-            {
-                return Err(
-                    "The workspace changed while choosing a project destination; save again".into(),
-                );
-            }
-            write_project(output, bytes)?;
-            let fingerprint = nvsf_app::providers::profiles::hash_bytes(bytes);
-            paths.recent.retain(|(recent, _)| recent != &path);
-            paths.recent.insert(0, (path.clone(), fingerprint));
-            paths.recent.truncate(200);
-            paths.generation = paths.generation.wrapping_add(1);
-            paths.active = Some((job, path.clone()));
-            host.0.unsaved.store(false, Ordering::Release);
-            host.0.extract_only_dirty.store(false, Ordering::Release);
-            Ok(())
+    save_workspace_project(
+        app,
+        host,
+        project_save::SaveRequest {
+            project: None,
+            source_token: None,
+            as_new: save_as,
         },
+        verify_close,
+    )
+}
+
+fn save_workspace_project(
+    app: &tauri::AppHandle,
+    host: &Host,
+    request: project_save::SaveRequest,
+    verify_close: Option<&dyn Fn() -> Result<()>>,
+) -> Result<Option<String>> {
+    let files = app.state::<ProjectFiles>();
+    project_save::save(
+        host,
+        &files,
+        request,
+        verify_close,
+        |name| {
+            app.dialog()
+                .file()
+                .set_title("Save Numera project as")
+                .add_filter("Numera project", &["nvsf", "nvsf.json", "json"])
+                .set_file_name(name)
+                .blocking_save_file()
+                .map(|file| file.into_path().map_err(|error| error.to_string()))
+                .transpose()
+        },
+        || Ok(confirm_replace(app)),
+        write_project,
     )
 }
 
