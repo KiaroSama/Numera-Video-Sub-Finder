@@ -170,20 +170,7 @@ fn App(initial_theme: String) -> impl IntoView {
     hotkeys::register(ui);
     if let Some(window) = web_sys::window() {
         let snapshot = Closure::<dyn FnMut(bool) -> wasm_bindgen::JsValue>::new(move |closing| {
-            ui.closing.set(closing);
-            if !closing {
-                ui.studio.close_open.set(false);
-            }
-            if closing {
-                ui.studio.playing.set(false);
-                ui.studio.roi_drag.set(None);
-            }
-            let state = json!({
-                "dirty": ui.dirty.get_untracked() || untrack(|| ui.extract_dirty()),
-                "draft": ui.draft_dirty.get_untracked(),
-                "revision": ui.revision.get_untracked(),
-                "busy": ui.busy.get_untracked(),
-            });
+            let state = ui.close_snapshot(closing);
             serde::Serialize::serialize(&state, &serde_wasm_bindgen::Serializer::json_compatible())
                 .unwrap_or(wasm_bindgen::JsValue::NULL)
         });

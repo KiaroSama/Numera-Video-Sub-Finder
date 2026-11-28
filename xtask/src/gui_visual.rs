@@ -154,14 +154,37 @@ pub fn layout(driver: &Driver, output: &Path) -> Result<()> {
     let orig_h = orig_inner["h"].as_f64().ok_or("Missing viewport height")?;
     let result = (|| -> Result<()> {
         let mut prior_width = orig_w;
-        for (width, height) in [(960, 640), (1280, 860)] {
+        for (width, height) in [(960, 640), (1280, 860), (1440, 860)] {
             driver.request(
                 reqwest::Method::POST,
                 "/window/rect",
                 json!({"width":width,"height":height}),
             )?;
             driver.wait(&format!("return Math.abs(innerWidth-{prior_width})>20 && !!document.querySelector('.app-shell');"), 5)?;
-            let bounds = driver.script("return {width:innerWidth,scroll:document.documentElement.scrollWidth,client:document.documentElement.clientWidth,frame:document.querySelector('.source-frame').getBoundingClientRect().width};")?;
+            if width == 1440 {
+                // Use the real separator handler to expose width lost to a wider sidebar.
+                driver.script("const e=document.querySelector('.stage-resizer-left');if(!e)throw new Error('Missing sidebar separator');e.dispatchEvent(new KeyboardEvent('keydown',{key:'End',bubbles:true,cancelable:true}));return true;")?;
+                driver.wait("const e=document.querySelector('.stage-resizer-left');return e?.getAttribute('aria-valuenow')==='260'&&Math.abs(document.querySelector('.sidebar').getBoundingClientRect().width-260)<1;", 5)?;
+            }
+            let bounds = driver.script(r#"
+                const header=document.querySelector('.topbar'),heading=header?.querySelector('h1');
+                if(!header||!heading)throw new Error('Missing workspace command header');
+                const box=header.getBoundingClientRect(),title=heading.getBoundingClientRect();
+                const inside=r=>r.width>0&&r.height>0&&r.left>=Math.max(0,box.left)-1&&r.right<=Math.min(innerWidth,box.right)+1&&r.top>=box.top-1&&r.bottom<=box.bottom+1;
+                const range=document.createRange();range.selectNodeContents(heading);
+                const lines=new Set([...range.getClientRects()].filter(r=>r.width>0&&r.height>0).map(r=>Math.round(r.top)));
+                const buttons=[...header.querySelectorAll('button')].map(button=>{
+                    const r=button.getBoundingClientRect();
+                    return {name:button.getAttribute('aria-label')||button.title,bounds:[r.x,r.y,r.width,r.height],contained:inside(r)};
+                });
+                return {width:innerWidth,scroll:document.documentElement.scrollWidth,client:document.documentElement.clientWidth,
+                    frame:document.querySelector('.source-frame').getBoundingClientRect().width,
+                    sidebar:document.querySelector('.sidebar').getBoundingClientRect().width,
+                    sidebarMethod:'default at 960/1280; programmatic End on the real separator at 1440',
+                    topbar:{heading:heading.textContent,headingBounds:[title.x,title.y,title.width,title.height],
+                        headingSingleLine:lines.size===1,headingContained:inside(title),buttons,
+                        allCommandsContained:buttons.length>=9&&buttons.every(button=>button.contained)}};
+            "#)?;
             if bounds["scroll"]
                 .as_f64()
                 .ok_or("Missing layout scroll width")?
@@ -170,6 +193,9 @@ pub fn layout(driver: &Driver, output: &Path) -> Result<()> {
                     .ok_or("Missing layout client width")?
                     + 1.0
                 || bounds["frame"].as_f64().unwrap_or(0.0) <= 0.0
+                || bounds["topbar"]["headingSingleLine"] != true
+                || bounds["topbar"]["headingContained"] != true
+                || bounds["topbar"]["allCommandsContained"] != true
             {
                 return Err(
                     format!("Workspace overflow at requested width {width}: {bounds}").into(),
@@ -219,11 +245,13 @@ pub fn layout(driver: &Driver, output: &Path) -> Result<()> {
         }
         skip_link(driver, output)
     })();
+    let sidebar_restored = driver.script("const e=document.querySelector('.stage-resizer-left');if(!e)throw new Error('Missing sidebar separator');e.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));return true;");
     let restored = driver.request(reqwest::Method::POST, "/window/rect", original);
     result?;
+    sidebar_restored?;
     restored?;
     driver.wait(
-        &format!("return Math.abs(innerWidth-{orig_w})<5 && Math.abs(innerHeight-{orig_h})<5;"),
+        &format!("return Math.abs(innerWidth-{orig_w})<5 && Math.abs(innerHeight-{orig_h})<5 && document.querySelector('.stage-resizer-left')?.getAttribute('aria-valuenow')==='168';"),
         5,
     )?;
     Ok(())

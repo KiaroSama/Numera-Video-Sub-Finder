@@ -116,7 +116,7 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round
 .sidebar-footer { margin: auto 0 0; padding: 12px 8px 4px; }
 .version { color: var(--muted); font-size: .75rem; }
 .workspace { min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
-.topbar { flex: 0 0 48px; min-width: 0; display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 0 8px 0 12px; background: var(--chrome); border-bottom: 1px solid var(--border); }
+.topbar { container: workspace-commands / inline-size; flex: 0 0 48px; min-width: 0; display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 0 8px 0 12px; background: var(--chrome); border-bottom: 1px solid var(--border); }
 .topbar-actions, .toolbar-group { display: flex; align-items: center; flex: none; gap: 2px; }
 .toolbar-group + .toolbar-group { border-inline-start: 1px solid var(--border); padding-inline-start: 4px; margin-inline-start: 2px; }
 .topbar button { min-width: 44px; white-space: nowrap; }
@@ -289,6 +289,7 @@ dd { margin: 0; color: var(--muted); overflow-wrap: anywhere; }
 .drop-card span { color: var(--muted); }
 .e2e-controls { flex: none; display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 4px 8px; margin-bottom: 8px; }
 .e2e-controls h2 { margin: 0; }
+@container workspace-commands (max-width: 1240px) { .hotkey-hint { display: none; } }
 @media (max-width: 1170px) { .toolbar-label, .hotkey-hint { display: none; } }
 @media (max-width: 1020px) {
   .shell { grid-template-columns: 56px minmax(0, 1fr); }
@@ -378,7 +379,7 @@ button, .nav-item, input, select, textarea, .panel, .roi {
     transform 140ms ease, box-shadow 140ms ease, opacity 140ms ease;
 }
 .hotkey-hint { font-size: .72em; opacity: .78; font-weight: 500; }
-.topbar h1 { min-width: 0; overflow-wrap: anywhere; }
+.topbar h1 { flex: none; white-space: nowrap; }
 
 .stage-frame { position: relative; flex: 1 0 var(--stage-height, 0px); min-height: 0; min-width: 0; display: flex; flex-direction: column; padding-top: var(--stage-top-pad, 0px); }
 .stage-frame[style*="--stage-height"] { flex-grow: 0; }

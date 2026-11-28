@@ -2,6 +2,67 @@ use super::gui::{Driver, Result};
 use serde_json::json;
 use std::path::Path;
 
+/// Exercises real setup controls before later witnesses change the fixture's geometry.
+pub fn verify_setup_dirty(driver: &Driver, output: &Path) -> Result<()> {
+    let clean = "const save=document.querySelector('#header-save');return save?.disabled===false&&save.getAttribute('aria-label')==='Save'&&!save.querySelector('.unsaved-dot');";
+    let dirty = "const save=document.querySelector('#header-save');return save?.disabled===false&&save.getAttribute('aria-label')==='Save unsaved changes'&&!!save.querySelector('.unsaved-dot');";
+    driver.wait(clean, 5)?;
+    let baseline = modal_workspace(driver)?;
+    if baseline["route"] != "Extract" || baseline["saveDisabled"] != false {
+        return Err(
+            format!("Setup dirty witness requires an editable loaded fixture: {baseline}").into(),
+        );
+    }
+    let mut observations = Vec::new();
+    for label in [
+        "Require proven GPU execution",
+        "Explicit Persian normalization",
+        "Allow replacing the selected output",
+    ] {
+        let locate = format!(
+            "const label={},matches=[...document.querySelectorAll('label.check')].filter(node=>node.textContent.trim()===label);if(matches.length!==1)throw new Error('Expected one setup checkbox: '+label);const input=matches[0].querySelector('input[type=checkbox]');if(!input||input.matches(':disabled'))throw new Error('Setup checkbox unavailable: '+label);",
+            serde_json::to_string(label)?
+        );
+        let before = driver.script(&(locate.clone() + "return input.checked;"))?;
+        let before = before
+            .as_bool()
+            .ok_or("Setup checkbox has no boolean state")?;
+        driver.script(&(locate.clone() + "input.click();return input.checked;"))?;
+        driver.wait(dirty, 5)?;
+        let changed = driver.script(&(locate.clone() + "return input.checked;"))?;
+        if changed.as_bool() != Some(!before) || modal_workspace(driver)? != baseline {
+            return Err(format!("Setup checkbox failed to change independently: {label}").into());
+        }
+        driver.script(&(locate.clone() + "input.click();return input.checked;"))?;
+        driver.wait(clean, 5)?;
+        let restored = driver.script(&(locate + "return input.checked;"))?;
+        if restored.as_bool() != Some(before) || modal_workspace(driver)? != baseline {
+            return Err(
+                format!("Restoring setup checkbox did not restore the baseline: {label}").into(),
+            );
+        }
+        observations.push(json!({
+            "label": label,
+            "before": before,
+            "changed": changed,
+            "restored": restored,
+            "dirty_after_change": true,
+            "clean_after_restore": true,
+            "source_region_transport_unchanged": true,
+        }));
+    }
+    std::fs::write(
+        output.join("setup-dirty-controls.json"),
+        serde_json::to_vec_pretty(&json!({
+            "delivery": "programmatic DOM click on the real checkbox",
+            "baseline": baseline,
+            "controls": observations,
+            "native_dialog_or_physical_input_qualified": false,
+        }))?,
+    )?;
+    Ok(())
+}
+
 /// Verifies studio ergonomics on the Extract workspace:
 /// - zero outer vertical scrollbar at default studio viewport and zero inner preview scrollbar at 100% Fit
 /// - live ROI drag preview (`.roi-draft`), 8 resize handles, 4 VideoSubFinder separating guides

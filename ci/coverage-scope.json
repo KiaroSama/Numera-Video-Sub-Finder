@@ -4,45 +4,45 @@
   "exclusions": [
     {
       "path": "crates/desktop/src/files.rs",
-      "start": 44,
-      "end": 54,
-      "source_sha256": "1bb583804cbef86558f4d0f4ebeff62b269e68fdb1d7177b63a0bbaa9e4097a3",
+      "start": 46,
+      "end": 56,
+      "source_sha256": "436362199d5a735d7db94a64f510b50e6e360d77f9ba7fe60f318737299f9afa",
       "category": "native-dialog",
       "reason": "Native source picker invocation; cancellation and grants remain measured.",
       "acceptance": "OPEN: native source selection/cancellation on all desktops, unchanged grants after cancellation."
     },
     {
       "path": "crates/desktop/src/files.rs",
-      "start": 74,
-      "end": 80,
-      "source_sha256": "1bb583804cbef86558f4d0f4ebeff62b269e68fdb1d7177b63a0bbaa9e4097a3",
+      "start": 76,
+      "end": 82,
+      "source_sha256": "436362199d5a735d7db94a64f510b50e6e360d77f9ba7fe60f318737299f9afa",
       "category": "native-dialog",
       "reason": "Native output picker invocation only.",
       "acceptance": "OPEN: native output selection/cancellation and preservation of existing files."
     },
     {
       "path": "crates/desktop/src/files.rs",
-      "start": 431,
-      "end": 437,
-      "source_sha256": "1bb583804cbef86558f4d0f4ebeff62b269e68fdb1d7177b63a0bbaa9e4097a3",
+      "start": 435,
+      "end": 440,
+      "source_sha256": "436362199d5a735d7db94a64f510b50e6e360d77f9ba7fe60f318737299f9afa",
       "category": "native-dialog",
       "reason": "Native project save picker invocation only.",
       "acceptance": "OPEN: native project save selection/cancellation, retained overwrite consent and corrections."
     },
     {
       "path": "crates/desktop/src/files.rs",
-      "start": 512,
-      "end": 518,
-      "source_sha256": "1bb583804cbef86558f4d0f4ebeff62b269e68fdb1d7177b63a0bbaa9e4097a3",
+      "start": 474,
+      "end": 480,
+      "source_sha256": "436362199d5a735d7db94a64f510b50e6e360d77f9ba7fe60f318737299f9afa",
       "category": "native-dialog",
       "reason": "Native subtitle export picker invocation only.",
       "acceptance": "OPEN: native export selection/cancellation and no unapproved replacement."
     },
     {
       "path": "crates/desktop/src/files.rs",
-      "start": 591,
-      "end": 596,
-      "source_sha256": "1bb583804cbef86558f4d0f4ebeff62b269e68fdb1d7177b63a0bbaa9e4097a3",
+      "start": 553,
+      "end": 558,
+      "source_sha256": "436362199d5a735d7db94a64f510b50e6e360d77f9ba7fe60f318737299f9afa",
       "category": "native-dialog",
       "reason": "Native project open picker invocation only.",
       "acceptance": "OPEN: native project selection/cancellation, original workspace retained on cancellation."
