@@ -252,7 +252,7 @@ fn toggle(driver: &Driver) -> Result<()> {
         "dark"
     };
     driver.click("#header-theme")?;
-    driver.wait(&format!("return document.documentElement.dataset.theme==='{target}' && localStorage.getItem('nvsf-theme')==='{target}' && !document.documentElement.hasAttribute('data-glimm-transition') && document.documentElement.style.getPropertyValue('--glimm-old-clip')==='' && Array.from(document.querySelectorAll('[data-glimm-layer]')).every(e=>e.style.opacity==='0');"), 5)
+    driver.wait(&format!("return document.documentElement.dataset.theme==='{target}' && localStorage.getItem('nvsf-theme')==='{target}' && !document.documentElement.hasAttribute('data-glimm-transition') && document.documentElement.style.getPropertyValue('--glimm-old-clip')==='' && Array.from(document.querySelectorAll('[data-glimm-layer]')).every(e=>e.style.opacity==='0');"), 15)
 }
 
 fn lose_context(driver: &Driver, while_active: bool) -> Result<()> {

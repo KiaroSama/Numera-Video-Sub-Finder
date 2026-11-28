@@ -203,7 +203,7 @@ fn refresh_titlebar(
 }
 
 #[tauri::command]
-fn set_window_theme(
+async fn set_window_theme(
     window: tauri::WebviewWindow,
     host: tauri::State<'_, Host>,
     theme: String,

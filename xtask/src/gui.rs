@@ -66,6 +66,14 @@ impl Driver {
                 return Err(format!("Actual GUI error: {error}").into());
             }
             if Instant::now() >= deadline {
+                if self
+                    .script(predicate)
+                    .map_err(|error| format!("GUI predicate request failed: {predicate}; {error}"))?
+                    .as_bool()
+                    == Some(true)
+                {
+                    return Ok(());
+                }
                 let snapshot = self.script(
                     r#"
                     const root = document.documentElement;

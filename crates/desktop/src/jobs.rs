@@ -71,42 +71,77 @@ pub fn launch(host: &Host, config: ExtractConfig, queue_id: Option<String>) -> R
                 if let Ok(mut snapshot) = worker_status.lock() { snapshot.progress = Some(progress); }
             })
         }));
-        if let Ok(mut snapshot) = worker_status.lock() {
-            match result {
-                Ok(Ok(project)) => {
-                    let history_path = host_clone.0.paths.projects.join(format!("{}.nvsf", snapshot.id));
-                    let saved = nvsf_app::storage::save_project(&project, &history_path);
-                    match host_clone.0.project.lock() {
-                        Ok(mut active) => {
-                            *active = Some(project);
-                            snapshot.project_ready = true;
-                            snapshot.state = "completed".into();
-                            if let Err(e) = saved { snapshot.error = Some(format!("Extraction completed, but history save failed: {e}")); }
-                            host_clone.0.log.event("INFO", "JOB", "Extraction completed; review project available");
-                        }
-                        Err(_) => { snapshot.state = "failed".into(); snapshot.error = Some("Workspace project state unavailable".into()); }
+        let job_id_for_history = worker_status
+            .lock()
+            .ok()
+            .map(|snapshot| snapshot.id.clone())
+            .unwrap_or_default();
+        let (final_state, mut final_error, project_ready) = match result {
+            Ok(Ok(project)) => {
+                let history_path = host_clone
+                    .0
+                    .paths
+                    .projects
+                    .join(format!("{job_id_for_history}.nvsf"));
+                let saved = nvsf_app::storage::save_project(&project, &history_path);
+                match host_clone.0.project.lock() {
+                    Ok(mut active) => {
+                        *active = Some(project);
+                        let err = saved
+                            .err()
+                            .map(|e| format!("Extraction completed, but history save failed: {e}"));
+                        host_clone.0.log.event(
+                            "INFO",
+                            "JOB",
+                            "Extraction completed; review project available",
+                        );
+                        ("completed".to_string(), err, true)
                     }
+                    Err(_) => (
+                        "failed".to_string(),
+                        Some("Workspace project state unavailable".into()),
+                        false,
+                    ),
                 }
-                Ok(Err(e)) => {
-                    snapshot.state = if worker_control.cancel.load(Ordering::Acquire) { "cancelled" } else { "failed" }.into();
-                    snapshot.error = Some(e.to_string());
-                    host_clone.0.log.event("ERROR", "JOB", "Extraction stopped; inspect workspace error and preserved checkpoint");
-                }
-                Err(_) => {
-                    snapshot.state = "failed".into();
-                    snapshot.error = Some("Native worker panicked; existing checkpoint is preserved. Restart the application before retrying".into());
-                    host_clone.0.log.event("ERROR", "JOB", "Worker panic caught");
-                }
+            }
+            Ok(Err(e)) => {
+                let state = if worker_control.cancel.load(Ordering::Acquire) {
+                    "cancelled"
+                } else {
+                    "failed"
+                };
+                host_clone.0.log.event(
+                    "ERROR",
+                    "JOB",
+                    "Extraction stopped; inspect workspace error and preserved checkpoint",
+                );
+                (state.to_string(), Some(e.to_string()), false)
+            }
+            Err(_) => {
+                host_clone.0.log.event("ERROR", "JOB", "Worker panic caught");
+                (
+                    "failed".to_string(),
+                    Some("Native worker panicked; existing checkpoint is preserved. Restart the application before retrying".into()),
+                    false,
+                )
+            }
+        };
+        if let Some(id) = &running_queue {
+            if let Err(e) =
+                crate::queue::mark(&host_clone, id, &final_state, final_error.clone())
+            {
+                final_error = Some(format!("Job stopped but durable queue update failed: {e}"));
+                host_clone.0.log.event(
+                    "ERROR",
+                    "QUEUE",
+                    "Durable job status could not be saved; previous queue state preserved",
+                );
             }
         }
-        if let Some(id) = &running_queue {
-            let snapshot = worker_status.lock().ok().map(|s| s.clone());
-            if let Some(snapshot) = snapshot {
-                if let Err(e) = crate::queue::mark(&host_clone, id, &snapshot.state, snapshot.error) {
-                    if let Ok(mut snapshot) = worker_status.lock() { snapshot.error = Some(format!("Job stopped but durable queue update failed: {e}")); }
-                    host_clone.0.log.event("ERROR", "QUEUE", "Durable job status could not be saved; previous queue state preserved");
-                }
-            }
+        if let Ok(mut snapshot) = worker_status.lock() {
+            snapshot.project_ready = project_ready;
+            snapshot.error = final_error;
+            snapshot.state = final_state;
         }
         let _ = done_tx.send(());
     }).map_err(|e| {
