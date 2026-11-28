@@ -752,18 +752,18 @@ impl Ui {
         }
         self.theme.set(value.clone());
         #[cfg(target_arch = "wasm32")]
-        spawn_local(async move {
-            let result = ipc::call::<()>("set_window_theme", json!({"theme": value})).await;
-            if !self.theme.is_disposed() && self.theme.get_untracked() == value {
-                let rendered = document()
-                    .document_element()
-                    .and_then(|root| root.get_attribute("data-theme"));
-                crate::glimm::sweep_theme(rendered.as_deref().unwrap_or(&previous), &value);
-                if let Err(error) = result {
+        {
+            let window_theme = value.clone();
+            spawn_local(async move {
+                if let Err(error) =
+                    ipc::call::<()>("set_window_theme", json!({"theme": window_theme})).await
+                    && !self.error.is_disposed()
+                {
                     self.error.set(Some(error));
                 }
-            }
-        });
+            });
+            crate::glimm::sweep_theme(&previous, &value);
+        }
     }
 }
 

@@ -15,11 +15,11 @@ fn sanitizer_summary_rejects_duplicate_runs_and_unexpected_filtering() {
     assert!(test_result("geometry", text, None).is_err());
     assert!(test_result("callbacks", &format!("{text}\n{text}"), Some(3)).is_err());
 
-    let native = "test result: ok. 19 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.1s";
+    let native = "test result: ok. 20 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.1s";
     assert_eq!(
-        test_result("native-abi-geometry", native, Some(19)).unwrap(),
-        (19, 0)
+        test_result("native-abi-geometry", native, Some(20)).unwrap(),
+        (20, 0)
     );
-    let stale = "test result: ok. 17 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.1s";
-    assert!(test_result("native-abi-geometry", stale, Some(19)).is_err());
+    let stale = "test result: ok. 19 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.1s";
+    assert!(test_result("native-abi-geometry", stale, Some(20)).is_err());
 }
