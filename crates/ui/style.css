@@ -65,7 +65,7 @@
 }
 * { box-sizing: border-box; }
 [hidden]:not(.app-menu, #notifications-panel, .toast-item) { display: none !important; }
-html, body, .shell { height: 100vh; overflow: hidden; }
+html, body, .shell { height: 100vh; overflow: clip; }
 body { margin: 0; font-size: .875rem; line-height: 1.4; }
 button, select, input, textarea { font: inherit; }
 button, select, input:not([type="checkbox"]):not([type="range"]) { min-height: 44px; }

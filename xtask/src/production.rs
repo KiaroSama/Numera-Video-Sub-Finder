@@ -17,7 +17,23 @@ mod linux;
 #[path = "production_listener.rs"]
 mod listener;
 
-pub(crate) const TITLE: &str = "Numera Video Sub Finder";
+pub(crate) const TITLE: &str =
+    concat!("Numera Video Sub Finder (v", env!("CARGO_PKG_VERSION"), ")");
+
+#[cfg(any(target_os = "linux", test))]
+fn regex_escape(text: &str) -> String {
+    let mut out = String::with_capacity(text.len() + 8);
+    for ch in text.chars() {
+        if matches!(
+            ch,
+            '(' | ')' | '.' | '+' | '*' | '?' | '[' | ']' | '{' | '}' | '^' | '$' | '|' | '\\'
+        ) {
+            out.push('\\');
+        }
+        out.push(ch);
+    }
+    out
+}
 const WALL: Duration = Duration::from_secs(60);
 const IDLE: Duration = Duration::from_secs(15);
 
@@ -540,7 +556,7 @@ fn native_window(pid: u32, root: &Path, index: &mut u64) -> Result<Option<String
             "--pid".into(),
             pid.to_string(),
             "--name".into(),
-            format!("^{TITLE}$"),
+            format!("^{}$", regex_escape(TITLE)),
         ],
         root,
         index,
@@ -636,5 +652,16 @@ mod tests {
         let mut budget = Budget::new();
         budget.started = Instant::now() - WALL;
         assert!(budget.observe("real-progress".into()).is_err());
+    }
+
+    #[test]
+    fn title_pattern_escapes_version_parentheses_and_dots() {
+        assert_eq!(
+            regex_escape(TITLE),
+            format!(
+                r"Numera Video Sub Finder \(v{}\)",
+                env!("CARGO_PKG_VERSION").replace('.', r"\.")
+            )
+        );
     }
 }
